@@ -4,8 +4,12 @@ import { createInertiaApp } from '@inertiajs/vue3';
 import createServer from '@inertiajs/vue3/server';
 import { resolvePageComponent } from 'laravel-vite-plugin/inertia-helpers';
 import { ZiggyVue } from '../../vendor/tightenco/ziggy';
+import { createPinia } from 'pinia';
+import PrimeVue from 'primevue/config';
+import Aura from '@primevue/themes/aura';
 
 const appName = import.meta.env.VITE_APP_NAME || 'Laravel';
+const pinia = createPinia();
 
 createServer((page) =>
     createInertiaApp({
@@ -16,6 +20,13 @@ createServer((page) =>
         setup({ App, props, plugin }) {
             return createSSRApp({ render: () => h(App, props) })
                 .use(plugin)
+                .use(pinia)
+                .use(PrimeVue, {
+                    theme: {
+                        preset: Aura,
+                        options: { darkModeSelector: false },
+                    },
+                })
                 .use(ZiggyVue, {
                     ...page.props.ziggy,
                     location: new URL(page.props.ziggy.location),

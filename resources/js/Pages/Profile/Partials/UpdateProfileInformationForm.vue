@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue';
-import { Link, router, useForm } from '@inertiajs/vue3';
+import { router, useForm } from '@inertiajs/vue3';
 import ActionMessage from '@/Components/ActionMessage.vue';
 import FormSection from '@/Components/FormSection.vue';
 import InputError from '@/Components/InputError.vue';
@@ -16,11 +16,10 @@ const props = defineProps({
 const form = useForm({
     _method: 'PUT',
     name: props.user.name,
-    email: props.user.email,
+    phone: props.user.phone,
     photo: null,
 });
 
-const verificationLinkSent = ref(null);
 const photoPreview = ref(null);
 const photoInput = ref(null);
 
@@ -34,10 +33,6 @@ const updateProfileInformation = () => {
         preserveScroll: true,
         onSuccess: () => clearPhotoFileInput(),
     });
-};
-
-const sendEmailVerification = () => {
-    verificationLinkSent.value = true;
 };
 
 const selectNewPhoto = () => {
@@ -142,38 +137,18 @@ const clearPhotoFileInput = () => {
                 <InputError :message="form.errors.name" class="mt-2" />
             </div>
 
-            <!-- Email -->
+            <!-- Phone -->
             <div class="col-span-6 sm:col-span-4">
-                <InputLabel for="email" value="Email" />
+                <InputLabel for="phone" value="Celular" />
                 <TextInput
-                    id="email"
-                    v-model="form.email"
-                    type="email"
+                    id="phone"
+                    v-model="form.phone"
+                    type="text"
                     class="mt-1 block w-full"
                     required
                     autocomplete="username"
                 />
-                <InputError :message="form.errors.email" class="mt-2" />
-
-                <div v-if="$page.props.jetstream.hasEmailVerification && user.email_verified_at === null">
-                    <p class="text-sm mt-2">
-                        Your email address is unverified.
-
-                        <Link
-                            :href="route('verification.send')"
-                            method="post"
-                            as="button"
-                            class="underline text-sm text-gray-600 hover:text-gray-900 rounded-md focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-                            @click.prevent="sendEmailVerification"
-                        >
-                            Click here to re-send the verification email.
-                        </Link>
-                    </p>
-
-                    <div v-show="verificationLinkSent" class="mt-2 font-medium text-sm text-green-600">
-                        A new verification link has been sent to your email address.
-                    </div>
-                </div>
+                <InputError :message="form.errors.phone" class="mt-2" />
             </div>
         </template>
 

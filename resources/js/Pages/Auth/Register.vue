@@ -10,7 +10,7 @@ import TextInput from '@/Components/TextInput.vue';
 
 const form = useForm({
     name: '',
-    email: '',
+    phone: '',
     password: '',
     password_confirmation: '',
     terms: false,
@@ -47,16 +47,16 @@ const submit = () => {
             </div>
 
             <div class="mt-4">
-                <InputLabel for="email" value="Email" />
+                <InputLabel for="phone" value="Celular" />
                 <TextInput
-                    id="email"
-                    v-model="form.email"
-                    type="email"
+                    id="phone"
+                    v-model="form.phone"
+                    type="text"
                     class="mt-1 block w-full"
                     required
                     autocomplete="username"
                 />
-                <InputError class="mt-2" :message="form.errors.email" />
+                <InputError class="mt-2" :message="form.errors.phone" />
             </div>
 
             <div class="mt-4">

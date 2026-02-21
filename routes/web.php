@@ -1,24 +1,19 @@
 <?php
 
-use Illuminate\Foundation\Application;
+use App\Http\Controllers\AdminGameController;
+use App\Http\Controllers\DraftController;
+use App\Http\Controllers\GameController;
 use Illuminate\Support\Facades\Route;
-use Inertia\Inertia;
 
-Route::get('/', function () {
-    return Inertia::render('Welcome', [
-        'canLogin' => Route::has('login'),
-        'canRegister' => Route::has('register'),
-        'laravelVersion' => Application::VERSION,
-        'phpVersion' => PHP_VERSION,
-    ]);
-});
+Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(function () {
+    Route::get('/', [GameController::class, 'index'])->name('dashboard');
+    Route::post('/games/{game}/join', [GameController::class, 'join'])->name('games.join');
 
-Route::middleware([
-    'auth:sanctum',
-    config('jetstream.auth_session'),
-    'verified',
-])->group(function () {
-    Route::get('/dashboard', function () {
-        return Inertia::render('Dashboard');
-    })->name('dashboard');
+    Route::post('/games/{game}/add-players', [AdminGameController::class, 'addPlayers'])
+        ->name('games.add-players');
+    Route::post('/games/{game}/draw-captains', [AdminGameController::class, 'drawCaptains'])
+        ->name('games.draw-captains');
+
+    Route::get('/games/{game}/draft', [DraftController::class, 'show'])->name('games.draft');
+    Route::post('/games/{game}/pick', [DraftController::class, 'pick'])->name('games.pick');
 });

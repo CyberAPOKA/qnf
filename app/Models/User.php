@@ -3,7 +3,10 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Enums\Position;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
@@ -16,6 +19,7 @@ class User extends Authenticatable
 
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory;
+
     use HasProfilePhoto;
     use Notifiable;
     use TwoFactorAuthenticatable;
@@ -27,7 +31,10 @@ class User extends Authenticatable
      */
     protected $fillable = [
         'name',
+        'phone',
         'email',
+        'role',
+        'position',
         'password',
     ];
 
@@ -61,7 +68,25 @@ class User extends Authenticatable
     {
         return [
             'email_verified_at' => 'datetime',
+            'position' => Position::class,
             'password' => 'hashed',
         ];
+    }
+
+    public function gamePlayers(): HasMany
+    {
+        return $this->hasMany(GamePlayer::class);
+    }
+
+    public function games(): BelongsToMany
+    {
+        return $this->belongsToMany(Game::class, 'game_players')
+            ->withPivot(['joined_at'])
+            ->withTimestamps();
+    }
+
+    public function captainedTeams(): HasMany
+    {
+        return $this->hasMany(Team::class, 'captain_user_id');
     }
 }

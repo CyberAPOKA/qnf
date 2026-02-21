@@ -208,7 +208,7 @@ const logout = () => {
                                     {{ $page.props.auth.user.name }}
                                 </div>
                                 <div class="font-medium text-sm text-gray-500">
-                                    {{ $page.props.auth.user.email }}
+                                    {{ $page.props.auth.user.phone || $page.props.auth.user.email }}
                                 </div>
                             </div>
                         </div>
