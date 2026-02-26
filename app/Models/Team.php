@@ -15,6 +15,7 @@ class Team extends Model
         'game_id',
         'color',
         'captain_user_id',
+        'first_pick_user_id',
         'pick_order',
     ];
 
@@ -33,5 +34,10 @@ class Team extends Model
     public function captain(): BelongsTo
     {
         return $this->belongsTo(User::class, 'captain_user_id');
+    }
+
+    public function firstPick(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'first_pick_user_id');
     }
 }

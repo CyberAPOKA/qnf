@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\GameStatus;
 use App\Models\Game;
 use App\Services\DraftService;
 use App\Support\GamePayload;
@@ -15,8 +16,12 @@ class DraftController extends Controller
 {
     public function __construct(private readonly DraftService $draftService) {}
 
-    public function show(Request $request, Game $game): Response
+    public function show(Request $request, Game $game): Response|RedirectResponse
     {
+        if ($game->status !== GameStatus::DRAFTING) {
+            return redirect()->route('dashboard');
+        }
+
         $payload = GamePayload::fromGame($game, $this->draftService);
 
         return Inertia::render('Draft', [

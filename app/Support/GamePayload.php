@@ -3,7 +3,6 @@
 namespace App\Support;
 
 use App\Enums\GameStatus;
-use App\Enums\TeamColor;
 use App\Models\Game;
 use App\Services\DraftService;
 
@@ -14,10 +13,10 @@ class GamePayload
         $game->loadMissing([
             'gamePlayers.user',
             'teams.captain',
+            'teams.firstPick',
             'draftPicks.pickedUser',
         ]);
 
-        $teamsByColor = $game->teams->keyBy(fn ($team) => $team->color->value);
         $captainIds = $game->teams->pluck('captain_user_id')->filter()->values();
         $pickedIds = $game->draftPicks->pluck('picked_user_id')->values();
 
@@ -32,21 +31,11 @@ class GamePayload
                 'phone' => $user->phone,
                 'position' => $user->position->value,
                 'position_label' => $user->position->label(),
+                'guest' => $user->guest,
             ])
             ->all();
 
-        $teamsPayload = [];
-        foreach (TeamColor::cases() as $color) {
-            $team = $teamsByColor->get($color->value);
-            $teamsPayload[$color->value] = [
-                'captain' => $team?->captain ? [
-                    'id' => $team->captain->id,
-                    'name' => $team->captain->name,
-                ] : null,
-                'players' => self::pickedPlayersByColor($game, $color),
-            ];
-        }
-
+        $teamsPayload = $draftService->teamsWithPlayers($game);
         $turnColor = $draftService->currentTurnColor($game);
 
         return [
@@ -55,6 +44,7 @@ class GamePayload
             'status' => $game->status->value,
             'status_label' => $game->status->label(),
             'opens_at' => optional($game->opens_at)->toIso8601String(),
+            'closes_at' => optional($game->closes_at)->toIso8601String(),
             'players_count' => $game->gamePlayers->count(),
             'players' => $game->gamePlayers
                 ->sortBy('joined_at')
@@ -65,6 +55,7 @@ class GamePayload
                     'phone' => $entry->user->phone,
                     'position' => $entry->user->position->value,
                     'position_label' => $entry->user->position->label(),
+                    'guest' => $entry->user->guest,
                     'joined_at' => optional($entry->joined_at)->toIso8601String(),
                 ])
                 ->all(),
@@ -90,16 +81,4 @@ class GamePayload
         ];
     }
 
-    private static function pickedPlayersByColor(Game $game, TeamColor $color): array
-    {
-        return $game->draftPicks
-            ->where('team_color', $color)
-            ->sortBy('id')
-            ->values()
-            ->map(fn ($pick) => [
-                'id' => $pick->pickedUser->id,
-                'name' => $pick->pickedUser->name,
-            ])
-            ->all();
-    }
 }

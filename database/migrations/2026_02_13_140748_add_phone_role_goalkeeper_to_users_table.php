@@ -15,7 +15,7 @@ return new class extends Migration
         Schema::table('users', function (Blueprint $table) {
             $table->string('phone')->nullable()->unique()->after('name');
             $table->string('role')->default('player')->after('phone');
-            $table->string('position')->default(Position::WINGER->value)->after('role');
+            $table->enum('position', Position::values())->default(Position::WINGER->value)->after('role');
         });
     }
 

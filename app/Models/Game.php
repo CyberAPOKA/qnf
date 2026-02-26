@@ -16,6 +16,7 @@ class Game extends Model
     protected $fillable = [
         'date',
         'opens_at',
+        'closes_at',
         'status',
         'created_by',
     ];
@@ -25,6 +26,7 @@ class Game extends Model
         return [
             'date' => 'date',
             'opens_at' => 'datetime',
+            'closes_at' => 'datetime',
             'status' => GameStatus::class,
         ];
     }

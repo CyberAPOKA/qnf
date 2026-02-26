@@ -3,7 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\GameStatus;
-use App\Events\GameBecameFull;
+use App\Enums\Position;
 use App\Events\GamePlayerJoined;
 use App\Models\Game;
 use App\Models\GamePlayer;
@@ -38,12 +38,16 @@ class GameController extends Controller
             return Inertia::render('AdminDashboard', [
                 'game' => $payload,
                 'current_user_id' => $request->user()->id,
-                'all_users' => User::select('id', 'name', 'position')->orderBy('name')->get()
+                'all_users' => User::select('id', 'name', 'position', 'guest')
+                    ->where('role', '!=', 'admin')
+                    ->orderBy('name')
+                    ->get()
                     ->map(fn ($user) => [
                         'id' => $user->id,
                         'name' => $user->name,
                         'position' => $user->position->value,
                         'position_label' => $user->position->label(),
+                        'guest' => $user->guest,
                     ]),
             ]);
         }
@@ -51,6 +55,7 @@ class GameController extends Controller
         return Inertia::render('PlayerDashboard', [
             'game' => $payload,
             'current_user_id' => $request->user()->id,
+            'is_goalkeeper' => $request->user()->position === Position::GOALKEEPER,
         ]);
     }
 
@@ -64,6 +69,10 @@ class GameController extends Controller
                     throw ValidationException::withMessages(['join' => 'A lista não está aberta.']);
                 }
 
+                if ($request->user()->position === Position::GOALKEEPER) {
+                    throw ValidationException::withMessages(['join' => 'Goleiros são adicionados pelo administrador.']);
+                }
+
                 $alreadyJoined = GamePlayer::where('game_id', $lockedGame->id)
                     ->where('user_id', $request->user()->id)
                     ->exists();
@@ -72,9 +81,12 @@ class GameController extends Controller
                     return;
                 }
 
-                $count = GamePlayer::where('game_id', $lockedGame->id)->count();
-                if ($count >= 15) {
-                    throw ValidationException::withMessages(['join' => 'A partida já lotou.']);
+                $linePlayerCount = GamePlayer::where('game_id', $lockedGame->id)
+                    ->whereHas('user', fn ($q) => $q->where('position', '!=', Position::GOALKEEPER))
+                    ->count();
+
+                if ($linePlayerCount >= 12) {
+                    throw ValidationException::withMessages(['join' => 'As vagas para jogadores de linha estão esgotadas.']);
                 }
 
                 GamePlayer::create([
@@ -93,11 +105,12 @@ class GameController extends Controller
         }
 
         $freshGame = Game::findOrFail($game->id);
-        $payload = GamePayload::fromGame($freshGame, $this->draftService);
 
-        rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
         if ($freshGame->status === GameStatus::FULL) {
-            rescue(fn () => broadcast(new GameBecameFull($freshGame->id, $payload))->toOthers(), report: false);
+            $this->gameService->handleGameBecameFull($freshGame, $this->draftService);
+        } else {
+            $payload = GamePayload::fromGame($freshGame, $this->draftService);
+            rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
         }
 
         return back();

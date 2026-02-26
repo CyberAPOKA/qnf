@@ -3,10 +3,15 @@
 namespace App\Services;
 
 use App\Enums\GameStatus;
+use App\Events\CaptainsDrawn;
+use App\Events\GameBecameFull;
 use App\Models\Game;
 use App\Models\User;
+use App\Services\DraftService;
+use App\Support\GamePayload;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
+use Illuminate\Validation\ValidationException;
 
 class GameService
 {
@@ -57,6 +62,26 @@ class GameService
         }
 
         return $game;
+    }
+
+    public function handleGameBecameFull(Game $game, DraftService $draftService): void
+    {
+        $game->update(['closes_at' => now()]);
+
+        try {
+            $draftService->drawCaptains($game);
+        } catch (ValidationException) {
+            $payload = GamePayload::fromGame($game->refresh(), $draftService);
+            rescue(fn () => broadcast(new GameBecameFull($game->id, $payload))->toOthers(), report: false);
+
+            return;
+        }
+
+        $freshGame = Game::findOrFail($game->id);
+        $payload = GamePayload::fromGame($freshGame, $draftService);
+
+        rescue(fn () => broadcast(new GameBecameFull($freshGame->id, $payload))->toOthers(), report: false);
+        rescue(fn () => broadcast(new CaptainsDrawn($freshGame->id, $payload))->toOthers(), report: false);
     }
 
     public function thisWeekWednesdayDate(CarbonInterface $date): CarbonImmutable

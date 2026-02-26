@@ -13,8 +13,9 @@ return new class extends Migration
     {
         Schema::create('game_players', function (Blueprint $table) {
             $table->id();
-            $table->unsignedBigInteger('game_id');
-            $table->unsignedBigInteger('user_id');
+            $table->unsignedBigInteger('game_id')->foreign('game_id')->references('id')->on('games')->cascadeOnDelete();
+            $table->unsignedBigInteger('user_id')->foreign('user_id')->references('id')->on('users')->cascadeOnDelete();
+    
             $table->timestamp('joined_at');
             $table->timestamps();
 

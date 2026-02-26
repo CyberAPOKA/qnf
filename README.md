@@ -24,6 +24,7 @@ php artisan migrate
 php artisan db:seed
 npm run build
 php artisan serve
+npm run dev
 php artisan reverb:start
 php artisan queue:work
 php artisan schedule:work

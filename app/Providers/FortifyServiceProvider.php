@@ -35,7 +35,7 @@ class FortifyServiceProvider extends ServiceProvider
             $digits = preg_replace('/\D/', '', $request->input('phone'));
             $last8 = substr($digits, -8);
 
-            $user = User::whereRaw('RIGHT(phone, 8) = ?', [$last8])->first();
+            $user = User::whereRaw('SUBSTR(phone, -8) = ?', [$last8])->first();
 
             if ($user && Hash::check($request->input('password'), $user->password)) {
                 return $user;

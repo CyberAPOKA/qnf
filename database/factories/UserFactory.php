@@ -34,6 +34,7 @@ class UserFactory extends Factory
             'email_verified_at' => now(),
             'role' => 'player',
             'position' => Position::WINGER,
+            'guest' => false,
             'password' => static::$password ??= Hash::make('password'),
             'two_factor_secret' => null,
             'two_factor_recovery_codes' => null,

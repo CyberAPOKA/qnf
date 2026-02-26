@@ -35,6 +35,7 @@ class User extends Authenticatable
         'email',
         'role',
         'position',
+        'guest',
         'password',
     ];
 
@@ -69,6 +70,7 @@ class User extends Authenticatable
         return [
             'email_verified_at' => 'datetime',
             'position' => Position::class,
+            'guest' => 'boolean',
             'password' => 'hashed',
         ];
     }

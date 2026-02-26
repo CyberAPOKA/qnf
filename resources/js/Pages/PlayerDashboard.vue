@@ -1,60 +1,42 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
+import { computed } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
+import GameStatusCard from '@/Components/Game/GameStatusCard.vue';
+import PlayerListCard from '@/Components/Game/PlayerListCard.vue';
+import TeamCard from '@/Components/Game/TeamCard.vue';
+import WhatsAppCard from '@/Components/Game/WhatsAppCard.vue';
 import { Link, useForm } from '@inertiajs/vue3';
-import { useGameStore } from '@/stores/gameStore';
+import { useGameChannel } from '@/composables/useGameChannel';
+import { useDraftCountdown } from '@/composables/useDraftCountdown';
 
 const props = defineProps({
     game: Object,
     current_user_id: Number,
+    is_goalkeeper: Boolean,
 });
 
-const store = useGameStore();
+const { store } = useGameChannel(props);
+const { countdown, isCountingDown } = useDraftCountdown();
 const form = useForm({});
 
 const joined = computed(() => {
     return !!store.game?.players?.some((player) => player.id === props.current_user_id);
 });
 
+const linePlayerCount = computed(() => {
+    return (store.game?.players || []).filter((p) => p.position !== 'goalkeeper').length;
+});
+
 const canJoin = computed(() => {
-    return store.game?.status === 'open' && !joined.value && store.game?.players_count < 15;
+    if (props.is_goalkeeper) return false;
+    return store.game?.status === 'open' && !joined.value && linePlayerCount.value < 12;
 });
 
 const joinGame = () => {
     if (!store.game) return;
     form.post(route('games.join', store.game.id), { preserveScroll: true, preserveState: false });
 };
-
-const handleRealtimeEvent = (payload) => {
-    store.patchFromEvent(payload);
-};
-
-onMounted(() => {
-    store.hydrate(props.game);
-    if (!store.channelName || !window.Echo) return;
-
-    window.Echo.private(store.channelName)
-        .listen('.GamePlayerJoined', handleRealtimeEvent)
-        .listen('.GameBecameFull', handleRealtimeEvent)
-        .listen('.CaptainsDrawn', handleRealtimeEvent)
-        .listen('.DraftPickMade', handleRealtimeEvent)
-        .listen('.DraftTurnChanged', handleRealtimeEvent)
-        .listen('.DraftFinished', handleRealtimeEvent);
-});
-
-watch(
-    () => props.game,
-    (game) => {
-        store.hydrate(game);
-    }
-);
-
-onBeforeUnmount(() => {
-    if (store.channelName && window.Echo) {
-        window.Echo.leave(`private-${store.channelName}`);
-    }
-});
 </script>
 
 <template>
@@ -67,53 +49,43 @@ onBeforeUnmount(() => {
 
         <div class="py-6 px-4">
             <div class="mx-auto max-w-xl space-y-4">
-                <div class="rounded-xl bg-white p-4 shadow">
-                    <p class="text-sm text-gray-500">Status</p>
-                    <p class="mt-1 text-lg font-semibold text-gray-900">{{ store.game?.status_label }}</p>
-                    <p class="mt-2 text-sm text-gray-700">
-                        Inscritos: <span class="font-semibold">{{ store.game?.players_count }}/15</span>
-                    </p>
-
-                    <div class="mt-4 space-y-2">
-                        <PrimaryButton
-                            class="w-full justify-center py-3 text-base"
-                            :disabled="form.processing || !canJoin"
-                            @click="joinGame"
-                        >
+                <GameStatusCard v-if="store.game?.status !== 'done'" :status-label="store.game?.status_label"
+                    :players-count="store.game?.players_count" :countdown="countdown"
+                    :is-counting-down="isCountingDown">
+                    <template #actions>
+                        <p v-if="is_goalkeeper" class="text-sm text-center text-gray-500">
+                            Goleiros são adicionados pelo administrador.
+                        </p>
+                        <PrimaryButton v-else class="w-full justify-center py-3 text-base"
+                            :disabled="form.processing || !canJoin" @click="joinGame">
                             Eu quero jogar
                         </PrimaryButton>
 
-                        <Link
-                            v-if="['drafting', 'done'].includes(store.game?.status)"
+                        <Link v-if="store.game?.status === 'drafting'"
                             class="inline-flex w-full items-center justify-center rounded-md bg-indigo-600 px-4 py-3 text-base font-semibold text-white hover:bg-indigo-700"
-                            :href="route('games.draft', store.game.id)"
-                        >
+                            :href="route('games.draft', store.game.id)">
                             Ir para Draft
                         </Link>
+                    </template>
+
+                    <template #footer>
+                        <p v-if="store.game?.status === 'full' && !isCountingDown"
+                            class="mt-3 text-sm font-medium text-red-600">
+                            Lista fechada
+                        </p>
+                    </template>
+                </GameStatusCard>
+
+                <PlayerListCard v-if="store.game?.status !== 'done'" :players="store.game?.players || []" />
+
+                <template v-if="store.game?.status === 'done'">
+                    <div class="grid grid-cols-1 gap-3">
+                        <TeamCard color="green" :team="store.game?.teams?.green" />
+                        <TeamCard color="yellow" :team="store.game?.teams?.yellow" />
+                        <TeamCard color="blue" :team="store.game?.teams?.blue" />
                     </div>
-
-                    <p v-if="store.game?.status === 'full'" class="mt-3 text-sm font-medium text-red-600">
-                        Lista fechada
-                    </p>
-                </div>
-
-                <div class="rounded-xl bg-white p-4 shadow">
-                    <h3 class="text-base font-semibold text-gray-900">Inscritos</h3>
-                    <ul class="mt-3 space-y-2">
-                        <li
-                            v-for="player in store.game?.players || []"
-                            :key="player.id"
-                            class="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2"
-                        >
-                            <span class="text-sm font-medium text-gray-900">{{ player.name }}</span>
-                            <span
-                                class="rounded-full px-2 py-1 text-xs font-semibold bg-gray-100 text-gray-700"
-                            >
-                                {{ player.position_label }}
-                            </span>
-                        </li>
-                    </ul>
-                </div>
+                    <WhatsAppCard :message="store.game?.whatsapp_message || ''" />
+                </template>
             </div>
         </div>
     </AppLayout>

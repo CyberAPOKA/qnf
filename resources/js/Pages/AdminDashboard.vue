@@ -1,9 +1,18 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, ref } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
+import SecondaryButton from '@/Components/SecondaryButton.vue';
+import GameStatusCard from '@/Components/Game/GameStatusCard.vue';
+import PlayerListCard from '@/Components/Game/PlayerListCard.vue';
+import TeamCard from '@/Components/Game/TeamCard.vue';
+import WhatsAppCard from '@/Components/Game/WhatsAppCard.vue';
+import AddGuestModal from '@/Components/Game/AddGuestModal.vue';
+import AddPlayerModal from '@/Components/Game/AddPlayerModal.vue';
 import { Link, useForm } from '@inertiajs/vue3';
-import { useGameStore } from '@/stores/gameStore';
+
+import { useGameChannel } from '@/composables/useGameChannel';
+import { useDraftCountdown } from '@/composables/useDraftCountdown';
 import MultiSelect from 'primevue/multiselect';
 
 const props = defineProps({
@@ -12,19 +21,35 @@ const props = defineProps({
     all_users: Array,
 });
 
-const store = useGameStore();
-const form = useForm({});
-
+const { store } = useGameChannel(props);
+const { countdown, isCountingDown } = useDraftCountdown();
 const selectedUsers = ref([]);
+const selectedGuests = ref([]);
 const addPlayersForm = useForm({ user_ids: [] });
+const addGuestsForm = useForm({ user_ids: [] });
+const guestModal = ref(null);
+const playerModal = ref(null);
 
 const availableUsers = computed(() => {
     const joinedIds = (store.game?.players || []).map((p) => p.id);
-    return (props.all_users || []).filter((u) => !joinedIds.includes(u.id));
+    return (props.all_users || []).filter((u) => !joinedIds.includes(u.id) && !u.guest);
+});
+
+const availableGuests = computed(() => {
+    const joinedIds = (store.game?.players || []).map((p) => p.id);
+    return (props.all_users || []).filter((u) => !joinedIds.includes(u.id) && u.guest);
 });
 
 const canAddPlayers = computed(() => {
     return ['scheduled', 'open', 'full'].includes(store.game?.status);
+});
+
+const goalkeeperCount = computed(() => {
+    return (store.game?.players || []).filter((p) => p.position === 'goalkeeper').length;
+});
+
+const linePlayerCount = computed(() => {
+    return (store.game?.players || []).filter((p) => p.position !== 'goalkeeper').length;
 });
 
 const addPlayers = () => {
@@ -37,40 +62,16 @@ const addPlayers = () => {
     });
 };
 
-const drawCaptains = () => {
-    if (!store.game) return;
-    form.post(route('games.draw-captains', store.game.id), { preserveScroll: true, preserveState: false });
+const addGuests = () => {
+    if (!store.game || !selectedGuests.value.length) return;
+    addGuestsForm.user_ids = selectedGuests.value.map((u) => u.id);
+    addGuestsForm.post(route('games.add-players', store.game.id), {
+        preserveScroll: true,
+        preserveState: false,
+        onSuccess: () => { selectedGuests.value = []; },
+    });
 };
 
-const handleRealtimeEvent = (payload) => {
-    store.patchFromEvent(payload);
-};
-
-onMounted(() => {
-    store.hydrate(props.game);
-    if (!store.channelName || !window.Echo) return;
-
-    window.Echo.private(store.channelName)
-        .listen('.GamePlayerJoined', handleRealtimeEvent)
-        .listen('.GameBecameFull', handleRealtimeEvent)
-        .listen('.CaptainsDrawn', handleRealtimeEvent)
-        .listen('.DraftPickMade', handleRealtimeEvent)
-        .listen('.DraftTurnChanged', handleRealtimeEvent)
-        .listen('.DraftFinished', handleRealtimeEvent);
-});
-
-watch(
-    () => props.game,
-    (game) => {
-        store.hydrate(game);
-    }
-);
-
-onBeforeUnmount(() => {
-    if (store.channelName && window.Echo) {
-        window.Echo.leave(`private-${store.channelName}`);
-    }
-});
 </script>
 
 <template>
@@ -83,84 +84,102 @@ onBeforeUnmount(() => {
 
         <div class="py-6 px-4">
             <div class="mx-auto max-w-xl space-y-4">
-                <div class="rounded-xl bg-white p-4 shadow">
-                    <p class="text-sm text-gray-500">Status</p>
-                    <p class="mt-1 text-lg font-semibold text-gray-900">{{ store.game?.status_label }}</p>
-                    <p class="mt-2 text-sm text-gray-700">
-                        Inscritos: <span class="font-semibold">{{ store.game?.players_count }}/15</span>
-                    </p>
+                <GameStatusCard
+                    :status-label="store.game?.status_label"
+                    :players-count="store.game?.players_count"
+                    :countdown="countdown"
+                    :is-counting-down="isCountingDown"
+                >
+                    <template #details>
+                        <p class="mt-1 text-sm text-gray-500">
+                            Linha: <span class="font-semibold">{{ linePlayerCount }}/12</span>
+                            · Goleiros: <span class="font-semibold" :class="goalkeeperCount < 3 ? 'text-red-600' : 'text-green-600'">{{ goalkeeperCount }}/3</span>
+                        </p>
+                    </template>
 
-                    <div class="mt-4 space-y-2">
-                        <PrimaryButton
-                            v-if="store.game?.status === 'full'"
-                            class="w-full justify-center py-3 text-base bg-amber-500 hover:bg-amber-600 focus:bg-amber-600"
-                            :disabled="form.processing"
-                            @click="drawCaptains"
-                        >
-                            Sortear capitães
-                        </PrimaryButton>
-
-                        <Link
-                            v-if="['drafting', 'done'].includes(store.game?.status)"
+                    <template #actions>
+                        <Link v-if="store.game?.status === 'drafting' && !isCountingDown"
                             class="inline-flex w-full items-center justify-center rounded-md bg-indigo-600 px-4 py-3 text-base font-semibold text-white hover:bg-indigo-700"
-                            :href="route('games.draft', store.game.id)"
-                        >
+                            :href="route('games.draft', store.game.id)">
                             Ir para Draft
                         </Link>
-                    </div>
+                    </template>
 
-                    <p v-if="store.game?.status === 'full'" class="mt-3 text-sm font-medium text-red-600">
-                        Lista fechada
-                    </p>
-                </div>
+                    <template #footer>
+                        <p v-if="store.game?.status === 'full' && !isCountingDown" class="mt-3 text-sm font-medium text-red-600">
+                            Lista fechada
+                        </p>
+                    </template>
+                </GameStatusCard>
 
                 <div v-if="canAddPlayers" class="rounded-xl bg-white p-4 shadow">
-                    <h3 class="text-base font-semibold text-gray-900">Adicionar jogadores</h3>
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-base font-semibold text-gray-900">Adicionar jogadores</h3>
+                        <SecondaryButton class="text-xs" @click="playerModal?.open()">
+                            Criar jogador
+                        </SecondaryButton>
+                    </div>
                     <div class="mt-3 space-y-3">
-                        <MultiSelect
-                            v-model="selectedUsers"
-                            :options="availableUsers"
-                            optionLabel="name"
-                            placeholder="Selecione jogadores"
-                            filter
-                            :maxSelectedLabels="3"
-                            class="w-full"
-                        >
+                        <MultiSelect v-model="selectedUsers" :options="availableUsers" optionLabel="name"
+                            placeholder="Selecione jogadores" filter :maxSelectedLabels="3" class="w-full">
                             <template #option="{ option }">
                                 <div class="flex items-center gap-2">
                                     <span>{{ option.name }}</span>
-                                    <span class="rounded-full px-2 py-0.5 text-xs font-semibold bg-gray-100 text-gray-700">
+                                    <span
+                                        class="rounded-full px-2 py-0.5 text-xs font-semibold bg-gray-100 text-gray-700">
                                         {{ option.position_label }}
                                     </span>
                                 </div>
                             </template>
                         </MultiSelect>
-                        <PrimaryButton
-                            class="w-full justify-center py-3 text-base"
-                            :disabled="addPlayersForm.processing || !selectedUsers.length"
-                            @click="addPlayers"
-                        >
+                        <PrimaryButton class="w-full justify-center py-3 text-base"
+                            :disabled="addPlayersForm.processing || !selectedUsers.length" @click="addPlayers">
                             Adicionar selecionados
                         </PrimaryButton>
                     </div>
                 </div>
 
-                <div class="rounded-xl bg-white p-4 shadow">
-                    <h3 class="text-base font-semibold text-gray-900">Inscritos</h3>
-                    <ul class="mt-3 space-y-2">
-                        <li
-                            v-for="player in store.game?.players || []"
-                            :key="player.id"
-                            class="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2"
-                        >
-                            <span class="text-sm font-medium text-gray-900">{{ player.name }}</span>
-                            <span class="rounded-full px-2 py-1 text-xs font-semibold bg-gray-100 text-gray-700">
-                                {{ player.position_label }}
-                            </span>
-                        </li>
-                    </ul>
+                <div v-if="canAddPlayers" class="rounded-xl bg-white p-4 shadow">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-base font-semibold text-gray-900">Adicionar convidados</h3>
+                        <SecondaryButton class="text-xs" @click="guestModal?.open()">
+                            Criar convidado
+                        </SecondaryButton>
+                    </div>
+                    <div class="mt-3 space-y-3">
+                        <MultiSelect v-model="selectedGuests" :options="availableGuests" optionLabel="name"
+                            placeholder="Selecione convidados" filter :maxSelectedLabels="3" class="w-full">
+                            <template #option="{ option }">
+                                <div class="flex items-center gap-2">
+                                    <span>{{ option.name }}</span>
+                                    <span
+                                        class="rounded-full px-2 py-0.5 text-xs font-semibold bg-orange-100 text-orange-700">
+                                        {{ option.position_label }}
+                                    </span>
+                                </div>
+                            </template>
+                        </MultiSelect>
+                        <PrimaryButton class="w-full justify-center py-3 text-base bg-orange-500 hover:bg-orange-600 focus:bg-orange-600"
+                            :disabled="addGuestsForm.processing || !selectedGuests.length" @click="addGuests">
+                            Adicionar selecionados
+                        </PrimaryButton>
+                    </div>
                 </div>
+
+                <PlayerListCard :players="store.game?.players || []" />
+
+                <template v-if="store.game?.status === 'done'">
+                    <div class="grid grid-cols-1 gap-3">
+                        <TeamCard color="green" :team="store.game?.teams?.green" />
+                        <TeamCard color="yellow" :team="store.game?.teams?.yellow" />
+                        <TeamCard color="blue" :team="store.game?.teams?.blue" />
+                    </div>
+                    <WhatsAppCard :message="store.game?.whatsapp_message || ''" />
+                </template>
             </div>
         </div>
+
+        <AddPlayerModal ref="playerModal" />
+        <AddGuestModal ref="guestModal" :game-id="store.game?.id" />
     </AppLayout>
 </template>

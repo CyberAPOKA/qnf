@@ -1,9 +1,13 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue';
+import { computed, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
-import { Link, useForm } from '@inertiajs/vue3';
-import { useGameStore } from '@/stores/gameStore';
+import DraftStatusCard from '@/Components/Game/DraftStatusCard.vue';
+import TeamCard from '@/Components/Game/TeamCard.vue';
+import PositionBadge from '@/Components/Game/PositionBadge.vue';
+import WhatsAppCard from '@/Components/Game/WhatsAppCard.vue';
+import { router, useForm } from '@inertiajs/vue3';
+import { useGameChannel } from '@/composables/useGameChannel';
 
 const props = defineProps({
     game: Object,
@@ -11,7 +15,7 @@ const props = defineProps({
     is_admin: Boolean,
 });
 
-const store = useGameStore();
+const { store } = useGameChannel(props);
 const pickForm = useForm({ user_id: null });
 
 const turnCaptainName = computed(() => {
@@ -28,8 +32,29 @@ const isMyTurn = computed(() => {
 
 const canPick = computed(() => {
     if (!store.game || store.game.status !== 'drafting') return false;
-    return props.is_admin || isMyTurn.value;
+    return isMyTurn.value;
 });
+
+const myTeamPlayers = computed(() => {
+    const color = store.game?.turn_color;
+    if (!color || !isMyTurn.value) return [];
+    return store.game?.teams?.[color]?.players || [];
+});
+
+const teamHasGoalkeeper = computed(() => {
+    return myTeamPlayers.value.some(p => p.position === 'goalkeeper');
+});
+
+const teamLinePickCount = computed(() => {
+    return myTeamPlayers.value.filter(p => p.position !== 'goalkeeper').length;
+});
+
+const canPickPlayer = (player) => {
+    if (!isMyTurn.value) return false;
+    if (teamHasGoalkeeper.value && player.position === 'goalkeeper') return false;
+    if (teamLinePickCount.value >= 3 && player.position !== 'goalkeeper') return false;
+    return true;
+};
 
 const pickUser = (userId) => {
     if (!store.game || !canPick.value) return;
@@ -47,43 +72,9 @@ const pickText = computed(() => {
     return `Pick ${picksCount + 1}/12`;
 });
 
-const whatsappLink = computed(() => {
-    if (!store.game?.whatsapp_message) return '#';
-    return `https://wa.me/?text=${encodeURIComponent(store.game.whatsapp_message)}`;
-});
-
-const copyMessage = async () => {
-    if (!store.game?.whatsapp_message) return;
-    await navigator.clipboard.writeText(store.game.whatsapp_message);
-};
-
-const handleRealtimeEvent = (payload) => {
-    store.patchFromEvent(payload);
-};
-
-onMounted(() => {
-    store.hydrate(props.game);
-
-    if (!store.channelName || !window.Echo) return;
-    window.Echo.private(store.channelName)
-        .listen('.CaptainsDrawn', handleRealtimeEvent)
-        .listen('.DraftPickMade', handleRealtimeEvent)
-        .listen('.DraftTurnChanged', handleRealtimeEvent)
-        .listen('.DraftFinished', handleRealtimeEvent)
-        .listen('.GamePlayerJoined', handleRealtimeEvent)
-        .listen('.GameBecameFull', handleRealtimeEvent);
-});
-
-watch(
-    () => props.game,
-    (game) => {
-        store.hydrate(game);
-    }
-);
-
-onBeforeUnmount(() => {
-    if (store.channelName && window.Echo) {
-        window.Echo.leave(`private-${store.channelName}`);
+watch(() => store.game?.status, (status) => {
+    if (status === 'done') {
+        router.visit(route('dashboard'));
     }
 });
 </script>
@@ -96,92 +87,38 @@ onBeforeUnmount(() => {
 
         <div class="py-6 px-4">
             <div class="mx-auto max-w-6xl space-y-4">
-                <div class="rounded-xl bg-white p-4 shadow">
-                    <p class="text-sm text-gray-500">{{ roundText }} - {{ pickText }}</p>
-                    <p class="mt-2 text-lg font-semibold text-gray-900" v-if="store.game?.status === 'drafting'">
-                        {{ isMyTurn ? 'Sua vez' : `${turnCaptainName || 'Capitão'} escolhendo...` }}
-                    </p>
-                    <p v-else class="mt-2 text-lg font-semibold text-green-700">Draft finalizado</p>
-                </div>
+                <DraftStatusCard
+                    :round-text="roundText"
+                    :pick-text="pickText"
+                    :status="store.game?.status || ''"
+                    :is-my-turn="isMyTurn"
+                    :turn-captain-name="turnCaptainName"
+                />
 
                 <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
-                    <div class="rounded-xl bg-green-50 p-4">
-                        <p class="font-semibold text-green-800">Time Verde</p>
-                        <p class="mt-1 text-sm text-green-700">
-                            Capitão: {{ store.game?.teams?.green?.captain?.name || '-' }}
-                        </p>
-                        <ul class="mt-2 space-y-1 text-sm text-green-900">
-                            <li v-for="player in store.game?.teams?.green?.players || []" :key="`g-${player.id}`">{{ player.name }}</li>
-                        </ul>
-                    </div>
-
-                    <div class="rounded-xl bg-yellow-50 p-4">
-                        <p class="font-semibold text-yellow-800">Time Amarelo</p>
-                        <p class="mt-1 text-sm text-yellow-700">
-                            Capitão: {{ store.game?.teams?.yellow?.captain?.name || '-' }}
-                        </p>
-                        <ul class="mt-2 space-y-1 text-sm text-yellow-900">
-                            <li v-for="player in store.game?.teams?.yellow?.players || []" :key="`y-${player.id}`">{{ player.name }}</li>
-                        </ul>
-                    </div>
-
-                    <div class="rounded-xl bg-blue-50 p-4">
-                        <p class="font-semibold text-blue-800">Time Azul</p>
-                        <p class="mt-1 text-sm text-blue-700">
-                            Capitão: {{ store.game?.teams?.blue?.captain?.name || '-' }}
-                        </p>
-                        <ul class="mt-2 space-y-1 text-sm text-blue-900">
-                            <li v-for="player in store.game?.teams?.blue?.players || []" :key="`b-${player.id}`">{{ player.name }}</li>
-                        </ul>
-                    </div>
+                    <TeamCard color="green" :team="store.game?.teams?.green" />
+                    <TeamCard color="yellow" :team="store.game?.teams?.yellow" />
+                    <TeamCard color="blue" :team="store.game?.teams?.blue" />
                 </div>
 
                 <div v-if="store.game?.status === 'drafting'" class="rounded-xl bg-white p-4 shadow">
                     <h3 class="text-base font-semibold text-gray-900">Disponíveis</h3>
                     <ul class="mt-3 space-y-2">
-                        <li
-                            v-for="player in store.game?.available_players || []"
-                            :key="player.id"
-                            class="flex items-center justify-between rounded-lg border border-gray-100 p-3"
-                        >
-                            <div>
+                        <li v-for="player in store.game?.available_players || []" :key="player.id"
+                            class="flex items-center justify-between rounded-lg border border-gray-100 p-3">
+                            <div class="flex items-center gap-2">
                                 <p class="text-sm font-semibold text-gray-900">{{ player.name }}</p>
-                                <p class="text-xs text-gray-500">{{ player.position_label }}</p>
+                                <PositionBadge :position="player.position" :label="player.position_label" />
                             </div>
-                            <PrimaryButton
-                                class="px-4 py-2 text-sm"
-                                :disabled="!canPick || pickForm.processing"
-                                @click="pickUser(player.id)"
-                            >
+                            <PrimaryButton v-if="canPickPlayer(player)" class="px-4 py-2 text-sm" :disabled="pickForm.processing"
+                                @click="pickUser(player.id)">
                                 Escolher
                             </PrimaryButton>
                         </li>
                     </ul>
                 </div>
 
-                <div v-if="store.game?.status === 'done'" class="rounded-xl bg-white p-4 shadow space-y-3">
-                    <h3 class="text-base font-semibold text-gray-900">Mensagem para WhatsApp</h3>
-                    <textarea
-                        :value="store.game?.whatsapp_message"
-                        class="h-60 w-full rounded-lg border-gray-300 text-sm"
-                        readonly
-                    />
-                    <div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                        <PrimaryButton class="w-full justify-center py-3" @click="copyMessage">
-                            Copiar
-                        </PrimaryButton>
-                        <a
-                            :href="whatsappLink"
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            class="inline-flex items-center justify-center rounded-md bg-green-600 px-4 py-3 text-sm font-semibold text-white hover:bg-green-700"
-                        >
-                            Enviar no WhatsApp
-                        </a>
-                    </div>
-                </div>
-
-                <Link class="text-sm text-indigo-600" :href="route('dashboard')">Voltar ao dashboard</Link>
+                <WhatsAppCard v-if="store.game?.status === 'done'" :message="store.game?.whatsapp_message || ''" />
             </div>
         </div>
     </AppLayout>

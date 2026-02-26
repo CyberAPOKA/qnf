@@ -34,8 +34,17 @@ class DraftService
             ]);
         }
 
+        $goalkeeperCount = $game->players()->where('position', Position::GOALKEEPER)->count();
+        if ($goalkeeperCount < 3) {
+            throw ValidationException::withMessages([
+                'captains' => 'São necessários pelo menos 3 goleiros para iniciar o draft.',
+            ]);
+        }
+
+        // Sorteia 3 jogadores de linha para serem capitães, garantindo que sejam diferentes dos goleiros e convidados
         $candidates = $game->players()
             ->where('position', '!=', Position::GOALKEEPER)
+            ->where('guest', false)
             ->inRandomOrder()
             ->take(3)
             ->get();
@@ -82,10 +91,6 @@ class DraftService
             return false;
         }
 
-        if ($actor->role === 'admin') {
-            return true;
-        }
-
         $turnColor = $this->currentTurnColor($game);
         if (! $turnColor) {
             return false;
@@ -117,7 +122,7 @@ class DraftService
             }
 
             $isCaptainTurn = $turnTeam->captain_user_id === $actor->id;
-            if ($actor->role !== 'admin' && ! $isCaptainTurn) {
+            if (! $isCaptainTurn) {
                 throw new AuthorizationException('Você não pode escolher neste turno.');
             }
 
@@ -136,6 +141,26 @@ class DraftService
                 throw ValidationException::withMessages(['user_id' => 'Jogador já foi escolhido.']);
             }
 
+            $pickedUser = User::findOrFail($pickedUserId);
+
+            $teamGoalkeeperCount = $lockedGame->draftPicks()
+                ->where('team_color', $turnColor)
+                ->whereHas('pickedUser', fn ($q) => $q->where('position', Position::GOALKEEPER))
+                ->count();
+
+            $teamLinePickCount = $lockedGame->draftPicks()
+                ->where('team_color', $turnColor)
+                ->whereHas('pickedUser', fn ($q) => $q->where('position', '!=', Position::GOALKEEPER))
+                ->count();
+
+            if ($pickedUser->position === Position::GOALKEEPER && $teamGoalkeeperCount >= 1) {
+                throw ValidationException::withMessages(['user_id' => 'Cada time pode ter no máximo 1 goleiro.']);
+            }
+
+            if ($pickedUser->position !== Position::GOALKEEPER && $teamLinePickCount >= 3) {
+                throw ValidationException::withMessages(['user_id' => 'O time já tem 3 jogadores de linha. Escolha um goleiro.']);
+            }
+
             $pickIndex = $lockedGame->draftPicks()->count();
             $pick = DraftPick::create([
                 'game_id' => $lockedGame->id,
@@ -145,6 +170,15 @@ class DraftService
                 'picked_user_id' => $pickedUserId,
                 'picked_at' => now(),
             ]);
+
+            $teamPickCount = $lockedGame->draftPicks()
+                ->where('team_color', $turnColor)
+                ->where('id', '!=', $pick->id)
+                ->count();
+
+            if ($teamPickCount === 0) {
+                $turnTeam->update(['first_pick_user_id' => $pickedUserId]);
+            }
 
             $totalAfter = $lockedGame->draftPicks()->count();
             if ($totalAfter >= 12) {
@@ -171,36 +205,90 @@ class DraftService
 
     public function buildWhatsAppMessage(Game $game): string
     {
-        $game->loadMissing(['teams.captain', 'draftPicks.pickedUser']);
-        $teams = $this->teamsWithPlayers($game);
+        $game->loadMissing(['teams.captain', 'teams.firstPick', 'draftPicks.pickedUser']);
 
-        $title = sprintf("Futsal - %s\n", $game->date->format('d/m/Y'));
+        $colorEmojis = [
+            TeamColor::GREEN->value => '🟢',
+            TeamColor::YELLOW->value => '🟡',
+            TeamColor::BLUE->value => '🔵',
+        ];
 
-        return $title
-            ."Time Verde:\n- ".implode("\n- ", $teams[TeamColor::GREEN->value])."\n\n"
-            ."Time Amarelo:\n- ".implode("\n- ", $teams[TeamColor::YELLOW->value])."\n\n"
-            ."Time Azul:\n- ".implode("\n- ", $teams[TeamColor::BLUE->value]);
+        $teamsByColor = $game->teams->keyBy(fn ($team) => $team->color->value);
+        $lines = ["*📋 TIMES*", '', '•••••••••••••••••••••••••••••••••••••', ''];
+
+        foreach (TeamColor::cases() as $color) {
+            $emoji = $colorEmojis[$color->value];
+            $team = $teamsByColor->get($color->value);
+            $captainName = $team?->captain?->name;
+            $firstPickId = $team?->first_pick_user_id;
+
+            if ($captainName) {
+                $lines[] = "{$emoji} {$captainName}©️";
+            }
+
+            foreach ($game->draftPicks->where('team_color', $color)->sortBy('id') as $pick) {
+                $name = $pick->pickedUser->name;
+                $badge = '';
+
+                if ($pick->pickedUser->position === Position::GOALKEEPER) {
+                    $badge = '🧤';
+                } elseif ($pick->picked_user_id === $firstPickId) {
+                    $badge = '🔟';
+                }
+
+                $lines[] = "{$emoji} {$name}{$badge}";
+            }
+
+            $lines[] = '';
+        }
+
+        $lines[] = '©️ = capitão';
+        $lines[] = '🧤 = goleiro';
+        $lines[] = '🔟 = 1º escolha';
+        $lines[] = '';
+        $lines[] = '•••••••••••••••••••••••••••••••••••••';
+        $lines[] = '';
+
+        $roundNumber = Game::where('id', '<=', $game->id)->count();
+        $lines[] = sprintf('*⚽️ Rodada: %02d*', $roundNumber);
+
+        return implode("\n", $lines);
     }
 
     public function teamsWithPlayers(Game $game): array
     {
-        $game->loadMissing(['teams.captain', 'draftPicks.pickedUser']);
+        $game->loadMissing(['teams.captain', 'teams.firstPick', 'draftPicks.pickedUser']);
 
         $result = [];
-        foreach (TeamColor::cases() as $color) {
-            $result[$color->value] = [];
-        }
+        $teamsByColor = $game->teams->keyBy(fn ($team) => $team->color->value);
 
-        $captains = $game->teams->keyBy(fn ($team) => $team->color->value);
         foreach (TeamColor::cases() as $color) {
-            $captainName = $captains->get($color->value)?->captain?->name;
-            if ($captainName) {
-                $result[$color->value][] = $captainName.' (Capitão)';
-            }
-        }
+            $team = $teamsByColor->get($color->value);
+            $captain = $team?->captain;
+            $firstPickId = $team?->first_pick_user_id;
 
-        foreach ($game->draftPicks->sortBy('id') as $pick) {
-            $result[$pick->team_color->value][] = $pick->pickedUser->name;
+            $players = $game->draftPicks
+                ->where('team_color', $color)
+                ->sortBy('id')
+                ->values()
+                ->map(fn ($pick) => [
+                    'id' => $pick->pickedUser->id,
+                    'name' => $pick->pickedUser->name,
+                    'position' => $pick->pickedUser->position->value,
+                    'position_label' => $pick->pickedUser->position->label(),
+                    'is_first_pick' => $pick->picked_user_id === $firstPickId,
+                ])
+                ->all();
+
+            $result[$color->value] = [
+                'captain' => $captain ? [
+                    'id' => $captain->id,
+                    'name' => $captain->name,
+                    'position' => $captain->position->value,
+                    'position_label' => $captain->position->label(),
+                ] : null,
+                'players' => $players,
+            ];
         }
 
         return $result;

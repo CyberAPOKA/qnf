@@ -9,19 +9,10 @@ use App\Services\DraftService;
 
 class GamePolicy
 {
-    public function drawCaptains(User $user, Game $game): bool
-    {
-        return $user->role === 'admin' && $game->status === GameStatus::FULL;
-    }
-
     public function pick(User $user, Game $game): bool
     {
         if ($game->status !== GameStatus::DRAFTING) {
             return false;
-        }
-
-        if ($user->role === 'admin') {
-            return true;
         }
 
         $pickCount = $game->draftPicks()->count();
