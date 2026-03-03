@@ -11,6 +11,7 @@ import AddGuestModal from '@/Components/Game/AddGuestModal.vue';
 import AddPlayerModal from '@/Components/Game/AddPlayerModal.vue';
 import ScoreEntryCard from '@/Components/Game/ScoreEntryCard.vue';
 import RankingCard from '@/Components/Game/RankingCard.vue';
+import TitleCard from '@/Components/Game/TitleCard.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 
 import { useGameChannel } from '@/composables/useGameChannel';
@@ -81,14 +82,12 @@ const addGuests = () => {
 <template>
     <AppLayout title="QNF">
         <template #header>
-            <h2 class="font-semibold text-lg text-gray-800 leading-tight text-center">
-                <i class="fa-solid fa-fire"></i> QUINTA NOBRE FUTSAL 2026 <i class="fa-solid fa-fire"></i>
-            </h2>
+            <TitleCard />
         </template>
 
         <div class="p-2 lg:p-4">
             <div class="mx-auto max-w-xl space-y-4">
-                <GameStatusCard :status-label="store.game?.status_label" :players-count="store.game?.players_count"
+                <GameStatusCard :status="store.game?.status" :status-label="store.game?.status_label" :players-count="store.game?.players_count"
                     :round="store.game?.round">
                     <template #details>
                         <div class="mt-1 text-sm text-gray-500">

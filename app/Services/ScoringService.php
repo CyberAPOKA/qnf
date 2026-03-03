@@ -160,6 +160,38 @@ class ScoringService
     }
 
     /**
+     * Calcula a sequência de vitórias consecutivas (dos jogos mais recentes)
+     * para cada jogador, baseado em game_players.points.
+     *
+     * @return array<int, int> Keyed por user_id => streak count
+     */
+    public function getWinStreaks(): array
+    {
+        $rows = DB::table('game_players')
+            ->join('games', 'game_players.game_id', '=', 'games.id')
+            ->where('games.status', GameStatus::DONE->value)
+            ->orderBy('games.date', 'desc')
+            ->select('game_players.user_id', 'game_players.points')
+            ->get();
+
+        $streaks = [];
+
+        foreach ($rows->groupBy('user_id') as $userId => $games) {
+            $streak = 0;
+            foreach ($games as $game) {
+                if ((int) $game->points === 1) {
+                    $streak++;
+                } else {
+                    break;
+                }
+            }
+            $streaks[$userId] = $streak;
+        }
+
+        return $streaks;
+    }
+
+    /**
      * Ranking agregado de todos os jogos finalizados.
      *
      * Delega para getPlayerStats() e aplica ordenação/limite.
@@ -176,6 +208,8 @@ class ScoringService
             ->take($limit)
             ->values();
 
+        $streaks = $this->getWinStreaks();
+
         // Standard competition ranking (1, 2, 2, 4) — separate for line/goalkeepers
         $linePos = 0;
         $lineRank = 0;
@@ -185,7 +219,7 @@ class ScoringService
         $gkRank = 0;
         $gkLast = [null, null];
 
-        return $sorted->map(function ($row) use (&$linePos, &$lineRank, &$lineLast, &$gkPos, &$gkRank, &$gkLast) {
+        return $sorted->map(function ($row) use (&$linePos, &$lineRank, &$lineLast, &$gkPos, &$gkRank, &$gkLast, $streaks) {
             $player = (array) $row;
             $pts = (int) $player['total_points'];
             $gp = (int) $player['games_played'];
@@ -205,6 +239,8 @@ class ScoringService
                 }
                 $player['rank'] = $lineRank;
             }
+
+            $player['win_streak'] = $streaks[$player['id']] ?? 0;
 
             return $player;
         })->all();

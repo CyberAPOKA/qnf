@@ -69,6 +69,7 @@ const lineColumns = [
     { key: 'name', label: 'Jogador', class: 'font-bold text-lg text-gray-900' },
     { key: 'total_points', label: 'Pontos', align: 'center', class: 'font-bold text-lg text-gray-900' },
     { key: 'games_played', label: 'Jogos', align: 'center', class: 'font-bold text-lg text-gray-900' },
+    // { key: 'win_streak', label: 'Sequência', align: 'center', class: 'font-bold text-lg text-gray-900' },
 ];
 
 const goalkeeperColumns = [
@@ -93,6 +94,7 @@ const goalkeeperColumns = [
             </template>
             <template #cell-name="{ row }">
                 <div class="flex items-center gap-2">
+                    <i v-if="row.win_streak >= 3" class="fa-solid fa-fire qnf-fire"></i>
                     <span class="font-medium text-gray-900">{{ row.name }}</span>
                     <PositionBadge :position="row.position" :label="positionLabels[row.position] || row.position" />
                 </div>
@@ -116,3 +118,28 @@ const goalkeeperColumns = [
         </DataTable>
     </div>
 </template>
+
+<style scoped>
+.qnf-fire {
+    color: #ff3b30;
+    filter: drop-shadow(0 0 10px rgba(255, 90, 0, .75));
+    animation: qnfFlame .55s ease-in-out infinite alternate;
+}
+
+@keyframes qnfFlame {
+    0% {
+        transform: translateY(1px) scale(.98) rotate(-6deg);
+        filter: drop-shadow(0 0 8px rgba(255, 110, 0, .65));
+    }
+    100% {
+        transform: translateY(-2px) scale(1.08) rotate(6deg);
+        filter: drop-shadow(0 0 14px rgba(255, 180, 0, .85));
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .qnf-fire {
+        animation: none !important;
+    }
+}
+</style>
