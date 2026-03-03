@@ -14,6 +14,7 @@ class GamePlayer extends Model
         'game_id',
         'user_id',
         'joined_at',
+        'points',
     ];
 
     protected function casts(): array

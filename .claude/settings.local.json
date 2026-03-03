@@ -5,7 +5,16 @@
       "Bash(npm ls:*)",
       "Bash(php artisan test:*)",
       "Bash(php artisan make:migration:*)",
-      "Bash(php artisan migrate:*)"
+      "Bash(php artisan migrate:*)",
+      "Bash(php artisan route:list --compact)",
+      "Bash(php artisan route:list)",
+      "Bash(php artisan futsal:save-scores --help)",
+      "Bash(php artisan db:seed --class=GameHistorySeeder --no-interaction)",
+      "Bash(php artisan migrate:fresh --seed)",
+      "Bash(php artisan tinker --execute=\":*)",
+      "Bash(php verify_seed.php)",
+      "Bash(xargs grep -l \"v-for\\\\|list\\\\|table\")",
+      "Bash(php artisan tinker --execute=\"echo json_encode\\(App\\\\Models\\\\Game::select\\(''id'',''date'',''round'',''status''\\)->orderBy\\(''date''\\)->get\\(\\)->toArray\\(\\), JSON_PRETTY_PRINT\\);\")"
     ]
   }
 }

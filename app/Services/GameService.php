@@ -20,13 +20,16 @@ class GameService
     public function getOrCreateThisWeekGame(?User $admin = null, ?CarbonInterface $now = null): Game
     {
         $clock = CarbonImmutable::instance($now ?? now(self::TZ))->setTimezone(self::TZ);
-        $gameDate = $this->thisWeekWednesdayDate($clock);
-        $opensAt = $gameDate->setTime(18, 0);
+        $gameDate = $this->thisWeekThursdayDate($clock);
+        $opensAt = $gameDate->subDay()->setTime(18, 0); // Quarta 18h
+
+        $lastRound = Game::whereYear('date', $gameDate->year)->max('round') ?? 0;
 
         return Game::firstOrCreate(
             ['date' => $gameDate->toDateString()],
             [
                 'opens_at' => $opensAt,
+                'round' => $lastRound + 1,
                 'status' => GameStatus::SCHEDULED,
                 'created_by' => $admin?->id,
             ]
@@ -36,19 +39,20 @@ class GameService
     public function openGameIfNeeded(?CarbonInterface $now = null): ?Game
     {
         $clock = CarbonImmutable::instance($now ?? now(self::TZ))->setTimezone(self::TZ);
+        $game = $this->getOrCreateThisWeekGame(null, $clock);
 
-        if (! $clock->isWednesday() || $clock->lt($clock->setTime(18, 0))) {
+        if ($game->status !== GameStatus::SCHEDULED) {
             return null;
         }
 
-        $game = $this->getOrCreateThisWeekGame(null, $clock);
-
-        if ($game->status === GameStatus::SCHEDULED && $clock->greaterThanOrEqualTo($game->opens_at->setTimezone(self::TZ))) {
+        if ($clock->greaterThanOrEqualTo($game->opens_at->setTimezone(self::TZ))) {
             $game->status = GameStatus::OPEN;
             $game->save();
+
+            return $game;
         }
 
-        return $game;
+        return null;
     }
 
     public function forceOpenThisWeekGame(?User $admin = null, ?CarbonInterface $now = null): Game
@@ -84,10 +88,10 @@ class GameService
         rescue(fn () => broadcast(new CaptainsDrawn($freshGame->id, $payload))->toOthers(), report: false);
     }
 
-    public function thisWeekWednesdayDate(CarbonInterface $date): CarbonImmutable
+    public function thisWeekThursdayDate(CarbonInterface $date): CarbonImmutable
     {
         $base = CarbonImmutable::instance($date)->setTimezone(self::TZ);
 
-        return $base->startOfWeek(CarbonInterface::MONDAY)->addDays(2)->startOfDay();
+        return $base->startOfWeek(CarbonInterface::MONDAY)->addDays(3)->startOfDay();
     }
 }

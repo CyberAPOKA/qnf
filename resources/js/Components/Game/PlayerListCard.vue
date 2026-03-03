@@ -10,7 +10,7 @@ defineProps({
 </script>
 
 <template>
-    <div class="rounded-xl bg-white p-4 shadow" v-if="players.length">
+    <div class="rounded-xl bg-white p-2 lg:p-4 shadow" v-if="players.length">
         <h3 class="text-base font-semibold text-gray-900">Inscritos</h3>
         <ul class="mt-3 space-y-2">
             <li v-for="player in players" :key="player.id"

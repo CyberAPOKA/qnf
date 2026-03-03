@@ -3,12 +3,16 @@
 namespace App\Support;
 
 use App\Enums\GameStatus;
+use App\Http\Resources\DraftPickResource;
+use App\Http\Resources\GamePlayerResource;
+use App\Http\Resources\PlayerResource;
 use App\Models\Game;
 use App\Services\DraftService;
+use App\Services\ScoringService;
 
 class GamePayload
 {
-    public static function fromGame(Game $game, DraftService $draftService): array
+    public static function fromGame(Game $game, DraftService $draftService, ?ScoringService $scoringService = null): array
     {
         $game->loadMissing([
             'gamePlayers.user',
@@ -20,19 +24,38 @@ class GamePayload
         $captainIds = $game->teams->pluck('captain_user_id')->filter()->values();
         $pickedIds = $game->draftPicks->pluck('picked_user_id')->values();
 
-        $availablePlayers = $game->gamePlayers
+        $availableUsers = $game->gamePlayers
             ->map(fn ($item) => $item->user)
             ->filter()
             ->reject(fn ($user) => $captainIds->contains($user->id) || $pickedIds->contains($user->id))
-            ->values()
-            ->map(fn ($user) => [
-                'id' => $user->id,
-                'name' => $user->name,
-                'phone' => $user->phone,
-                'position' => $user->position->value,
-                'position_label' => $user->position->label(),
-                'guest' => $user->guest,
+            ->values();
+
+        $statsMap = collect();
+        $rankMap = collect();
+
+        if ($scoringService !== null) {
+            $availableIds = $availableUsers->pluck('id')->all();
+            if (! empty($availableIds)) {
+                $statsMap = $scoringService->getPlayerStats(userIds: $availableIds, includeGuests: true);
+            }
+
+            $rankMap = collect($scoringService->getRanking(limit: 999, includeGuests: true))
+                ->pluck('rank', 'id');
+        }
+
+        $availablePlayers = $availableUsers
+            ->map(function ($user) use ($statsMap, $rankMap) {
+                $data = (new PlayerResource($user))->withStats($statsMap->get($user->id))->resolve();
+                $data['rank'] = $rankMap->get($user->id);
+
+                return $data;
+            })
+            ->sortBy([
+                fn ($a, $b) => ($a['position'] === 'goalkeeper') <=> ($b['position'] === 'goalkeeper'),
+                ['total_points', 'desc'],
+                ['games_played', 'asc'],
             ])
+            ->values()
             ->all();
 
         $teamsPayload = $draftService->teamsWithPlayers($game);
@@ -41,44 +64,18 @@ class GamePayload
         return [
             'id' => $game->id,
             'date' => optional($game->date)->toDateString(),
+            'round' => $game->round,
             'status' => $game->status->value,
             'status_label' => $game->status->label(),
             'opens_at' => optional($game->opens_at)->toIso8601String(),
             'closes_at' => optional($game->closes_at)->toIso8601String(),
             'players_count' => $game->gamePlayers->count(),
-            'players' => $game->gamePlayers
-                ->sortBy('joined_at')
-                ->values()
-                ->map(fn ($entry) => [
-                    'id' => $entry->user->id,
-                    'name' => $entry->user->name,
-                    'phone' => $entry->user->phone,
-                    'position' => $entry->user->position->value,
-                    'position_label' => $entry->user->position->label(),
-                    'guest' => $entry->user->guest,
-                    'joined_at' => optional($entry->joined_at)->toIso8601String(),
-                ])
-                ->all(),
+            'players' => GamePlayerResource::collection($game->gamePlayers->sortBy('joined_at')->values())->resolve(),
             'teams' => $teamsPayload,
-            'picks' => $game->draftPicks
-                ->sortBy('id')
-                ->values()
-                ->map(fn ($pick) => [
-                    'id' => $pick->id,
-                    'round' => $pick->round,
-                    'pick_in_round' => $pick->pick_in_round,
-                    'team_color' => $pick->team_color->value,
-                    'picked_user' => [
-                        'id' => $pick->pickedUser->id,
-                        'name' => $pick->pickedUser->name,
-                    ],
-                    'picked_at' => optional($pick->picked_at)->toIso8601String(),
-                ])
-                ->all(),
+            'picks' => DraftPickResource::collection($game->draftPicks->sortBy('id')->values())->resolve(),
             'turn_color' => $turnColor?->value,
             'available_players' => $availablePlayers,
             'whatsapp_message' => $game->status === GameStatus::DONE ? $draftService->buildWhatsAppMessage($game) : null,
         ];
     }
-
 }

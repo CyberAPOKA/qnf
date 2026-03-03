@@ -10,6 +10,7 @@ use App\Models\GamePlayer;
 use App\Models\User;
 use App\Services\DraftService;
 use App\Services\GameService;
+use App\Services\ScoringService;
 use App\Support\GamePayload;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -23,6 +24,7 @@ class GameController extends Controller
     public function __construct(
         private readonly GameService $gameService,
         private readonly DraftService $draftService,
+        private readonly ScoringService $scoringService,
     ) {}
 
     public function index(Request $request): Response
@@ -30,9 +32,11 @@ class GameController extends Controller
         $this->gameService->openGameIfNeeded();
 
         $game = $this->gameService->getOrCreateThisWeekGame();
-        $payload = GamePayload::fromGame($game, $this->draftService);
+        $payload = GamePayload::fromGame($game, $this->draftService, $this->scoringService);
 
         $isAdmin = $request->user()->role === 'admin';
+
+        $ranking = $this->scoringService->getRanking(includeGuests: true);
 
         if ($isAdmin) {
             return Inertia::render('AdminDashboard', [
@@ -49,6 +53,8 @@ class GameController extends Controller
                         'position_label' => $user->position->label(),
                         'guest' => $user->guest,
                     ]),
+                'can_enter_scores' => $this->scoringService->canEnterScores($game),
+                'ranking' => $ranking,
             ]);
         }
 
@@ -56,6 +62,7 @@ class GameController extends Controller
             'game' => $payload,
             'current_user_id' => $request->user()->id,
             'is_goalkeeper' => $request->user()->position === Position::GOALKEEPER,
+            'ranking' => $ranking,
         ]);
     }
 

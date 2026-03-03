@@ -10,6 +10,7 @@ use App\Models\GamePlayer;
 use App\Models\User;
 use App\Services\DraftService;
 use App\Services\GameService;
+use App\Services\ScoringService;
 use App\Support\GamePayload;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -164,6 +165,26 @@ class AdminGameController extends Controller
                 $payload = GamePayload::fromGame($freshGame, $this->draftService);
                 rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
             }
+        }
+
+        return back();
+    }
+
+    public function saveScores(Request $request, Game $game, ScoringService $scoringService): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $validated = $request->validate([
+            'scores' => ['required', 'array', 'size:3'],
+            'scores.green' => ['required', 'integer', 'min:0', 'max:99'],
+            'scores.yellow' => ['required', 'integer', 'min:0', 'max:99'],
+            'scores.blue' => ['required', 'integer', 'min:0', 'max:99'],
+        ]);
+
+        try {
+            $scoringService->saveScores($game, $validated['scores'], force: true);
+        } catch (ValidationException $exception) {
+            return back()->withErrors($exception->errors());
         }
 
         return back();

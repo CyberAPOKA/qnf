@@ -23,6 +23,7 @@
         "vue": "^3.3.13"
     },
     "dependencies": {
+        "@fortawesome/fontawesome-free": "^7.2.0",
         "@primevue/themes": "^4.5.4",
         "laravel-echo": "^2.3.0",
         "pinia": "^3.0.4",

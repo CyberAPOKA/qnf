@@ -17,6 +17,7 @@ class Team extends Model
         'captain_user_id',
         'first_pick_user_id',
         'pick_order',
+        'score',
     ];
 
     protected function casts(): array

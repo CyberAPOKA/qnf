@@ -17,6 +17,7 @@ return new class extends Migration
             $table->date('date')->unique();
             $table->timestamp('opens_at');
             $table->timestamp('closes_at')->nullable();
+            $table->unsignedSmallInteger('round')->nullable();
             $table->enum('status', GameStatus::values())->default(GameStatus::SCHEDULED->value);
             $table->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();

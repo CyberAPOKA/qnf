@@ -19,6 +19,8 @@ use Illuminate\Validation\ValidationException;
 
 class DraftService
 {
+    public function __construct(private readonly ScoringService $scoringService) {}
+
     public const SNAKE_SEQUENCE = [
         TeamColor::GREEN, TeamColor::YELLOW, TeamColor::BLUE,
         TeamColor::BLUE, TeamColor::YELLOW, TeamColor::GREEN,
@@ -187,7 +189,7 @@ class DraftService
 
             $lockedGame->refresh();
             $lockedGame->loadMissing(['teams.captain', 'draftPicks.pickedUser', 'players']);
-            $payload = GamePayload::fromGame($lockedGame, $this);
+            $payload = GamePayload::fromGame($lockedGame, $this, $this->scoringService);
 
             rescue(fn () => broadcast(new DraftPickMade($payload))->toOthers(), report: false);
             rescue(fn () => broadcast(new DraftTurnChanged($payload))->toOthers(), report: false);
@@ -249,8 +251,7 @@ class DraftService
         $lines[] = '•••••••••••••••••••••••••••••••••••••';
         $lines[] = '';
 
-        $roundNumber = Game::where('id', '<=', $game->id)->count();
-        $lines[] = sprintf('*⚽️ Rodada: %02d*', $roundNumber);
+        $lines[] = sprintf('*⚽️ Rodada: %02d*', $game->round ?? 0);
 
         return implode("\n", $lines);
     }
@@ -288,6 +289,7 @@ class DraftService
                     'position_label' => $captain->position->label(),
                 ] : null,
                 'players' => $players,
+                'score' => $team?->score,
             ];
         }
 

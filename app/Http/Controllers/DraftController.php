@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\GameStatus;
 use App\Models\Game;
 use App\Services\DraftService;
+use App\Services\ScoringService;
 use App\Support\GamePayload;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -14,7 +15,10 @@ use Inertia\Response;
 
 class DraftController extends Controller
 {
-    public function __construct(private readonly DraftService $draftService) {}
+    public function __construct(
+        private readonly DraftService $draftService,
+        private readonly ScoringService $scoringService,
+    ) {}
 
     public function show(Request $request, Game $game): Response|RedirectResponse
     {
@@ -22,7 +26,7 @@ class DraftController extends Controller
             return redirect()->route('dashboard');
         }
 
-        $payload = GamePayload::fromGame($game, $this->draftService);
+        $payload = GamePayload::fromGame($game, $this->draftService, $this->scoringService);
 
         return Inertia::render('Draft', [
             'game' => $payload,

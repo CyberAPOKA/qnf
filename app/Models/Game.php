@@ -17,6 +17,7 @@ class Game extends Model
         'date',
         'opens_at',
         'closes_at',
+        'round',
         'status',
         'created_by',
     ];

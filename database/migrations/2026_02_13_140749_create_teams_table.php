@@ -19,6 +19,7 @@ return new class extends Migration
             $table->foreignId('first_pick_user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->enum('color', TeamColor::values());
             $table->unsignedTinyInteger('pick_order');
+            $table->unsignedTinyInteger('score')->nullable();
             $table->timestamps();
 
             $table->unique(['game_id', 'color']);
@@ -28,7 +29,7 @@ return new class extends Migration
     /**
      * Reverse the migrations.
      */
-    public function down(): voidla
+    public function down(): void
     {
         Schema::dropIfExists('teams');
     }

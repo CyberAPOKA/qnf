@@ -9,20 +9,24 @@ import TeamCard from '@/Components/Game/TeamCard.vue';
 import WhatsAppCard from '@/Components/Game/WhatsAppCard.vue';
 import AddGuestModal from '@/Components/Game/AddGuestModal.vue';
 import AddPlayerModal from '@/Components/Game/AddPlayerModal.vue';
+import ScoreEntryCard from '@/Components/Game/ScoreEntryCard.vue';
+import RankingCard from '@/Components/Game/RankingCard.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 
 import { useGameChannel } from '@/composables/useGameChannel';
-import { useDraftCountdown } from '@/composables/useDraftCountdown';
+import { useDraftRedirect } from '@/composables/useDraftRedirect';
 import MultiSelect from 'primevue/multiselect';
 
 const props = defineProps({
     game: Object,
     current_user_id: Number,
     all_users: Array,
+    can_enter_scores: Boolean,
+    ranking: Array,
 });
 
 const { store } = useGameChannel(props);
-const { countdown, isCountingDown } = useDraftCountdown();
+useDraftRedirect();
 const selectedUsers = ref([]);
 const selectedGuests = ref([]);
 const addPlayersForm = useForm({ user_ids: [] });
@@ -75,30 +79,30 @@ const addGuests = () => {
 </script>
 
 <template>
-    <AppLayout title="Admin - Jogo da Semana">
+    <AppLayout title="QNF">
         <template #header>
-            <h2 class="font-semibold text-xl text-gray-800 leading-tight">
-                Futsal da Semana (Admin)
+            <h2 class="font-semibold text-lg text-gray-800 leading-tight text-center">
+                <i class="fa-solid fa-fire"></i> QUINTA NOBRE FUTSAL 2026 <i class="fa-solid fa-fire"></i>
             </h2>
         </template>
 
-        <div class="py-6 px-4">
+        <div class="p-2 lg:p-4">
             <div class="mx-auto max-w-xl space-y-4">
-                <GameStatusCard
-                    :status-label="store.game?.status_label"
-                    :players-count="store.game?.players_count"
-                    :countdown="countdown"
-                    :is-counting-down="isCountingDown"
-                >
+                <GameStatusCard :status-label="store.game?.status_label" :players-count="store.game?.players_count"
+                    :round="store.game?.round">
                     <template #details>
-                        <p class="mt-1 text-sm text-gray-500">
+                        <div class="mt-1 text-sm text-gray-500">
                             Linha: <span class="font-semibold">{{ linePlayerCount }}/12</span>
-                            · Goleiros: <span class="font-semibold" :class="goalkeeperCount < 3 ? 'text-red-600' : 'text-green-600'">{{ goalkeeperCount }}/3</span>
-                        </p>
+                            · Goleiros:
+                            <span class="font-semibold"
+                                :class="goalkeeperCount < 3 ? 'text-red-600' : 'text-green-600'">
+                                {{ goalkeeperCount }}/3
+                            </span>
+                        </div>
                     </template>
 
                     <template #actions>
-                        <Link v-if="store.game?.status === 'drafting' && !isCountingDown"
+                        <Link v-if="store.game?.status === 'drafting'"
                             class="inline-flex w-full items-center justify-center rounded-md bg-indigo-600 px-4 py-3 text-base font-semibold text-white hover:bg-indigo-700"
                             :href="route('games.draft', store.game.id)">
                             Ir para Draft
@@ -106,13 +110,13 @@ const addGuests = () => {
                     </template>
 
                     <template #footer>
-                        <p v-if="store.game?.status === 'full' && !isCountingDown" class="mt-3 text-sm font-medium text-red-600">
+                        <p v-if="store.game?.status === 'full'" class="mt-3 text-sm font-medium text-red-600">
                             Lista fechada
                         </p>
                     </template>
                 </GameStatusCard>
 
-                <div v-if="canAddPlayers" class="rounded-xl bg-white p-4 shadow">
+                <div v-if="canAddPlayers" class="rounded-xl bg-white p-2 lg:p-4 shadow">
                     <div class="flex items-center justify-between">
                         <h3 class="text-base font-semibold text-gray-900">Adicionar jogadores</h3>
                         <SecondaryButton class="text-xs" @click="playerModal?.open()">
@@ -139,7 +143,7 @@ const addGuests = () => {
                     </div>
                 </div>
 
-                <div v-if="canAddPlayers" class="rounded-xl bg-white p-4 shadow">
+                <div v-if="canAddPlayers" class="rounded-xl bg-white p-2 lg:p-4 shadow">
                     <div class="flex items-center justify-between">
                         <h3 class="text-base font-semibold text-gray-900">Adicionar convidados</h3>
                         <SecondaryButton class="text-xs" @click="guestModal?.open()">
@@ -159,7 +163,8 @@ const addGuests = () => {
                                 </div>
                             </template>
                         </MultiSelect>
-                        <PrimaryButton class="w-full justify-center py-3 text-base bg-orange-500 hover:bg-orange-600 focus:bg-orange-600"
+                        <PrimaryButton
+                            class="w-full justify-center py-3 text-base bg-orange-500 hover:bg-orange-600 focus:bg-orange-600"
                             :disabled="addGuestsForm.processing || !selectedGuests.length" @click="addGuests">
                             Adicionar selecionados
                         </PrimaryButton>
@@ -174,8 +179,11 @@ const addGuests = () => {
                         <TeamCard color="yellow" :team="store.game?.teams?.yellow" />
                         <TeamCard color="blue" :team="store.game?.teams?.blue" />
                     </div>
+                    <ScoreEntryCard :game-id="store.game.id" :teams="store.game.teams" />
                     <WhatsAppCard :message="store.game?.whatsapp_message || ''" />
                 </template>
+
+                <RankingCard :ranking="ranking || []" />
             </div>
         </div>
 

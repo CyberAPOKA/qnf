@@ -2,6 +2,7 @@
 
 namespace App\Actions\Fortify;
 
+use App\Enums\Position;
 use App\Models\User;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
@@ -16,20 +17,32 @@ class UpdateUserProfileInformation implements UpdatesUserProfileInformation
      */
     public function update(User $user, array $input): void
     {
-        Validator::make($input, [
+        $rules = [
             'name' => ['required', 'string', 'max:255'],
             'phone' => ['required', 'string', 'max:30', Rule::unique('users')->ignore($user->id)],
             'photo' => ['nullable', 'mimes:jpg,jpeg,png', 'max:1024'],
-        ])->validateWithBag('updateProfileInformation');
+        ];
+
+        if ($user->position !== Position::GOALKEEPER) {
+            $rules['position'] = ['required', Rule::in([Position::FIXED->value, Position::WINGER->value, Position::PIVOT->value])];
+        }
+
+        Validator::make($input, $rules)->validateWithBag('updateProfileInformation');
 
         if (isset($input['photo'])) {
             $user->updateProfilePhoto($input['photo']);
         }
 
-        $user->forceFill([
+        $data = [
             'name' => $input['name'],
             'phone' => $input['phone'],
             'email' => sprintf('%s@phone.local', preg_replace('/\D+/', '', $input['phone'])),
-        ])->save();
+        ];
+
+        if ($user->position !== Position::GOALKEEPER && isset($input['position'])) {
+            $data['position'] = $input['position'];
+        }
+
+        $user->forceFill($data)->save();
     }
 }

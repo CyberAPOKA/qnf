@@ -208,7 +208,7 @@ class UserSeeder extends Seeder
 
     public function run(): void
     {
-        $password = Hash::make('123123123');
+        $password = Hash::make('qnf');
 
         foreach (static::$players as $player) {
             User::query()->firstOrCreate(
