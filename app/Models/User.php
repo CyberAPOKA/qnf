@@ -36,6 +36,9 @@ class User extends Authenticatable
         'role',
         'position',
         'guest',
+        'photo_front',
+        'photo_side',
+        'active',
         'password',
     ];
 
@@ -71,6 +74,7 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'position' => Position::class,
             'guest' => 'boolean',
+            'active' => 'boolean',
             'password' => 'hashed',
         ];
     }

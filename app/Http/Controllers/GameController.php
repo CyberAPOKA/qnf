@@ -44,6 +44,7 @@ class GameController extends Controller
                 'current_user_id' => $request->user()->id,
                 'all_users' => User::select('id', 'name', 'position', 'guest')
                     ->where('role', '!=', 'admin')
+                    ->where('active', true)
                     ->orderBy('name')
                     ->get()
                     ->map(fn ($user) => [
@@ -58,10 +59,16 @@ class GameController extends Controller
             ]);
         }
 
+        $droppedOut = GamePlayer::where('game_id', $game->id)
+            ->where('user_id', $request->user()->id)
+            ->where('dropped_out', true)
+            ->exists();
+
         return Inertia::render('PlayerDashboard', [
             'game' => $payload,
             'current_user_id' => $request->user()->id,
             'is_goalkeeper' => $request->user()->position === Position::GOALKEEPER,
+            'dropped_out' => $droppedOut,
             'ranking' => $ranking,
         ]);
     }
@@ -80,11 +87,15 @@ class GameController extends Controller
                     throw ValidationException::withMessages(['join' => 'Goleiros são adicionados pelo administrador.']);
                 }
 
-                $alreadyJoined = GamePlayer::where('game_id', $lockedGame->id)
+                $existing = GamePlayer::where('game_id', $lockedGame->id)
                     ->where('user_id', $request->user()->id)
-                    ->exists();
+                    ->first();
 
-                if ($alreadyJoined) {
+                if ($existing) {
+                    if ($existing->dropped_out) {
+                        throw ValidationException::withMessages(['join' => 'Você desistiu e não pode se inscrever novamente.']);
+                    }
+
                     return;
                 }
 
@@ -119,6 +130,34 @@ class GameController extends Controller
             $payload = GamePayload::fromGame($freshGame, $this->draftService);
             rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
         }
+
+        return back();
+    }
+
+    public function quit(Request $request, Game $game): RedirectResponse
+    {
+        try {
+            DB::transaction(function () use ($request, $game): void {
+                $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
+
+                if (! in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL])) {
+                    throw ValidationException::withMessages(['quit' => 'Não é possível desistir neste momento.']);
+                }
+
+                $gamePlayer = GamePlayer::where('game_id', $lockedGame->id)
+                    ->where('user_id', $request->user()->id)
+                    ->where('dropped_out', false)
+                    ->firstOrFail();
+
+                $gamePlayer->update(['dropped_out' => true]);
+            });
+        } catch (ValidationException $exception) {
+            return back()->withErrors($exception->errors());
+        }
+
+        $freshGame = Game::findOrFail($game->id);
+        $payload = GamePayload::fromGame($freshGame, $this->draftService);
+        rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
 
         return back();
     }

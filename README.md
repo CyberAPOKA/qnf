@@ -39,6 +39,6 @@ php artisan futsal:open-week-game {--force}
 CTRL+SHIFT+P->User Settings
 "claudeCode.initialPermissionMode": "bypassPermissions"
 
-Relativo: "php artisan game:test-open 5" — abre em 5 minutos
-Horário fixo: "php artisan game:test-open --s --h=18 --m=30" — abre hoje às 18:30
+Relativo: "php artisan game:test-open 1" — abre em 1 minuto
+Horário fixo: "php artisan game:test-open --s --h=18 --m=0" — abre hoje às 18:00
 ```

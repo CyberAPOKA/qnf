@@ -37,6 +37,13 @@ class UserSeeder extends Seeder
             'email' => 'ailon.ribeiro@qnf.com',
             'position' => Position::GOALKEEPER->value,
         ],
+        [
+            'name'  => 'Lucas Fontes',
+            'phone' => '555198611915',
+            'email' => 'lucas.fontes@qnf.com',
+            'position' => Position::GOALKEEPER->value,
+        ],
+
         // Fixos
         [
             'name'  => 'Willian Guilherme',
@@ -152,12 +159,6 @@ class UserSeeder extends Seeder
             'name'  => 'João Vicente',
             'phone' => '555199502165',
             'email' => 'joao.vicente@qnf.com',
-            'position' => Position::WINGER->value,
-        ],
-        [
-            'name'  => 'Lucas Fontes',
-            'phone' => '555198611915',
-            'email' => 'lucas.fontes@qnf.com',
             'position' => Position::WINGER->value,
         ],
         [

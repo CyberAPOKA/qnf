@@ -1,7 +1,9 @@
 <script setup>
-import { computed } from 'vue';
+import { ref, computed } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
+import SecondaryButton from '@/Components/SecondaryButton.vue';
+import ConfirmationModal from '@/Components/ConfirmationModal.vue';
 import GameStatusCard from '@/Components/Game/GameStatusCard.vue';
 import PlayerListCard from '@/Components/Game/PlayerListCard.vue';
 import TeamCard from '@/Components/Game/TeamCard.vue';
@@ -17,12 +19,15 @@ const props = defineProps({
     game: Object,
     current_user_id: Number,
     is_goalkeeper: Boolean,
+    dropped_out: Boolean,
     ranking: Array,
 });
 
 const { store } = useGameChannel(props);
 useDraftRedirect();
 const form = useForm({});
+const quitForm = useForm({});
+const showQuitModal = ref(false);
 
 const joined = computed(() => {
     return !!store.game?.players?.some((player) => player.id === props.current_user_id);
@@ -33,13 +38,26 @@ const linePlayerCount = computed(() => {
 });
 
 const canJoin = computed(() => {
-    if (props.is_goalkeeper) return false;
+    if (props.is_goalkeeper || props.dropped_out) return false;
     return store.game?.status === 'open' && !joined.value && linePlayerCount.value < 12;
+});
+
+const canQuit = computed(() => {
+    return joined.value && ['open', 'full'].includes(store.game?.status);
 });
 
 const joinGame = () => {
     if (!store.game) return;
     form.post(route('games.join', store.game.id), { preserveScroll: true, preserveState: false });
+};
+
+const confirmQuit = () => {
+    if (!store.game) return;
+    quitForm.post(route('games.quit', store.game.id), {
+        preserveScroll: true,
+        preserveState: false,
+        onSuccess: () => { showQuitModal.value = false; },
+    });
 };
 
 const { countdown } = useCountdown(() => store.game?.opens_at);
@@ -53,8 +71,9 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
 
         <div class="p-2 lg:p-4">
             <div class="mx-auto max-w-xl space-y-4">
-                <GameStatusCard v-if="store.game?.status !== 'done'" :status="store.game?.status" :status-label="store.game?.status_label"
-                    :players-count="store.game?.players_count" :round="store.game?.round">
+                <GameStatusCard v-if="store.game?.status !== 'done'" :status="store.game?.status"
+                    :status-label="store.game?.status_label" :players-count="store.game?.players_count"
+                    :round="store.game?.round">
                     <template #actions>
 
                         <div v-if="store.game?.status === 'scheduled'" class="text-center">
@@ -64,10 +83,24 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                             </p>
                         </div>
 
-                        <PrimaryButton v-else v-if="!is_goalkeeper" class="w-full justify-center py-3 text-base"
-                            :disabled="form.processing || !canJoin" @click="joinGame">
-                            Eu quero jogar
-                        </PrimaryButton>
+                        <template v-else-if="!is_goalkeeper">
+                            <p v-if="dropped_out" class="font-medium text-red-600">
+                                Você desistiu desta rodada!
+                                <i class="fa-regular fa-face-sad-tear"></i>
+                            </p>
+
+                            <template v-else>
+                                <PrimaryButton v-if="!joined" class="w-full justify-center py-3 text-base"
+                                    :disabled="form.processing || !canJoin" @click="joinGame">
+                                    Eu quero jogar
+                                </PrimaryButton>
+
+                                <button v-if="canQuit" @click="showQuitModal = true"
+                                    class="w-full rounded-md border border-red-300 bg-white px-4 py-3 text-base font-semibold text-red-600 shadow-sm hover:bg-red-50">
+                                    Eu quero desistir
+                                </button>
+                            </template>
+                        </template>
 
                         <Link v-if="store.game?.status === 'drafting'"
                             class="inline-flex w-full items-center justify-center rounded-md bg-indigo-600 px-4 py-3 text-base font-semibold text-white hover:bg-indigo-700"
@@ -97,5 +130,20 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                 <RankingCard :ranking="ranking || []" />
             </div>
         </div>
+
+        <!-- Modal de confirmação de desistência -->
+        <ConfirmationModal :show="showQuitModal" @close="showQuitModal = false">
+            <template #title>Desistir do jogo</template>
+            <template #content>
+                Tem certeza que deseja desistir? <strong>Você não poderá se inscrever novamente nesta rodada.</strong>
+            </template>
+            <template #footer>
+                <SecondaryButton @click="showQuitModal = false">Cancelar</SecondaryButton>
+                <PrimaryButton class="ms-3 !bg-red-600 hover:!bg-red-500" :disabled="quitForm.processing"
+                    @click="confirmQuit">
+                    Sim, desistir
+                </PrimaryButton>
+            </template>
+        </ConfirmationModal>
     </AppLayout>
 </template>

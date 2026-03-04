@@ -21,10 +21,12 @@ class GamePayload
             'draftPicks.pickedUser',
         ]);
 
+        $activePlayers = $game->gamePlayers->reject(fn ($gp) => $gp->dropped_out);
+
         $captainIds = $game->teams->pluck('captain_user_id')->filter()->values();
         $pickedIds = $game->draftPicks->pluck('picked_user_id')->values();
 
-        $availableUsers = $game->gamePlayers
+        $availableUsers = $activePlayers
             ->map(fn ($item) => $item->user)
             ->filter()
             ->reject(fn ($user) => $captainIds->contains($user->id) || $pickedIds->contains($user->id))
@@ -69,8 +71,8 @@ class GamePayload
             'status_label' => $game->status->label(),
             'opens_at' => optional($game->opens_at)->toIso8601String(),
             'closes_at' => optional($game->closes_at)->toIso8601String(),
-            'players_count' => $game->gamePlayers->count(),
-            'players' => GamePlayerResource::collection($game->gamePlayers->sortBy('joined_at')->values())->resolve(),
+            'players_count' => $activePlayers->count(),
+            'players' => GamePlayerResource::collection($activePlayers->sortBy('joined_at')->values())->resolve(),
             'teams' => $teamsPayload,
             'picks' => DraftPickResource::collection($game->draftPicks->sortBy('id')->values())->resolve(),
             'turn_color' => $turnColor?->value,

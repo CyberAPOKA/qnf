@@ -51,6 +51,12 @@ const logout = () => {
                                 <NavLink :href="route('dashboard')" :active="route().current('dashboard')">
                                     Dashboard
                                 </NavLink>
+                                <NavLink :href="route('statistics')" :active="route().current('statistics')">
+                                    Estatísticas
+                                </NavLink>
+                                <NavLink v-if="$page.props.auth.user.role === 'admin'" :href="route('admin.players')" :active="route().current('admin.players')">
+                                    Jogadores
+                                </NavLink>
                             </div>
                         </div>
 
@@ -193,6 +199,12 @@ const logout = () => {
                     <div class="pt-2 pb-3 space-y-1">
                         <ResponsiveNavLink :href="route('dashboard')" :active="route().current('dashboard')">
                             Dashboard
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink :href="route('statistics')" :active="route().current('statistics')">
+                            Estatísticas
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink v-if="$page.props.auth.user.role === 'admin'" :href="route('admin.players')" :active="route().current('admin.players')">
+                            Jogadores
                         </ResponsiveNavLink>
                     </div>
 

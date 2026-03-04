@@ -4,9 +4,12 @@ namespace App\Http\Controllers;
 
 use App\Enums\GameStatus;
 use App\Enums\Position;
+use App\Enums\TeamColor;
 use App\Events\GamePlayerJoined;
+use App\Models\DraftPick;
 use App\Models\Game;
 use App\Models\GamePlayer;
+use App\Models\Team;
 use App\Models\User;
 use App\Services\DraftService;
 use App\Services\GameService;
@@ -165,6 +168,134 @@ class AdminGameController extends Controller
                 $payload = GamePayload::fromGame($freshGame, $this->draftService);
                 rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
             }
+        }
+
+        return back();
+    }
+
+    public function removeFromTeam(Request $request, Game $game, ScoringService $scoringService): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $validated = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'color' => ['required', Rule::in(TeamColor::values())],
+        ]);
+
+        $userId = $validated['user_id'];
+        $color = $validated['color'];
+
+        DB::transaction(function () use ($game, $userId, $color) {
+            $team = Team::where('game_id', $game->id)->where('color', $color)->first();
+
+            if ($team && $team->captain_user_id === $userId) {
+                $team->update([
+                    'captain_user_id' => null,
+                    'first_pick_user_id' => null,
+                ]);
+            } else {
+                $pick = DraftPick::where('game_id', $game->id)
+                    ->where('team_color', $color)
+                    ->where('picked_user_id', $userId)
+                    ->first();
+
+                if ($pick) {
+                    if ($team && $team->first_pick_user_id === $userId) {
+                        $team->update(['first_pick_user_id' => null]);
+                    }
+                    $pick->delete();
+                }
+            }
+        });
+
+        $hasScores = Team::where('game_id', $game->id)->whereNotNull('score')->exists();
+        if ($hasScores) {
+            $scoringService->calculateAndAssignPoints($game);
+        }
+
+        return back();
+    }
+
+    public function addToTeam(Request $request, Game $game, ScoringService $scoringService): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $validated = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'color' => ['required', Rule::in(TeamColor::values())],
+        ]);
+
+        $userId = $validated['user_id'];
+        $color = $validated['color'];
+
+        $player = User::findOrFail($userId);
+
+        DB::transaction(function () use ($game, $userId, $color, $player) {
+            $isCaptain = Team::where('game_id', $game->id)->where('captain_user_id', $userId)->exists();
+            $isDrafted = DraftPick::where('game_id', $game->id)->where('picked_user_id', $userId)->exists();
+
+            if ($isCaptain || $isDrafted) {
+                throw ValidationException::withMessages(['user_id' => 'Jogador já está em um time.']);
+            }
+
+            $team = Team::where('game_id', $game->id)->where('color', $color)->first();
+
+            // Count current team composition
+            $hasCaptain = $team && $team->captain_user_id;
+            $captainIsGoalkeeper = $hasCaptain
+                ? User::where('id', $team->captain_user_id)->where('position', Position::GOALKEEPER)->exists()
+                : false;
+
+            $draftedGoalkeepers = DraftPick::where('game_id', $game->id)
+                ->where('team_color', $color)
+                ->whereHas('pickedUser', fn ($q) => $q->where('position', Position::GOALKEEPER))
+                ->count();
+
+            $draftedLinePlayers = DraftPick::where('game_id', $game->id)
+                ->where('team_color', $color)
+                ->whereHas('pickedUser', fn ($q) => $q->where('position', '!=', Position::GOALKEEPER))
+                ->count();
+
+            $goalkeeperCount = $draftedGoalkeepers + ($captainIsGoalkeeper ? 1 : 0);
+            $lineCount = $draftedLinePlayers + ($hasCaptain && ! $captainIsGoalkeeper ? 1 : 0);
+            $totalCount = ($hasCaptain ? 1 : 0) + $draftedGoalkeepers + $draftedLinePlayers;
+
+            if ($totalCount >= 5) {
+                throw ValidationException::withMessages(['user_id' => 'O time já está completo (5 jogadores).']);
+            }
+
+            $isGoalkeeper = $player->position === Position::GOALKEEPER;
+
+            if ($isGoalkeeper && $goalkeeperCount >= 1) {
+                throw ValidationException::withMessages(['user_id' => 'O time já tem 1 goleiro.']);
+            }
+
+            if (! $isGoalkeeper && $lineCount >= 4) {
+                throw ValidationException::withMessages(['user_id' => 'O time já tem 4 jogadores de linha.']);
+            }
+
+            if ($team && ! $team->captain_user_id) {
+                $team->update(['captain_user_id' => $userId]);
+            } else {
+                DraftPick::create([
+                    'game_id' => $game->id,
+                    'round' => 99,
+                    'pick_in_round' => 0,
+                    'team_color' => $color,
+                    'picked_user_id' => $userId,
+                    'picked_at' => now(),
+                ]);
+            }
+
+            GamePlayer::firstOrCreate(
+                ['game_id' => $game->id, 'user_id' => $userId],
+                ['joined_at' => now()]
+            );
+        });
+
+        $hasScores = Team::where('game_id', $game->id)->whereNotNull('score')->exists();
+        if ($hasScores) {
+            $scoringService->calculateAndAssignPoints($game);
         }
 
         return back();

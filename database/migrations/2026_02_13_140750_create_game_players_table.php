@@ -18,6 +18,7 @@ return new class extends Migration
     
             $table->timestamp('joined_at');
             $table->unsignedTinyInteger('points')->default(0);
+            $table->boolean('dropped_out')->default(false);
 
             $table->timestamps();
 

@@ -15,12 +15,14 @@ class GamePlayer extends Model
         'user_id',
         'joined_at',
         'points',
+        'dropped_out',
     ];
 
     protected function casts(): array
     {
         return [
             'joined_at' => 'datetime',
+            'dropped_out' => 'boolean',
         ];
     }
 

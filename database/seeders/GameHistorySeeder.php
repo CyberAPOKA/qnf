@@ -317,7 +317,7 @@ class GameHistorySeeder extends Seeder
                 'captain' => '555195002348', // Pedro Pereira ©️
                 'players' => [
                     '555199304836', // Christian Steffens
-                    'guest:Jesse',  // Jesse - convidado
+                    'guest:Jonathan',  // Jonathan - convidado
                     '555196272812', // Daniel
                     'guest:gk:Cristiano', // Cristiano - convidado 🧤
                 ],

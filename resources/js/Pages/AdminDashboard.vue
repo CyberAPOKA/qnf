@@ -77,6 +77,22 @@ const addGuests = () => {
     });
 };
 
+const teamPlayerIds = computed(() => {
+    const teams = store.game?.teams;
+    if (!teams) return new Set();
+    const ids = new Set();
+    for (const color of ['green', 'yellow', 'blue']) {
+        const t = teams[color];
+        if (t?.captain) ids.add(t.captain.id);
+        for (const p of t?.players || []) ids.add(p.id);
+    }
+    return ids;
+});
+
+const availableForTeam = computed(() => {
+    return (props.all_users || []).filter((u) => !teamPlayerIds.value.has(u.id));
+});
+
 </script>
 
 <template>
@@ -174,9 +190,9 @@ const addGuests = () => {
 
                 <template v-if="store.game?.status === 'done'">
                     <div class="grid grid-cols-1 gap-3">
-                        <TeamCard color="green" :team="store.game?.teams?.green" />
-                        <TeamCard color="yellow" :team="store.game?.teams?.yellow" />
-                        <TeamCard color="blue" :team="store.game?.teams?.blue" />
+                        <TeamCard color="green" :team="store.game?.teams?.green" editable :game-id="store.game?.id" :available-players="availableForTeam" />
+                        <TeamCard color="yellow" :team="store.game?.teams?.yellow" editable :game-id="store.game?.id" :available-players="availableForTeam" />
+                        <TeamCard color="blue" :team="store.game?.teams?.blue" editable :game-id="store.game?.id" :available-players="availableForTeam" />
                     </div>
                     <ScoreEntryCard :game-id="store.game.id" :teams="store.game.teams" />
                     <WhatsAppCard :message="store.game?.whatsapp_message || ''" />
