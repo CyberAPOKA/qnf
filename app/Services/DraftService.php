@@ -15,6 +15,7 @@ use App\Models\User;
 use App\Support\GamePayload;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class DraftService
@@ -43,17 +44,25 @@ class DraftService
             ]);
         }
 
-        // Sorteia 3 jogadores de linha para serem capitães, garantindo que sejam diferentes dos goleiros e convidados
-        $candidates = $game->players()
-            ->where('position', '!=', Position::GOALKEEPER)
-            ->where('guest', false)
-            ->inRandomOrder()
-            ->take(3)
-            ->get();
+        $previousGame = Game::where('id', '<', $game->id)->orderByDesc('id')->first();
+
+        $previousCaptainIds = $previousGame
+            ? Team::where('game_id', $previousGame->id)->whereNotNull('captain_user_id')->pluck('captain_user_id')->values()
+            : collect();
+
+        $query = $game->players()
+            ->where('users.position', '!=', Position::GOALKEEPER)
+            ->where('users.guest', false);
+
+        if ($previousCaptainIds->isNotEmpty()) {
+            $query->whereNotIn('users.id', $previousCaptainIds);
+        }
+
+        $candidates = $query->inRandomOrder()->take(3)->get();
 
         if ($candidates->count() < 3) {
             throw ValidationException::withMessages([
-                'captains' => 'Não há jogadores de linha suficientes para sortear 3 capitães.',
+                'captains' => 'Não há jogadores elegíveis suficientes sem repetir capitães do jogo anterior.',
             ]);
         }
 
