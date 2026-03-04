@@ -103,8 +103,8 @@ const availableForTeam = computed(() => {
 
         <div class="p-2 lg:p-4">
             <div class="mx-auto max-w-xl space-y-4">
-                <GameStatusCard :status="store.game?.status" :status-label="store.game?.status_label" :players-count="store.game?.players_count"
-                    :round="store.game?.round">
+                <GameStatusCard :status="store.game?.status" :status-label="store.game?.status_label"
+                    :players-count="store.game?.players_count" :round="store.game?.round">
                     <template #details>
                         <div class="mt-1 text-sm text-gray-500">
                             Linha: <span class="font-semibold">{{ linePlayerCount }}/12</span>
@@ -186,13 +186,16 @@ const availableForTeam = computed(() => {
                     </div>
                 </div>
 
-                <PlayerListCard :players="store.game?.players || []" />
+                <PlayerListCard v-if="store.game?.status !== 'done'" :players="store.game?.players || []" />
 
                 <template v-if="store.game?.status === 'done'">
                     <div class="grid grid-cols-1 gap-3">
-                        <TeamCard color="green" :team="store.game?.teams?.green" editable :game-id="store.game?.id" :available-players="availableForTeam" />
-                        <TeamCard color="yellow" :team="store.game?.teams?.yellow" editable :game-id="store.game?.id" :available-players="availableForTeam" />
-                        <TeamCard color="blue" :team="store.game?.teams?.blue" editable :game-id="store.game?.id" :available-players="availableForTeam" />
+                        <TeamCard color="green" :team="store.game?.teams?.green" editable :game-id="store.game?.id"
+                            :available-players="availableForTeam" />
+                        <TeamCard color="yellow" :team="store.game?.teams?.yellow" editable :game-id="store.game?.id"
+                            :available-players="availableForTeam" />
+                        <TeamCard color="blue" :team="store.game?.teams?.blue" editable :game-id="store.game?.id"
+                            :available-players="availableForTeam" />
                     </div>
                     <ScoreEntryCard :game-id="store.game.id" :teams="store.game.teams" />
                     <WhatsAppCard :message="store.game?.whatsapp_message || ''" />

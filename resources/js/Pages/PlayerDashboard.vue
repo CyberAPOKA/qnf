@@ -71,7 +71,7 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
 
         <div class="p-2 lg:p-4">
             <div class="mx-auto max-w-xl space-y-4">
-                <GameStatusCard v-if="store.game?.status !== 'done'" :status="store.game?.status"
+                <GameStatusCard :status="store.game?.status"
                     :status-label="store.game?.status_label" :players-count="store.game?.players_count"
                     :round="store.game?.round">
                     <template #actions>

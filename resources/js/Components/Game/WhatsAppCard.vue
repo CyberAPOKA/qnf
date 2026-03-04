@@ -1,6 +1,7 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed } from 'vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
+import { useClipboard } from '@/composables/useClipboard';
 
 const props = defineProps({
     message: {
@@ -9,35 +10,14 @@ const props = defineProps({
     },
 });
 
+const { label: copyLabel, copy } = useClipboard();
+
 const whatsappLink = computed(() => {
     if (!props.message) return '#';
     return `https://api.whatsapp.com/send?text=${encodeURIComponent(props.message)}`;
 });
 
-const copyLabel = ref('Copiar');
-
-const copyMessage = async () => {
-    if (!props.message) return;
-    try {
-        if (navigator.clipboard && window.isSecureContext) {
-            await navigator.clipboard.writeText(props.message);
-        } else {
-            const textarea = document.createElement('textarea');
-            textarea.value = props.message;
-            textarea.style.position = 'fixed';
-            textarea.style.left = '-9999px';
-            document.body.appendChild(textarea);
-            textarea.select();
-            document.execCommand('copy');
-            document.body.removeChild(textarea);
-        }
-        copyLabel.value = 'Copiado!';
-        setTimeout(() => { copyLabel.value = 'Copiar'; }, 2000);
-    } catch {
-        copyLabel.value = 'Erro ao copiar';
-        setTimeout(() => { copyLabel.value = 'Copiar'; }, 2000);
-    }
-};
+const copyMessage = () => copy(props.message);
 </script>
 
 <template>

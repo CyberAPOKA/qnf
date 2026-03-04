@@ -115,7 +115,7 @@ class AdminGameController extends Controller
         return back();
     }
 
-    public function storeGuest(Request $request, Game $game): RedirectResponse
+    public function storeGuest(Request $request, Game $game, ScoringService $scoringService): RedirectResponse
     {
         abort_unless($request->user()->role === 'admin', 403);
 
@@ -123,6 +123,7 @@ class AdminGameController extends Controller
             'name' => ['required', 'string', 'max:255'],
             'position' => ['required', Rule::in(Position::values())],
             'enroll' => ['boolean'],
+            'team_color' => ['nullable', Rule::in(TeamColor::values())],
         ]);
 
         $guest = User::create([
@@ -135,7 +136,36 @@ class AdminGameController extends Controller
             'password' => Hash::make(Str::random(16)),
         ]);
 
-        if ($validated['enroll'] ?? false) {
+        $teamColor = $validated['team_color'] ?? null;
+
+        if ($teamColor) {
+            DB::transaction(function () use ($game, $guest, $teamColor) {
+                $team = Team::where('game_id', $game->id)->where('color', $teamColor)->first();
+
+                if ($team && ! $team->captain_user_id) {
+                    $team->update(['captain_user_id' => $guest->id]);
+                } else {
+                    DraftPick::create([
+                        'game_id' => $game->id,
+                        'round' => 99,
+                        'pick_in_round' => 0,
+                        'team_color' => $teamColor,
+                        'picked_user_id' => $guest->id,
+                        'picked_at' => now(),
+                    ]);
+                }
+
+                GamePlayer::firstOrCreate(
+                    ['game_id' => $game->id, 'user_id' => $guest->id],
+                    ['joined_at' => now()]
+                );
+            });
+
+            $hasScores = Team::where('game_id', $game->id)->whereNotNull('score')->exists();
+            if ($hasScores) {
+                $scoringService->calculateAndAssignPoints($game);
+            }
+        } elseif ($validated['enroll'] ?? false) {
             DB::transaction(function () use ($game, $guest) {
                 $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
 

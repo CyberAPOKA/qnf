@@ -2,6 +2,8 @@
 import { ref, computed } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import Select from 'primevue/select';
+import AddGuestModal from '@/Components/Game/AddGuestModal.vue';
+import Button from 'primevue/button';
 
 const props = defineProps({
     color: {
@@ -120,6 +122,15 @@ const filteredPlayers = computed(() => {
 const selectedPlayer = ref(null);
 const removeForm = useForm({ user_id: null, color: '' });
 const addForm = useForm({ user_id: '', color: '' });
+const guestModal = ref(null);
+
+const allowedGuestPositions = computed(() => {
+    if (isFull.value) return [];
+    const positions = [];
+    if (needsGoalkeeper.value) positions.push('goalkeeper');
+    if (needsLine.value) positions.push('fixed', 'winger', 'pivot');
+    return positions;
+});
 
 const removeMember = (userId) => {
     if (!props.gameId) return;
@@ -154,8 +165,7 @@ const addMember = () => {
                 <i class="fa-solid fa-circle text-[12px]" :class="config.dot"></i>
                 <span class="text-base font-bold">{{ member.name }}</span>
                 <i v-if="member.badgeIcon" :class="[member.badgeIcon, member.badgeClass]"></i>
-                <button v-if="editable" @click="removeMember(member.id)"
-                    :disabled="removeForm.processing"
+                <button v-if="editable" @click="removeMember(member.id)" :disabled="removeForm.processing"
                     class="ml-auto rounded p-1 text-red-500 hover:bg-red-100 hover:text-red-700 transition">
                     <i class="fa-solid fa-xmark text-sm"></i>
                 </button>
@@ -179,5 +189,13 @@ const addMember = () => {
                 <i class="fa-solid fa-plus"></i>
             </button>
         </div>
+
+        <Button v-if="editable && !isFull && allowedGuestPositions.length" @click="guestModal?.open(color)"
+            class="w-full mt-2" severity="contrast">
+            <i class="fa-solid fa-user-plus mr-1"></i>
+            Criar convidado
+        </Button>
+
+        <AddGuestModal ref="guestModal" :game-id="gameId" team-mode :allowed-positions="allowedGuestPositions" />
     </div>
 </template>

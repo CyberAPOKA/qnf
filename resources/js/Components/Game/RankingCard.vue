@@ -2,6 +2,7 @@
 import { computed } from 'vue';
 import DataTable from '@/Components/DataTable.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
+import { useClipboard } from '@/composables/useClipboard';
 
 const props = defineProps({
     ranking: {
@@ -78,11 +79,40 @@ const goalkeeperColumns = [
     { key: 'total_points', label: 'Pontos', align: 'center', class: 'font-bold text-lg text-gray-900' },
     { key: 'games_played', label: 'Jogos', align: 'center', class: 'font-bold text-lg text-gray-900' },
 ];
+
+// --- Ranking WhatsApp message ---
+
+const medalEmojis = { gold: '🥇', silver: '🥈', bronze: '🥉' };
+
+const rankingMessage = computed(() => {
+    const eligible = linePlayers.value.filter((p) => p.total_points >= 1);
+    if (!eligible.length) return '';
+
+    const lines = ['👑 REI DA QUADRA 2026', ''];
+
+    for (const player of eligible) {
+        const medal = player.medal ? medalEmojis[player.medal] : '🔘';
+        const stars = '⭐️'.repeat(player.total_points);
+        lines.push(`${medal} ${player.name} (${player.games_played}p) ${stars}`);
+    }
+
+    return lines.join('\n');
+});
+
+const { label: copyRankingLabel, copy: copyRanking } = useClipboard();
+const copyRankingMessage = () => copyRanking(rankingMessage.value);
 </script>
 
 <template>
     <div class="rounded-xl bg-white p-2 lg:p-4 shadow">
-        <h3 class="mb-3 text-base font-semibold text-gray-900">Ranking - Linha</h3>
+        <div class="mb-3 flex items-center justify-between">
+            <h3 class="text-base font-semibold text-gray-900">Ranking - Linha</h3>
+            <button v-if="rankingMessage" @click="copyRankingMessage"
+                class="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition">
+                <i class="fa-brands fa-whatsapp mr-1"></i>
+                {{ copyRankingLabel }}
+            </button>
+        </div>
         <DataTable :columns="lineColumns" :rows="linePlayers" :row-class="lineRowClass"
             empty-message="Nenhum jogo finalizado ainda.">
             <template #cell-rank="{ row }">
