@@ -59,11 +59,10 @@ class AdminGameController extends Controller
             $toInsert = $newIds->take($slotsLeft);
 
             foreach ($toInsert as $userId) {
-                GamePlayer::create([
-                    'game_id' => $lockedGame->id,
-                    'user_id' => $userId,
-                    'joined_at' => now(),
-                ]);
+                GamePlayer::updateOrCreate(
+                    ['game_id' => $lockedGame->id, 'user_id' => $userId],
+                    ['joined_at' => now(), 'dropped_out' => false],
+                );
             }
 
             $totalAfter = count($existing) + $toInsert->count();
