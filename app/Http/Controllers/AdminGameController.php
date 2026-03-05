@@ -333,6 +333,40 @@ class AdminGameController extends Controller
         return back();
     }
 
+    public function removePlayer(Request $request, Game $game): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $validated = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+        ]);
+
+        DB::transaction(function () use ($game, $validated): void {
+            $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
+
+            if (! in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL])) {
+                throw ValidationException::withMessages(['remove' => 'Não é possível remover jogadores neste momento.']);
+            }
+
+            $gamePlayer = GamePlayer::where('game_id', $lockedGame->id)
+                ->where('user_id', $validated['user_id'])
+                ->where('dropped_out', false)
+                ->firstOrFail();
+
+            $gamePlayer->update(['dropped_out' => true]);
+
+            if ($lockedGame->status === GameStatus::FULL) {
+                $lockedGame->update(['status' => GameStatus::OPEN]);
+            }
+        });
+
+        $freshGame = Game::findOrFail($game->id);
+        $payload = GamePayload::fromGame($freshGame, $this->draftService);
+        rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
+
+        return back();
+    }
+
     public function saveScores(Request $request, Game $game, ScoringService $scoringService): RedirectResponse
     {
         abort_unless($request->user()->role === 'admin', 403);

@@ -186,7 +186,8 @@ const availableForTeam = computed(() => {
                     </div>
                 </div>
 
-                <PlayerListCard v-if="store.game?.status !== 'done'" :players="store.game?.players || []" />
+                <PlayerListCard v-if="store.game?.status !== 'done'" :players="store.game?.players || []"
+                    :game-id="store.game?.id" editable />
 
                 <template v-if="store.game?.status === 'done'">
                     <div class="grid grid-cols-1 gap-3">
