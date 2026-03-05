@@ -100,6 +100,7 @@ class GameController extends Controller
                 }
 
                 $linePlayerCount = GamePlayer::where('game_id', $lockedGame->id)
+                    ->where('dropped_out', false)
                     ->whereHas('user', fn ($q) => $q->where('position', '!=', Position::GOALKEEPER))
                     ->count();
 
@@ -113,7 +114,7 @@ class GameController extends Controller
                     'joined_at' => now(),
                 ]);
 
-                $countAfter = GamePlayer::where('game_id', $lockedGame->id)->count();
+                $countAfter = GamePlayer::where('game_id', $lockedGame->id)->where('dropped_out', false)->count();
                 if ($countAfter >= 15) {
                     $lockedGame->update(['status' => GameStatus::FULL]);
                 }
@@ -150,6 +151,10 @@ class GameController extends Controller
                     ->firstOrFail();
 
                 $gamePlayer->update(['dropped_out' => true]);
+
+                if ($lockedGame->status === GameStatus::FULL) {
+                    $lockedGame->update(['status' => GameStatus::OPEN]);
+                }
             });
         } catch (ValidationException $exception) {
             return back()->withErrors($exception->errors());

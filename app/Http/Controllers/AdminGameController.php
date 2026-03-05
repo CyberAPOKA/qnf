@@ -47,6 +47,7 @@ class AdminGameController extends Controller
             }
 
             $existing = GamePlayer::where('game_id', $lockedGame->id)
+                ->where('dropped_out', false)
                 ->pluck('user_id')
                 ->toArray();
 
@@ -68,6 +69,7 @@ class AdminGameController extends Controller
             $totalAfter = count($existing) + $toInsert->count();
             if ($totalAfter >= 15 && in_array($lockedGame->status, [GameStatus::SCHEDULED, GameStatus::OPEN])) {
                 $goalkeeperCount = GamePlayer::where('game_id', $lockedGame->id)
+                    ->where('dropped_out', false)
                     ->whereHas('user', fn ($q) => $q->where('position', Position::GOALKEEPER))
                     ->count();
 
@@ -173,7 +175,7 @@ class AdminGameController extends Controller
                     throw ValidationException::withMessages(['guest' => 'A lista não permite mais inscrições.']);
                 }
 
-                $count = GamePlayer::where('game_id', $lockedGame->id)->count();
+                $count = GamePlayer::where('game_id', $lockedGame->id)->where('dropped_out', false)->count();
                 if ($count >= 15) {
                     throw ValidationException::withMessages(['guest' => 'A lista já está cheia.']);
                 }
