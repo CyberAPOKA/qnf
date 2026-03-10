@@ -36,6 +36,7 @@ return [
     ],
 
     'whatsapp' => [
+        'active' => env('WHATSAPP_ACTIVE', false),
         'url' => env('WHATSAPP_SERVICE_URL', 'http://127.0.0.1:3001'),
         'group_id' => env('WHATSAPP_GROUP_ID'),
     ],
@@ -47,7 +48,6 @@ return [
     'mercadopago' => [
         'access_token' => env('MERCADOPAGO_ACCESS_TOKEN'),
         'webhook_url' => env('MERCADOPAGO_WEBHOOK_URL'),
-        'payer_email' => env('MERCADOPAGO_PAYER_EMAIL', 'pagamento@qnf.com.br'),
     ],
 
 ];

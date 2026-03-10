@@ -21,9 +21,10 @@ class MercadoPagoService
      *
      * @return array{id: int, qr_code: string, qr_code_base64: string}
      */
-    public function createPixPayment(int $amountCents, string $description, string $externalReference): array
+    public function createPixPayment(int $amountCents, string $description, string $externalReference, string $payerEmail = ''): array
     {
         $amount = $amountCents / 100;
+        $email = $payerEmail ?: 'academiaportodefutsal@gmail.com';
 
         $response = Http::withToken($this->accessToken)
             ->withHeaders(['X-Idempotency-Key' => $externalReference])
@@ -32,7 +33,7 @@ class MercadoPagoService
                 'description' => $description,
                 'payment_method_id' => 'pix',
                 'payer' => [
-                    'email' => config('services.mercadopago.payer_email', 'academiaportodefutsal@gmail.com'),
+                    'email' => $email,
                 ],
                 'external_reference' => $externalReference,
                 'notification_url' => config('services.mercadopago.webhook_url'),

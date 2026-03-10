@@ -7,17 +7,23 @@ use Illuminate\Support\Facades\Log;
 
 class WhatsAppService
 {
+    private bool $active;
     private string $serviceUrl;
     private ?string $groupId;
 
     public function __construct()
     {
+        $this->active = (bool) config('services.whatsapp.active', false);
         $this->serviceUrl = config('services.whatsapp.url', 'http://127.0.0.1:3001');
         $this->groupId = config('services.whatsapp.group_id');
     }
 
     public function sendToGroup(string $message): bool
     {
+        if (! $this->active) {
+            return false;
+        }
+
         if (! $this->groupId) {
             Log::warning('WhatsApp group ID not configured.');
             return false;
@@ -28,6 +34,10 @@ class WhatsAppService
 
     public function sendToPhone(string $phone, string $message): bool
     {
+        if (! $this->active) {
+            return false;
+        }
+
         $chatId = preg_replace('/\D/', '', $phone) . '@c.us';
 
         return $this->send($chatId, $message);

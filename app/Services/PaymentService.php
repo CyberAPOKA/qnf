@@ -46,6 +46,7 @@ class PaymentService
                     $amount,
                     "QNF Futsal - Rodada {$game->round}",
                     $externalRef,
+                    $player->email,
                 );
 
                 Payment::create([
