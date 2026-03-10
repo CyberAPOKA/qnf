@@ -17,12 +17,12 @@ defineProps({
             Rodada {{ round }}
             <i class="fa-regular fa-gem text-2xl round-ice"></i>
         </p>
-        <p v-if="status !== 'scheduled' && status !== 'done'" class="mt-2 text-sm text-gray-700">
+        <p v-if="!['scheduled', 'drafted', 'done'].includes(status)" class="mt-2 text-sm text-gray-700">
             Inscritos: <span class="font-semibold">{{ playersCount }}/15</span>
         </p>
-        <slot name="details" v-if="status !== 'done'" />
+        <slot name="details" v-if="!['drafted', 'done'].includes(status)" />
 
-        <div class="mt-2 space-y-2" v-if="status !== 'done'">
+        <div class="mt-2 space-y-2" v-if="!['drafted', 'done'].includes(status)">
             <slot name="actions" />
         </div>
 

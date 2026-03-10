@@ -1,6 +1,6 @@
 <script setup>
-import { ref } from 'vue';
-import { Head, Link, router } from '@inertiajs/vue3';
+import { ref, computed } from 'vue';
+import { Head, Link, router, usePage } from '@inertiajs/vue3';
 import ApplicationMark from '@/Components/ApplicationMark.vue';
 import Banner from '@/Components/Banner.vue';
 import Dropdown from '@/Components/Dropdown.vue';
@@ -25,6 +25,15 @@ const switchToTeam = (team) => {
 const logout = () => {
     router.post(route('logout'));
 };
+
+const suspension = computed(() => usePage().props.suspension);
+
+const suspensionMessage = computed(() => {
+    const s = suspension.value;
+    if (!s || s.suspended_until_round === null) return null;
+    if (s.suspended_until_round === 0) return 'Suspenso permanentemente';
+    return `Suspenso até a Rodada ${s.suspended_until_round}`;
+});
 </script>
 
 <template>
@@ -32,6 +41,10 @@ const logout = () => {
         <Head :title="title" />
 
         <Banner />
+
+        <div v-if="suspensionMessage" class="bg-red-600 text-white text-center py-2 px-4 text-sm font-semibold">
+            {{ suspensionMessage }}
+        </div>
 
         <div class="min-h-screen bg-gray-100">
             <nav class="bg-white border-b border-gray-100">

@@ -70,6 +70,7 @@ const lineColumns = [
     { key: 'name', label: 'Jogador', class: 'font-bold text-lg text-gray-900' },
     { key: 'total_points', label: 'Pontos', align: 'center', class: 'font-bold text-lg text-gray-900' },
     { key: 'games_played', label: 'Jogos', align: 'center', class: 'font-bold text-lg text-gray-900' },
+    { key: 'rank_change', label: '', align: 'center' },
     // { key: 'win_streak', label: 'Sequência', align: 'center', class: 'font-bold text-lg text-gray-900' },
 ];
 
@@ -78,6 +79,7 @@ const goalkeeperColumns = [
     { key: 'name', label: 'Jogador', class: 'font-bold text-lg text-gray-900' },
     { key: 'total_points', label: 'Pontos', align: 'center', class: 'font-bold text-lg text-gray-900' },
     { key: 'games_played', label: 'Jogos', align: 'center', class: 'font-bold text-lg text-gray-900' },
+    { key: 'rank_change', label: '', align: 'center' },
 ];
 
 // --- Ranking WhatsApp message ---
@@ -129,6 +131,20 @@ const copyRankingMessage = () => copyRanking(rankingMessage.value);
                     <PositionBadge :position="row.position" :label="positionLabels[row.position] || row.position" />
                 </div>
             </template>
+            <template #cell-rank_change="{ row }">
+                <span v-if="row.rank_change === null" class="text-xs text-blue-500 font-semibold">NOVO</span>
+                <span v-else-if="row.rank_change > 0" class="text-green-600 flex items-center justify-center gap-0.5">
+                    <i class="fa-solid fa-circle-up"></i>
+                    <span class="text-xs font-bold">{{ row.rank_change }}</span>
+                </span>
+                <span v-else-if="row.rank_change < 0" class="text-red-500 flex items-center justify-center gap-0.5">
+                    <i class="fa-solid fa-circle-down"></i>
+                    <span class="text-xs font-bold">{{ Math.abs(row.rank_change) }}</span>
+                </span>
+                <span v-else class="text-gray-400">
+                    <i class="fa-solid fa-circle-minus"></i>
+                </span>
+            </template>
         </DataTable>
     </div>
 
@@ -144,6 +160,20 @@ const copyRankingMessage = () => copyRanking(rankingMessage.value);
                     <span class="font-medium text-gray-900">{{ row.name }}</span>
                     <PositionBadge :position="row.position" :label="positionLabels[row.position] || row.position" />
                 </div>
+            </template>
+            <template #cell-rank_change="{ row }">
+                <span v-if="row.rank_change === null" class="text-xs text-blue-500 font-semibold">NOVO</span>
+                <span v-else-if="row.rank_change > 0" class="text-green-600 flex items-center justify-center gap-0.5">
+                    <i class="fa-solid fa-circle-up"></i>
+                    <span class="text-xs font-bold">{{ row.rank_change }}</span>
+                </span>
+                <span v-else-if="row.rank_change < 0" class="text-red-500 flex items-center justify-center gap-0.5">
+                    <i class="fa-solid fa-circle-down"></i>
+                    <span class="text-xs font-bold">{{ Math.abs(row.rank_change) }}</span>
+                </span>
+                <span v-else class="text-gray-400">
+                    <i class="fa-solid fa-circle-minus"></i>
+                </span>
             </template>
         </DataTable>
     </div>

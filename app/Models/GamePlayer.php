@@ -14,6 +14,7 @@ class GamePlayer extends Model
         'game_id',
         'user_id',
         'joined_at',
+        'waitlist_at',
         'points',
         'dropped_out',
     ];
@@ -22,6 +23,7 @@ class GamePlayer extends Model
     {
         return [
             'joined_at' => 'datetime',
+            'waitlist_at' => 'datetime',
             'dropped_out' => 'boolean',
         ];
     }

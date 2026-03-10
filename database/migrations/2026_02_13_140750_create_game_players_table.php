@@ -15,8 +15,9 @@ return new class extends Migration
             $table->id();
             $table->unsignedBigInteger('game_id')->foreign('game_id')->references('id')->on('games')->cascadeOnDelete();
             $table->unsignedBigInteger('user_id')->foreign('user_id')->references('id')->on('users')->cascadeOnDelete();
-    
+
             $table->timestamp('joined_at');
+            $table->timestamp('waitlist_at')->nullable();
             $table->unsignedTinyInteger('points')->default(0);
             $table->boolean('dropped_out')->default(false);
 

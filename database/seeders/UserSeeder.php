@@ -153,7 +153,7 @@ class UserSeeder extends Seeder
             'name'  => 'Gustavo Mendes',
             'phone' => '555196304074',
             'email' => 'gustavo.mendes@qnf.com',
-            'position' => Position::WINGER->value,
+            'position' => Position::FIXED->value,
         ],
         [
             'name'  => 'João Vicente',

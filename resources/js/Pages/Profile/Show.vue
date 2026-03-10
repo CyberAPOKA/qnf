@@ -3,6 +3,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import SectionBorder from '@/Components/SectionBorder.vue';
 import UpdatePasswordForm from '@/Pages/Profile/Partials/UpdatePasswordForm.vue';
 import UpdatePositionForm from '@/Pages/Profile/Partials/UpdatePositionForm.vue';
+import UpdateWhatsAppNotificationsForm from '@/Pages/Profile/Partials/UpdateWhatsAppNotificationsForm.vue';
 
 defineProps({
     confirmsTwoFactorAuthentication: Boolean,
@@ -19,11 +20,17 @@ defineProps({
         </template>
 
         <div>
-            <div class="max-w-7xl mx-auto py-10 sm:px-6 lg:px-8">
+            <div class="max-w-7xl mx-auto py-10 sm:px-6 lg:px-8 space-y-10 sm:space-y-0">
                 <UpdatePositionForm />
 
+                <SectionBorder />
+
+                <UpdateWhatsAppNotificationsForm />
+
+                <SectionBorder />
+
                 <div v-if="$page.props.jetstream.canUpdatePassword">
-                    <UpdatePasswordForm class="mt-10 sm:mt-0" />
+                    <UpdatePasswordForm />
 
                     <SectionBorder />
                 </div>

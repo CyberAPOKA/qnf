@@ -13,6 +13,7 @@ import ScoreEntryCard from '@/Components/Game/ScoreEntryCard.vue';
 import RankingCard from '@/Components/Game/RankingCard.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
 import { Link, useForm } from '@inertiajs/vue3';
+import axios from 'axios';
 
 import { useGameChannel } from '@/composables/useGameChannel';
 import { useDraftRedirect } from '@/composables/useDraftRedirect';
@@ -92,6 +93,27 @@ const teamPlayerIds = computed(() => {
 const availableForTeam = computed(() => {
     return (props.all_users || []).filter((u) => !teamPlayerIds.value.has(u.id));
 });
+
+const whatsappTestLabel = ref('Teste WhatsApp');
+const whatsappTesting = ref(false);
+
+const sendWhatsAppTest = async () => {
+    if (whatsappTesting.value) return;
+    whatsappTesting.value = true;
+    whatsappTestLabel.value = 'Enviando...';
+    try {
+        await axios.post(route('api.whatsapp.send-test'));
+        whatsappTestLabel.value = 'Enviado!';
+    } catch (e) {
+        const msg = e.response?.data?.error || 'Erro';
+        whatsappTestLabel.value = msg;
+    } finally {
+        setTimeout(() => {
+            whatsappTestLabel.value = 'Teste WhatsApp';
+            whatsappTesting.value = false;
+        }, 3000);
+    }
+};
 
 </script>
 
@@ -186,10 +208,10 @@ const availableForTeam = computed(() => {
                     </div>
                 </div>
 
-                <PlayerListCard v-if="store.game?.status !== 'done'" :players="store.game?.players || []"
+                <PlayerListCard v-if="!['drafted', 'done'].includes(store.game?.status)" :players="store.game?.players || []"
                     :game-id="store.game?.id" editable />
 
-                <template v-if="store.game?.status === 'done'">
+                <template v-if="['drafted', 'done'].includes(store.game?.status)">
                     <div class="grid grid-cols-1 gap-3">
                         <TeamCard color="green" :team="store.game?.teams?.green" editable :game-id="store.game?.id"
                             :available-players="availableForTeam" />
@@ -199,10 +221,17 @@ const availableForTeam = computed(() => {
                             :available-players="availableForTeam" />
                     </div>
                     <ScoreEntryCard :game-id="store.game.id" :teams="store.game.teams" />
-                    <WhatsAppCard :message="store.game?.whatsapp_message || ''" />
                 </template>
 
                 <RankingCard :ranking="ranking || []" />
+
+                <div class="flex justify-center">
+                    <button @click="sendWhatsAppTest" :disabled="whatsappTesting"
+                        class="rounded-md bg-green-600 px-4 py-2 text-sm font-semibold text-white hover:bg-green-700 disabled:opacity-50 transition">
+                        <i class="fa-brands fa-whatsapp mr-1.5"></i>
+                        {{ whatsappTestLabel }}
+                    </button>
+                </div>
             </div>
         </div>
 

@@ -341,6 +341,39 @@ class GameHistorySeeder extends Seeder
                 ],
             ],
         ],
+
+        // ─── RODADA 09 ────────────────────────────────────
+        [
+            'date'   => '2026-03-13',
+            'scores' => ['green' => 3, 'yellow' => 0, 'blue' => 5],
+            'green'  => [
+                'captain' => '555198407569', // Bryan Larruscain ©️
+                'players' => [
+                    '555193103772', // Isaque 🔟
+                    'guest:Erick Pulga', // Erick Pulga
+                    '555196272812', // Daniel
+                    'guest:gk:Motta', // Motta 🧤
+                ],
+            ],
+            'yellow' => [
+                'captain' => '555196705353', // Vitor ©️
+                'players' => [
+                    '555199304836', // Christian Steffens 🔟
+                    '555196819002', // Brayan Dorneles
+                    '555199502165', // João Vicente
+                    'guest:gk:Cristiano', // Cristiano 🧤
+                ],
+            ],
+            'blue'   => [
+                'captain' => '555199113865', // Guto Cenci ©️
+                'players' => [
+                    '555199329888', // Jair 🔟
+                    '555196304074', // Gustavo Mendes
+                    '555199885564', // Roth
+                    '555198249498', // Mateus Nogueira 🧤
+                ],
+            ],
+        ],
     ];
 
     public function run(): void

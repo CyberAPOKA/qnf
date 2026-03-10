@@ -8,6 +8,7 @@ enum GameStatus: string
     case OPEN = 'open';
     case FULL = 'full';
     case DRAFTING = 'drafting';
+    case DRAFTED = 'drafted';
     case DONE = 'done';
 
     public static function values(): array
@@ -22,6 +23,7 @@ enum GameStatus: string
             self::OPEN->value => 'Aberto',
             self::FULL->value => 'Lotado',
             self::DRAFTING->value => 'Draft',
+            self::DRAFTED->value => 'Aguardando Jogo',
             self::DONE->value => 'Finalizado',
         ];
     }

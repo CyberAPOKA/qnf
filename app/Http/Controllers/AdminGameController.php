@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\DraftService;
 use App\Services\GameService;
 use App\Services\ScoringService;
+use App\Services\WaitlistService;
 use App\Support\GamePayload;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -28,6 +29,7 @@ class AdminGameController extends Controller
     public function __construct(
         private readonly DraftService $draftService,
         private readonly GameService $gameService,
+        private readonly WaitlistService $waitlistService,
     ) {}
 
     public function addPlayers(Request $request, Game $game): RedirectResponse
@@ -343,7 +345,7 @@ class AdminGameController extends Controller
         DB::transaction(function () use ($game, $validated): void {
             $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
 
-            if (! in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL])) {
+            if (! in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL, GameStatus::DRAFTED])) {
                 throw ValidationException::withMessages(['remove' => 'Não é possível remover jogadores neste momento.']);
             }
 
@@ -352,10 +354,14 @@ class AdminGameController extends Controller
                 ->where('dropped_out', false)
                 ->firstOrFail();
 
-            $gamePlayer->update(['dropped_out' => true]);
+            $gamePlayer->update(['dropped_out' => true, 'waitlist_at' => null]);
 
             if ($lockedGame->status === GameStatus::FULL) {
                 $lockedGame->update(['status' => GameStatus::OPEN]);
+            }
+
+            if ($lockedGame->status === GameStatus::DRAFTED) {
+                $this->waitlistService->promoteFromWaitlist($lockedGame, (int) $validated['user_id']);
             }
         });
 

@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\GameStatus;
 use App\Enums\Position;
+use App\Models\Game;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -29,12 +31,18 @@ class AdminPlayerController extends Controller
                 'position_label' => $user->position->label(),
                 'guest' => $user->guest,
                 'active' => $user->active,
+                'suspended_until_round' => $user->suspended_until_round,
                 'photo_front' => $user->photo_front ? Storage::url($user->photo_front) : null,
                 'photo_side' => $user->photo_side ? Storage::url($user->photo_side) : null,
             ]);
 
+        $doneGames = Game::where('status', GameStatus::DONE)
+            ->orderByDesc('round')
+            ->get(['id', 'round']);
+
         return Inertia::render('AdminPlayers', [
             'players' => $players,
+            'done_games' => $doneGames,
         ]);
     }
 
@@ -112,6 +120,75 @@ class AdminPlayerController extends Controller
         }
 
         $user->save();
+
+        return back();
+    }
+
+    public function convertGuest(Request $request, User $user): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+        abort_unless($user->guest, 404);
+
+        $validated = $request->validate([
+            'name' => ['required', 'string', 'max:255'],
+            'phone' => ['required', 'string', 'max:20', Rule::unique('users', 'phone')->ignore($user->id)],
+            'position' => ['required', Rule::in(Position::values())],
+            'photo_front' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
+            'photo_side' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
+        ]);
+
+        $user->fill([
+            'name' => $validated['name'],
+            'phone' => $validated['phone'],
+            'email' => $validated['phone'].'@player.local',
+            'position' => $validated['position'],
+            'guest' => false,
+            'password' => Hash::make('qnf'),
+        ]);
+
+        if ($request->hasFile('photo_front')) {
+            if ($user->photo_front) {
+                Storage::disk('public')->delete($user->photo_front);
+            }
+            $user->photo_front = $request->file('photo_front')->store('players', 'public');
+        }
+
+        if ($request->hasFile('photo_side')) {
+            if ($user->photo_side) {
+                Storage::disk('public')->delete($user->photo_side);
+            }
+            $user->photo_side = $request->file('photo_side')->store('players', 'public');
+        }
+
+        $user->save();
+
+        return back();
+    }
+
+    public function suspend(Request $request, User $user): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $validated = $request->validate([
+            'round' => ['required', 'integer', 'min:1'],
+            'duration' => ['required', 'in:1,2,3,permanent'],
+        ]);
+
+        if ($validated['duration'] === 'permanent') {
+            $user->update(['suspended_until_round' => 0]);
+        } else {
+            $suspendedUntil = $validated['round'] + (int) $validated['duration'] + 1;
+            $user->update(['suspended_until_round' => $suspendedUntil]);
+        }
+
+        return back();
+    }
+
+    public function unsuspend(Request $request, User $user): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $user->update(['suspended_until_round' => null]);
 
         return back();
     }

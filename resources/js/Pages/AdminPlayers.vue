@@ -14,6 +14,7 @@ import { useForm } from '@inertiajs/vue3';
 
 const props = defineProps({
     players: Array,
+    done_games: Array,
 });
 
 const positions = [
@@ -35,15 +36,19 @@ const columns = [
     { key: 'phone', label: 'Telefone' },
     { key: 'position', label: 'Posição', align: 'center' },
     { key: 'active', label: 'Ativo', align: 'center' },
-    { key: 'actions', label: '', align: 'center' },
+    { key: 'actions', label: 'Ações', align: 'center' },
 ];
+
+const guests = computed(() => props.players.filter(p => p.guest));
 
 const rowClass = (row) => (row.active ? '' : 'opacity-50');
 
 // --- Modal state ---
 const showModal = ref(false);
 const editingPlayer = ref(null);
+const convertingGuest = ref(null);
 const isEditing = computed(() => editingPlayer.value !== null);
+const isConverting = computed(() => convertingGuest.value !== null);
 
 const form = useForm({
     name: '',
@@ -60,10 +65,32 @@ const photoSidePreview = ref(null);
 
 const openCreate = () => {
     editingPlayer.value = null;
+    convertingGuest.value = null;
     form.reset();
     form.clearErrors();
     photoFrontPreview.value = null;
     photoSidePreview.value = null;
+    showModal.value = true;
+};
+
+const onSelectGuest = (event) => {
+    const guestId = Number(event.target.value);
+    event.target.value = '';
+    if (!guestId) return;
+    const guest = guests.value.find(g => g.id === guestId);
+    if (!guest) return;
+
+    editingPlayer.value = null;
+    convertingGuest.value = guest;
+    form.reset();
+    form.clearErrors();
+    form.name = guest.name;
+    form.position = guest.position;
+    form.phone = '';
+    form.password = '';
+    form.active = true;
+    photoFrontPreview.value = guest.photo_front;
+    photoSidePreview.value = guest.photo_side;
     showModal.value = true;
 };
 
@@ -85,6 +112,7 @@ const openEdit = (player) => {
 const close = () => {
     showModal.value = false;
     editingPlayer.value = null;
+    convertingGuest.value = null;
     form.reset();
     form.clearErrors();
     photoFrontPreview.value = null;
@@ -105,7 +133,13 @@ const onFileChange = (field, event) => {
 };
 
 const submit = () => {
-    if (isEditing.value) {
+    if (isConverting.value) {
+        form.post(route('admin.players.convert-guest', convertingGuest.value.id), {
+            preserveScroll: true,
+            preserveState: false,
+            onSuccess: () => close(),
+        });
+    } else if (isEditing.value) {
         form.post(route('admin.players.update', editingPlayer.value.id), {
             _method: 'PUT',
             preserveScroll: true,
@@ -120,6 +154,51 @@ const submit = () => {
         });
     }
 };
+
+// --- Suspension modal ---
+const showSuspendModal = ref(false);
+const suspendingPlayer = ref(null);
+
+const suspendForm = useForm({
+    round: '',
+    duration: '',
+});
+
+const suspensionLabel = (player) => {
+    if (player.suspended_until_round === null) return null;
+    if (player.suspended_until_round === 0) return 'Permanente';
+    return `Até rodada ${player.suspended_until_round}`;
+};
+
+const openSuspend = (player) => {
+    suspendingPlayer.value = player;
+    suspendForm.reset();
+    suspendForm.clearErrors();
+    showSuspendModal.value = true;
+};
+
+const closeSuspend = () => {
+    showSuspendModal.value = false;
+    suspendingPlayer.value = null;
+    suspendForm.reset();
+    suspendForm.clearErrors();
+};
+
+const submitSuspend = () => {
+    suspendForm.post(route('admin.players.suspend', suspendingPlayer.value.id), {
+        preserveScroll: true,
+        preserveState: false,
+        onSuccess: () => closeSuspend(),
+    });
+};
+
+const unsuspend = () => {
+    suspendForm.post(route('admin.players.unsuspend', suspendingPlayer.value.id), {
+        preserveScroll: true,
+        preserveState: false,
+        onSuccess: () => closeSuspend(),
+    });
+};
 </script>
 
 <template>
@@ -133,10 +212,19 @@ const submit = () => {
                 <div class="rounded-xl bg-white p-4 shadow">
                     <div class="mb-4 flex items-center justify-between">
                         <h3 class="text-base font-semibold text-gray-900">Jogadores</h3>
-                        <button @click="openCreate"
-                            class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
-                            Criar jogador
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <select v-if="guests.length" @change="onSelectGuest"
+                                class="rounded-lg border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                                <option value="">Converter convidado...</option>
+                                <option v-for="g in guests" :key="g.id" :value="g.id">
+                                    {{ g.name }}
+                                </option>
+                            </select>
+                            <button @click="openCreate"
+                                class="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500">
+                                Criar jogador
+                            </button>
+                        </div>
                     </div>
 
                     <DataTable :columns="columns" :rows="players" numbered :row-class="rowClass"
@@ -163,9 +251,17 @@ const submit = () => {
                             </span>
                         </template>
                         <template #cell-actions="{ row }">
-                            <button @click="openEdit(row)" class="text-sm font-medium text-indigo-600 hover:text-indigo-500">
-                                Editar
-                            </button>
+                            <div class="flex items-center justify-center gap-3">
+                                <button @click="openEdit(row)" class="text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                                    Editar
+                                </button>
+                                <button @click="openSuspend(row)" class="text-sm font-medium text-red-600 hover:text-red-500">
+                                    Suspender
+                                </button>
+                            </div>
+                            <span v-if="suspensionLabel(row)" class="mt-1 inline-block rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700">
+                                {{ suspensionLabel(row) }}
+                            </span>
                         </template>
                     </DataTable>
                 </div>
@@ -174,7 +270,7 @@ const submit = () => {
 
         <!-- Modal Criar/Editar -->
         <DialogModal :show="showModal" @close="close">
-            <template #title>{{ isEditing ? 'Editar jogador' : 'Criar jogador' }}</template>
+            <template #title>{{ isConverting ? 'Converter convidado' : isEditing ? 'Editar jogador' : 'Criar jogador' }}</template>
 
             <template #content>
                 <div class="space-y-4">
@@ -201,7 +297,7 @@ const submit = () => {
                         <InputError :message="form.errors.position" class="mt-2" />
                     </div>
 
-                    <div v-if="!isEditing">
+                    <div v-if="!isEditing && !isConverting">
                         <InputLabel for="pl-password" value="Senha" />
                         <TextInput id="pl-password" v-model="form.password" type="password" class="mt-1 block w-full" />
                         <InputError :message="form.errors.password" class="mt-2" />
@@ -244,8 +340,97 @@ const submit = () => {
             <template #footer>
                 <SecondaryButton @click="close">Cancelar</SecondaryButton>
                 <PrimaryButton class="ms-3" :disabled="form.processing" @click="submit">
-                    {{ isEditing ? 'Atualizar' : 'Salvar' }}
+                    {{ isConverting ? 'Converter' : isEditing ? 'Atualizar' : 'Salvar' }}
                 </PrimaryButton>
+            </template>
+        </DialogModal>
+
+        <!-- Modal Suspensão -->
+        <DialogModal :show="showSuspendModal" @close="closeSuspend">
+            <template #title>Suspender jogador</template>
+
+            <template #content>
+                <div v-if="suspendingPlayer" class="space-y-4">
+                    <p class="text-sm text-gray-700">
+                        Jogador: <span class="font-semibold">{{ suspendingPlayer.name }}</span>
+                    </p>
+
+                    <div v-if="suspendingPlayer.suspended_until_round !== null"
+                        class="rounded-lg border border-red-200 bg-red-50 p-3">
+                        <p class="text-sm font-semibold text-red-700">
+                            Este jogador já está suspenso
+                            <span v-if="suspendingPlayer.suspended_until_round === 0">(permanente)</span>
+                            <span v-else>(até a rodada {{ suspendingPlayer.suspended_until_round }})</span>
+                        </p>
+                    </div>
+
+                    <div>
+                        <InputLabel value="Rodada da infração" />
+                        <select v-model="suspendForm.round"
+                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
+                            <option value="" disabled>Selecione a rodada</option>
+                            <option v-for="game in done_games" :key="game.id" :value="game.round">
+                                Rodada {{ game.round }}
+                            </option>
+                        </select>
+                        <InputError :message="suspendForm.errors.round" class="mt-2" />
+                    </div>
+
+                    <div>
+                        <InputLabel value="Duração da suspensão" />
+                        <div class="mt-2 grid grid-cols-2 gap-2">
+                            <button v-for="opt in [
+                                { value: '1', label: '1 semana' },
+                                { value: '2', label: '2 semanas' },
+                                { value: '3', label: '3 semanas' },
+                                { value: 'permanent', label: 'Permanente' },
+                            ]" :key="opt.value" type="button" @click="suspendForm.duration = opt.value"
+                                :class="[
+                                    'rounded-lg border px-4 py-2 text-sm font-medium transition',
+                                    suspendForm.duration === opt.value
+                                        ? 'border-red-600 bg-red-600 text-white'
+                                        : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50',
+                                ]">
+                                {{ opt.label }}
+                            </button>
+                        </div>
+                        <InputError :message="suspendForm.errors.duration" class="mt-2" />
+                    </div>
+
+                    <div v-if="suspendForm.round && suspendForm.duration" class="rounded-lg bg-gray-50 p-3 text-sm text-gray-600">
+                        <template v-if="suspendForm.duration === 'permanent'">
+                            O jogador será suspenso <span class="font-semibold text-red-600">permanentemente</span>.
+                        </template>
+                        <template v-else>
+                            O jogador não poderá jogar da rodada
+                            <span class="font-semibold">{{ Number(suspendForm.round) + 1 }}</span>
+                            até a rodada
+                            <span class="font-semibold">{{ Number(suspendForm.round) + Number(suspendForm.duration) }}</span>.
+                            Poderá voltar na
+                            <span class="font-semibold text-green-600">rodada {{ Number(suspendForm.round) + Number(suspendForm.duration) + 1 }}</span>.
+                        </template>
+                    </div>
+                </div>
+            </template>
+
+            <template #footer>
+                <div class="flex w-full items-center justify-between">
+                    <button v-if="suspendingPlayer?.suspended_until_round !== null && suspendingPlayer?.suspended_until_round !== undefined"
+                        type="button" @click="unsuspend"
+                        class="rounded-lg border border-green-600 px-4 py-2 text-sm font-semibold text-green-600 hover:bg-green-50">
+                        Remover punição
+                    </button>
+                    <span v-else />
+
+                    <div class="flex gap-2">
+                        <SecondaryButton @click="closeSuspend">Cancelar</SecondaryButton>
+                        <button type="button" @click="submitSuspend"
+                            :disabled="suspendForm.processing || !suspendForm.round || !suspendForm.duration"
+                            class="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 disabled:opacity-50">
+                            Suspender
+                        </button>
+                    </div>
+                </div>
             </template>
         </DialogModal>
     </AppLayout>

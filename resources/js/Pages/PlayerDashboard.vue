@@ -20,12 +20,14 @@ const props = defineProps({
     current_user_id: Number,
     is_goalkeeper: Boolean,
     dropped_out: Boolean,
+    waitlist_position: Number,
     ranking: Array,
 });
 
 const { store } = useGameChannel(props);
 useDraftRedirect();
 const form = useForm({});
+const waitlistForm = useForm({});
 const quitForm = useForm({});
 const showQuitModal = ref(false);
 
@@ -42,13 +44,24 @@ const canJoin = computed(() => {
     return store.game?.status === 'open' && !joined.value && linePlayerCount.value < 12;
 });
 
+const canJoinWaitlist = computed(() => {
+    if (props.is_goalkeeper || props.dropped_out || props.waitlist_position) return false;
+    return store.game?.status === 'drafted' && !joined.value;
+});
+
 const canQuit = computed(() => {
-    return joined.value && ['open', 'full'].includes(store.game?.status);
+    if (props.waitlist_position) return false;
+    return joined.value && ['open', 'full', 'drafted'].includes(store.game?.status);
 });
 
 const joinGame = () => {
     if (!store.game) return;
     form.post(route('games.join', store.game.id), { preserveScroll: true, preserveState: false });
+};
+
+const joinWaitlist = () => {
+    if (!store.game) return;
+    waitlistForm.post(route('games.join-waitlist', store.game.id), { preserveScroll: true, preserveState: false });
 };
 
 const confirmQuit = () => {
@@ -89,10 +102,23 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                                 <i class="fa-regular fa-face-sad-tear"></i>
                             </p>
 
+                            <template v-else-if="waitlist_position">
+                                <p class="font-medium text-amber-600">
+                                    <i class="fa-solid fa-clock"></i>
+                                    Você está na fila de espera ({{ waitlist_position }}º)
+                                </p>
+                            </template>
+
                             <template v-else>
-                                <PrimaryButton v-if="!joined" class="w-full justify-center py-3 text-base"
-                                    :disabled="form.processing || !canJoin" @click="joinGame">
+                                <PrimaryButton v-if="canJoin" class="w-full justify-center py-3 text-base"
+                                    :disabled="form.processing" @click="joinGame">
                                     Eu quero jogar
+                                </PrimaryButton>
+
+                                <PrimaryButton v-if="canJoinWaitlist"
+                                    class="w-full justify-center py-3 text-base !bg-amber-500 hover:!bg-amber-600 focus:!bg-amber-600"
+                                    :disabled="waitlistForm.processing" @click="joinWaitlist">
+                                    Entrar na fila de espera
                                 </PrimaryButton>
 
                                 <button v-if="canQuit" @click="showQuitModal = true"
@@ -116,15 +142,14 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                     </template>
                 </GameStatusCard>
 
-                <PlayerListCard v-if="store.game?.status !== 'done'" :players="store.game?.players || []" />
+                <PlayerListCard v-if="!['drafted', 'done'].includes(store.game?.status)" :players="store.game?.players || []" />
 
-                <template v-if="store.game?.status === 'done'">
+                <template v-if="['drafted', 'done'].includes(store.game?.status)">
                     <div class="grid grid-cols-1 gap-3">
                         <TeamCard color="green" :team="store.game?.teams?.green" />
                         <TeamCard color="yellow" :team="store.game?.teams?.yellow" />
                         <TeamCard color="blue" :team="store.game?.teams?.blue" />
                     </div>
-                    <WhatsAppCard :message="store.game?.whatsapp_message || ''" />
                 </template>
 
                 <RankingCard :ranking="ranking || []" />

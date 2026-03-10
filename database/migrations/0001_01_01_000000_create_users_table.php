@@ -27,6 +27,8 @@ return new class extends Migration
             $table->boolean('guest')->default(false);
             $table->string('photo_front')->nullable();
             $table->string('photo_side')->nullable();
+            $table->boolean('whatsapp_notifications')->default(true);
+            $table->unsignedInteger('suspended_until_round')->nullable();
             $table->boolean('active')->default(true);
             $table->timestamps();
         });

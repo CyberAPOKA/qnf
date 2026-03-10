@@ -11,6 +11,7 @@ use App\Models\User;
 use App\Services\DraftService;
 use App\Services\GameService;
 use App\Services\ScoringService;
+use App\Services\WaitlistService;
 use App\Support\GamePayload;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -25,6 +26,7 @@ class GameController extends Controller
         private readonly GameService $gameService,
         private readonly DraftService $draftService,
         private readonly ScoringService $scoringService,
+        private readonly WaitlistService $waitlistService,
     ) {}
 
     public function index(Request $request): Response
@@ -59,17 +61,31 @@ class GameController extends Controller
             ]);
         }
 
-        $droppedOut = GamePlayer::where('game_id', $game->id)
+        $playerRecord = GamePlayer::where('game_id', $game->id)
             ->where('user_id', $request->user()->id)
-            ->where('dropped_out', true)
-            ->exists();
+            ->first();
+
+        $droppedOut = $playerRecord?->dropped_out ?? false;
+
+        $waitlistPosition = null;
+        if ($playerRecord?->waitlist_at) {
+            $waitlistPosition = GamePlayer::where('game_id', $game->id)
+                ->whereNotNull('waitlist_at')
+                ->where('dropped_out', false)
+                ->where('waitlist_at', '<=', $playerRecord->waitlist_at)
+                ->count();
+        }
+
+        $user = $request->user();
 
         return Inertia::render('PlayerDashboard', [
             'game' => $payload,
-            'current_user_id' => $request->user()->id,
-            'is_goalkeeper' => $request->user()->position === Position::GOALKEEPER,
+            'current_user_id' => $user->id,
+            'is_goalkeeper' => $user->position === Position::GOALKEEPER,
             'dropped_out' => $droppedOut,
+            'waitlist_position' => $waitlistPosition,
             'ranking' => $ranking,
+            'suspended_until_round' => $user->suspended_until_round,
         ]);
     }
 
@@ -81,6 +97,10 @@ class GameController extends Controller
 
                 if ($lockedGame->status !== GameStatus::OPEN) {
                     throw ValidationException::withMessages(['join' => 'A lista não está aberta.']);
+                }
+
+                if ($request->user()->isSuspended($lockedGame->round)) {
+                    throw ValidationException::withMessages(['join' => 'Você está suspenso e não pode se inscrever.']);
                 }
 
                 if ($request->user()->position === Position::GOALKEEPER) {
@@ -141,7 +161,7 @@ class GameController extends Controller
             DB::transaction(function () use ($request, $game): void {
                 $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
 
-                if (! in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL])) {
+                if (! in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL, GameStatus::DRAFTED])) {
                     throw ValidationException::withMessages(['quit' => 'Não é possível desistir neste momento.']);
                 }
 
@@ -150,10 +170,14 @@ class GameController extends Controller
                     ->where('dropped_out', false)
                     ->firstOrFail();
 
-                $gamePlayer->update(['dropped_out' => true]);
+                $gamePlayer->update(['dropped_out' => true, 'waitlist_at' => null]);
 
                 if ($lockedGame->status === GameStatus::FULL) {
                     $lockedGame->update(['status' => GameStatus::OPEN]);
+                }
+
+                if ($lockedGame->status === GameStatus::DRAFTED) {
+                    $this->waitlistService->promoteFromWaitlist($lockedGame, $request->user()->id);
                 }
             });
         } catch (ValidationException $exception) {
@@ -163,6 +187,48 @@ class GameController extends Controller
         $freshGame = Game::findOrFail($game->id);
         $payload = GamePayload::fromGame($freshGame, $this->draftService);
         rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
+
+        return back();
+    }
+
+    public function joinWaitlist(Request $request, Game $game): RedirectResponse
+    {
+        try {
+            DB::transaction(function () use ($request, $game): void {
+                $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
+
+                if ($lockedGame->status !== GameStatus::DRAFTED) {
+                    throw ValidationException::withMessages(['waitlist' => 'A fila de espera não está disponível.']);
+                }
+
+                if ($request->user()->isSuspended($lockedGame->round)) {
+                    throw ValidationException::withMessages(['waitlist' => 'Você está suspenso e não pode entrar na fila.']);
+                }
+
+                if ($request->user()->position === Position::GOALKEEPER) {
+                    throw ValidationException::withMessages(['waitlist' => 'Goleiros não podem entrar na fila de espera.']);
+                }
+
+                $existing = GamePlayer::where('game_id', $lockedGame->id)
+                    ->where('user_id', $request->user()->id)
+                    ->first();
+
+                if ($existing) {
+                    if ($existing->dropped_out) {
+                        throw ValidationException::withMessages(['waitlist' => 'Você desistiu e não pode entrar na fila.']);
+                    }
+                    throw ValidationException::withMessages(['waitlist' => 'Você já está inscrito ou na fila.']);
+                }
+
+                GamePlayer::create([
+                    'game_id' => $lockedGame->id,
+                    'user_id' => $request->user()->id,
+                    'waitlist_at' => now(),
+                ]);
+            });
+        } catch (ValidationException $exception) {
+            return back()->withErrors($exception->errors());
+        }
 
         return back();
     }

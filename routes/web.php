@@ -1,49 +1,47 @@
 <?php
 
-use App\Enums\Position;
 use App\Http\Controllers\AdminGameController;
+use App\Http\Controllers\AdminPlayerController;
 use App\Http\Controllers\DraftController;
 use App\Http\Controllers\GameController;
-use App\Http\Controllers\AdminPlayerController;
+use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\StatisticsController;
 use App\Http\Controllers\WhatsAppController;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
-use Illuminate\Validation\Rule;
 
 Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(function () {
 
-    Route::put('/profile/position', function (Request $request) {
-        abort_if($request->user()->position === Position::GOALKEEPER, 403);
+    Route::put('/profile/position', [ProfileController::class, 'updatePosition'])->name('profile.update-position');
+    Route::put('/profile/whatsapp-notifications', [ProfileController::class, 'updateWhatsAppNotifications'])->name('profile.update-whatsapp-notifications');
 
-        $validated = $request->validate([
-            'position' => ['required', Rule::in([Position::FIXED->value, Position::WINGER->value, Position::PIVOT->value])],
-        ]);
-
-        $request->user()->update(['position' => $validated['position']]);
-
-        return back();
-    })->name('profile.update-position');
-    
     Route::get('/', [GameController::class, 'index'])->name('dashboard');
     Route::get('/statistics', [StatisticsController::class, 'index'])->name('statistics');
-    Route::post('/games/{game}/join', [GameController::class, 'join'])->name('games.join');
-    Route::post('/games/{game}/quit', [GameController::class, 'quit'])->name('games.quit');
 
-    Route::post('/games/{game}/add-players', [AdminGameController::class, 'addPlayers'])->name('games.add-players');
-    Route::post('/admin/store-player', [AdminGameController::class, 'storePlayer'])->name('admin.store-player');
-    Route::post('/games/{game}/store-guest', [AdminGameController::class, 'storeGuest'])->name('games.store-guest');
-    Route::post('/games/{game}/scores', [AdminGameController::class, 'saveScores'])->name('games.save-scores');
-    Route::post('/games/{game}/remove-player', [AdminGameController::class, 'removePlayer'])->name('games.remove-player');
-    Route::post('/games/{game}/remove-from-team', [AdminGameController::class, 'removeFromTeam'])->name('games.remove-from-team');
-    Route::post('/games/{game}/add-to-team', [AdminGameController::class, 'addToTeam'])->name('games.add-to-team');
+    Route::prefix('games/{game}')->group(function () {
+        Route::post('/join', [GameController::class, 'join'])->name('games.join');
+        Route::post('/quit', [GameController::class, 'quit'])->name('games.quit');
+        Route::post('/waitlist', [GameController::class, 'joinWaitlist'])->name('games.join-waitlist');
+        Route::post('/add-players', [AdminGameController::class, 'addPlayers'])->name('games.add-players');
+        Route::post('/store-guest', [AdminGameController::class, 'storeGuest'])->name('games.store-guest');
+        Route::post('/scores', [AdminGameController::class, 'saveScores'])->name('games.save-scores');
+        Route::post('/remove-player', [AdminGameController::class, 'removePlayer'])->name('games.remove-player');
+        Route::post('/remove-from-team', [AdminGameController::class, 'removeFromTeam'])->name('games.remove-from-team');
+        Route::post('/add-to-team', [AdminGameController::class, 'addToTeam'])->name('games.add-to-team');
+        Route::get('/draft', [DraftController::class, 'show'])->name('games.draft');
+        Route::post('/pick', [DraftController::class, 'pick'])->name('games.pick');
+    });
 
-    Route::get('/admin/players', [AdminPlayerController::class, 'index'])->name('admin.players');
-    Route::post('/admin/players', [AdminPlayerController::class, 'store'])->name('admin.players.store');
-    Route::post('/admin/players/{user}', [AdminPlayerController::class, 'update'])->name('admin.players.update');
+    Route::prefix('admin')->group(function () {
+        Route::post('/store-player', [AdminGameController::class, 'storePlayer'])->name('admin.store-player');
+        Route::get('/players', [AdminPlayerController::class, 'index'])->name('admin.players');
+        Route::post('/players', [AdminPlayerController::class, 'store'])->name('admin.players.store');
+        Route::post('/players/{user}', [AdminPlayerController::class, 'update'])->name('admin.players.update');
+        Route::post('/players/{user}/convert-guest', [AdminPlayerController::class, 'convertGuest'])->name('admin.players.convert-guest');
+        Route::post('/players/{user}/suspend', [AdminPlayerController::class, 'suspend'])->name('admin.players.suspend');
+        Route::post('/players/{user}/unsuspend', [AdminPlayerController::class, 'unsuspend'])->name('admin.players.unsuspend');
+    });
 
-    Route::get('/games/{game}/draft', [DraftController::class, 'show'])->name('games.draft');
-    Route::post('/games/{game}/pick', [DraftController::class, 'pick'])->name('games.pick');
-
-    Route::post('/api/whatsapp/send-test', [WhatsAppController::class, 'sendTest'])->name('api.whatsapp.send-test');
+    Route::prefix('api')->group(function () {
+        Route::post('/whatsapp/send-test', [WhatsAppController::class, 'sendTest'])->name('api.whatsapp.send-test');
+    });
 });

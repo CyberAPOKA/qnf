@@ -16,7 +16,7 @@ class ScoringService
 
     public function canEnterScores(Game $game, ?CarbonInterface $now = null): bool
     {
-        if ($game->status !== GameStatus::DONE) {
+        if ($game->status !== GameStatus::DRAFTED) {
             return false;
         }
 
@@ -28,9 +28,9 @@ class ScoringService
 
     public function saveScores(Game $game, array $scores, bool $force = false, ?CarbonInterface $now = null): void
     {
-        if ($game->status !== GameStatus::DONE) {
+        if ($game->status !== GameStatus::DRAFTED) {
             throw ValidationException::withMessages([
-                'scores' => 'O jogo precisa estar finalizado para registrar o placar.',
+                'scores' => 'O jogo precisa estar com os times definidos para registrar o placar.',
             ]);
         }
 
@@ -61,6 +61,8 @@ class ScoringService
             );
 
             $this->calculateAndAssignPoints($gameId);
+
+            $game->update(['status' => GameStatus::DONE]);
         });
     }
 
@@ -133,7 +135,7 @@ class ScoringService
      * @return Collection<int, object{id: int, name: string, position: string, games_played: int, total_points: int}>
      *         Keyed por user_id
      */
-    public function getPlayerStats(?array $userIds = null, bool $includeGuests = false): Collection
+    public function getPlayerStats(?array $userIds = null, bool $includeGuests = false, ?int $excludeGameId = null): Collection
     {
         $query = DB::table('game_players')
             ->join('users', 'game_players.user_id', '=', 'users.id')
@@ -147,6 +149,10 @@ class ScoringService
                 DB::raw("CASE WHEN users.position = 'goalkeeper' THEN COUNT(game_players.id) ELSE CAST(SUM(game_players.points) AS UNSIGNED) END as total_points"),
             )
             ->groupBy('users.id', 'users.name', 'users.position');
+
+        if ($excludeGameId !== null) {
+            $query->where('game_players.game_id', '!=', $excludeGameId);
+        }
 
         if (! $includeGuests) {
             $query->where('users.guest', false);
@@ -197,9 +203,58 @@ class ScoringService
      * Delega para getPlayerStats() e aplica ordenação/limite.
      * Ordenação: pontos desc → jogos desc (desempate) → nome asc
      */
+    /**
+     * Atribui ranking competitivo (1, 2, 2, 4) a uma coleção de stats,
+     * separando linha e goleiros.
+     *
+     * @return array<int, int> Keyed por user_id => rank
+     */
+    private function assignRanks(Collection $stats): array
+    {
+        $sorted = $stats->sortBy([
+            ['total_points', 'desc'],
+            ['games_played', 'desc'],
+            ['name', 'asc'],
+        ])->values();
+
+        $linePos = 0;
+        $lineRank = 0;
+        $lineLast = [null, null];
+        $gkPos = 0;
+        $gkRank = 0;
+        $gkLast = [null, null];
+
+        $ranks = [];
+
+        foreach ($sorted as $row) {
+            $pts = (int) $row->total_points;
+            $gp = (int) $row->games_played;
+
+            if ($row->position === 'goalkeeper') {
+                $gkPos++;
+                if ($pts !== $gkLast[0] || $gp !== $gkLast[1]) {
+                    $gkRank = $gkPos;
+                    $gkLast = [$pts, $gp];
+                }
+                $ranks[$row->id] = $gkRank;
+            } else {
+                $linePos++;
+                if ($pts !== $lineLast[0] || $gp !== $lineLast[1]) {
+                    $lineRank = $linePos;
+                    $lineLast = [$pts, $gp];
+                }
+                $ranks[$row->id] = $lineRank;
+            }
+        }
+
+        return $ranks;
+    }
+
     public function getRanking(int $limit = 50, bool $includeGuests = false): array
     {
-        $sorted = $this->getPlayerStats(userIds: null, includeGuests: $includeGuests)
+        $currentStats = $this->getPlayerStats(userIds: null, includeGuests: $includeGuests);
+
+        $sorted = $currentStats
             ->sortBy([
                 ['total_points', 'desc'],
                 ['games_played', 'desc'],
@@ -209,6 +264,19 @@ class ScoringService
             ->values();
 
         $streaks = $this->getWinStreaks();
+        $currentRanks = $this->assignRanks($currentStats);
+
+        // Compute previous ranking (excluding last completed game)
+        $latestGameId = DB::table('games')
+            ->where('status', GameStatus::DONE->value)
+            ->orderByDesc('date')
+            ->value('id');
+
+        $previousRanks = [];
+        if ($latestGameId) {
+            $previousStats = $this->getPlayerStats(userIds: null, includeGuests: $includeGuests, excludeGameId: $latestGameId);
+            $previousRanks = $this->assignRanks($previousStats);
+        }
 
         // Standard competition ranking (1, 2, 2, 4) — separate for line/goalkeepers
         $linePos = 0;
@@ -219,7 +287,7 @@ class ScoringService
         $gkRank = 0;
         $gkLast = [null, null];
 
-        return $sorted->map(function ($row) use (&$linePos, &$lineRank, &$lineLast, &$gkPos, &$gkRank, &$gkLast, $streaks) {
+        return $sorted->map(function ($row) use (&$linePos, &$lineRank, &$lineLast, &$gkPos, &$gkRank, &$gkLast, $streaks, $previousRanks) {
             $player = (array) $row;
             $pts = (int) $player['total_points'];
             $gp = (int) $player['games_played'];
@@ -241,6 +309,13 @@ class ScoringService
             }
 
             $player['win_streak'] = $streaks[$player['id']] ?? 0;
+
+            // rank_change: positive = subiu, negative = desceu, 0 = manteve, null = novo
+            if (isset($previousRanks[$player['id']])) {
+                $player['rank_change'] = $previousRanks[$player['id']] - $player['rank'];
+            } else {
+                $player['rank_change'] = null;
+            }
 
             return $player;
         })->all();

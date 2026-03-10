@@ -7,7 +7,7 @@ import ConfirmationModal from '@/Components/ConfirmationModal.vue';
 import DraftStatusCard from '@/Components/Game/DraftStatusCard.vue';
 import TeamCard from '@/Components/Game/TeamCard.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
-import WhatsAppCard from '@/Components/Game/WhatsAppCard.vue';
+
 import { router, useForm } from '@inertiajs/vue3';
 import { useGameChannel } from '@/composables/useGameChannel';
 
@@ -89,7 +89,7 @@ const pickText = computed(() => {
 });
 
 watch(() => store.game?.status, (status) => {
-    if (status === 'done') {
+    if (status === 'drafted') {
         router.visit(route('dashboard'));
     }
 });
@@ -165,7 +165,6 @@ watch(() => store.game?.status, (status) => {
                     </ul>
                 </div>
 
-                <WhatsAppCard v-if="store.game?.status === 'done'" :message="store.game?.whatsapp_message || ''" />
             </div>
         </div>
         <ConfirmationModal :show="playerToConfirm !== null" @close="cancelPick">

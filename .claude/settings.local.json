@@ -14,7 +14,12 @@
       "Bash(php artisan tinker --execute=\":*)",
       "Bash(php verify_seed.php)",
       "Bash(xargs grep -l \"v-for\\\\|list\\\\|table\")",
-      "Bash(php artisan tinker --execute=\"echo json_encode\\(App\\\\Models\\\\Game::select\\(''id'',''date'',''round'',''status''\\)->orderBy\\(''date''\\)->get\\(\\)->toArray\\(\\), JSON_PRETTY_PRINT\\);\")"
+      "Bash(php artisan tinker --execute=\"echo json_encode\\(App\\\\Models\\\\Game::select\\(''id'',''date'',''round'',''status''\\)->orderBy\\(''date''\\)->get\\(\\)->toArray\\(\\), JSON_PRETTY_PRINT\\);\")",
+      "Bash(node --version)",
+      "Bash(npm --version)",
+      "Bash(grep -E \"\\\\.php$\")",
+      "Bash(php artisan route:list --name=admin.players)",
+      "Bash(php artisan route:list --name=admin.players.convert)"
     ]
   }
 }

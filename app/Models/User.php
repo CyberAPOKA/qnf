@@ -38,6 +38,8 @@ class User extends Authenticatable
         'guest',
         'photo_front',
         'photo_side',
+        'whatsapp_notifications',
+        'suspended_until_round',
         'active',
         'password',
     ];
@@ -74,6 +76,8 @@ class User extends Authenticatable
             'email_verified_at' => 'datetime',
             'position' => Position::class,
             'guest' => 'boolean',
+            'whatsapp_notifications' => 'boolean',
+            'suspended_until_round' => 'integer',
             'active' => 'boolean',
             'password' => 'hashed',
         ];
@@ -94,5 +98,19 @@ class User extends Authenticatable
     public function captainedTeams(): HasMany
     {
         return $this->hasMany(Team::class, 'captain_user_id');
+    }
+
+    public function isSuspended(int $currentRound): bool
+    {
+        if ($this->suspended_until_round === null) {
+            return false;
+        }
+
+        // 0 = permanent
+        if ($this->suspended_until_round === 0) {
+            return true;
+        }
+
+        return $currentRound < $this->suspended_until_round;
     }
 }

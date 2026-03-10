@@ -77,7 +77,7 @@ class GamePayload
             'picks' => DraftPickResource::collection($game->draftPicks->sortBy('id')->values())->resolve(),
             'turn_color' => $turnColor?->value,
             'available_players' => $availablePlayers,
-            'whatsapp_message' => $game->status === GameStatus::DONE ? $draftService->buildWhatsAppMessage($game) : null,
+            'whatsapp_message' => in_array($game->status, [GameStatus::DRAFTED, GameStatus::DONE]) ? $draftService->buildWhatsAppMessage($game) : null,
         ];
     }
 }

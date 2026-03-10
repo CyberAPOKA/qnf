@@ -36,6 +36,9 @@ class HandleInertiaRequests extends Middleware
                 ...(new Ziggy)->toArray(),
                 'location' => $request->url(),
             ],
+            'suspension' => fn () => $request->user() ? [
+                'suspended_until_round' => $request->user()->suspended_until_round,
+            ] : null,
         ];
     }
 }

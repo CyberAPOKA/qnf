@@ -20,7 +20,10 @@ use Illuminate\Validation\ValidationException;
 
 class DraftService
 {
-    public function __construct(private readonly ScoringService $scoringService) {}
+    public function __construct(
+        private readonly ScoringService $scoringService,
+        private readonly WhatsAppService $whatsAppService,
+    ) {}
 
     public const SNAKE_SEQUENCE = [
         TeamColor::GREEN, TeamColor::YELLOW, TeamColor::BLUE,
@@ -82,7 +85,43 @@ class DraftService
             $game->update(['status' => GameStatus::DRAFTING]);
         });
 
+        $this->notifyWhatsapp($game, $candidates, $colors);
+
         return $candidates->values()->all();
+    }
+
+    private function notifyWhatsapp(Game $game, $candidates, array $colors): void
+    {
+        $colorEmojis = [
+            TeamColor::GREEN->value => '🟢',
+            TeamColor::YELLOW->value => '🟡',
+            TeamColor::BLUE->value => '🔵',
+        ];
+
+        $round = $game->round ?? 0;
+
+        // Mensagem para o grupo
+        $lines = ["*⚽️ Rodada {$round} — Capitães Sorteados!*", ''];
+        foreach ($colors as $index => $color) {
+            $emoji = $colorEmojis[$color->value];
+            $lines[] = "{$emoji} {$candidates[$index]->name}";
+        }
+        $lines[] = '';
+        $lines[] = 'Capitães, acessem o app para realizarem o draft! 🏆';
+        $groupMessage = implode("\n", $lines);
+        rescue(fn () => $this->whatsAppService->sendToGroup($groupMessage), report: false);
+
+        // Mensagem pessoal para cada capitão
+        // foreach ($colors as $index => $color) {
+        //     $captain = $candidates[$index];
+        //     $emoji = $colorEmojis[$color->value];
+        //     $label = $color->label();
+
+        //     if ($captain->phone && $captain->whatsapp_notifications) {
+        //         $personalMessage = "Fala, {$captain->name}! ⚽️\n\nVocê foi sorteado como capitão do time {$emoji} *{$label}* na rodada {$round}.\n\nAcesse o app para realizar suas escolhas no draft! 🏆";
+        //         rescue(fn () => $this->whatsAppService->sendToPhone($captain->phone, $personalMessage), report: false);
+        //     }
+        // }
     }
 
     public function currentTurnColor(Game $game): ?TeamColor
@@ -192,8 +231,45 @@ class DraftService
             }
 
             $totalAfter = $lockedGame->draftPicks()->count();
+
+            // Auto-assign last remaining player when only 1 is left
+            if ($totalAfter === 11) {
+                $captainIds = $lockedGame->teams()->whereNotNull('captain_user_id')->pluck('captain_user_id');
+                $pickedIds = $lockedGame->draftPicks()->pluck('picked_user_id');
+
+                $lastPlayer = $lockedGame->players()
+                    ->whereNotIn('users.id', $captainIds)
+                    ->whereNotIn('users.id', $pickedIds)
+                    ->first();
+
+                if ($lastPlayer) {
+                    $lastTurnColor = self::SNAKE_SEQUENCE[11];
+                    $lastTeam = $lockedGame->teams()->where('color', $lastTurnColor)->first();
+
+                    $autoPick = DraftPick::create([
+                        'game_id' => $lockedGame->id,
+                        'round' => intdiv(11, 3) + 1,
+                        'pick_in_round' => (11 % 3) + 1,
+                        'team_color' => $lastTurnColor,
+                        'picked_user_id' => $lastPlayer->id,
+                        'picked_at' => now(),
+                    ]);
+
+                    $lastTeamPickCount = $lockedGame->draftPicks()
+                        ->where('team_color', $lastTurnColor)
+                        ->where('id', '!=', $autoPick->id)
+                        ->count();
+
+                    if ($lastTeamPickCount === 0 && $lastTeam) {
+                        $lastTeam->update(['first_pick_user_id' => $lastPlayer->id]);
+                    }
+
+                    $totalAfter = 12;
+                }
+            }
+
             if ($totalAfter >= 12) {
-                $lockedGame->update(['status' => GameStatus::DONE]);
+                $lockedGame->update(['status' => GameStatus::DRAFTED]);
             }
 
             $lockedGame->refresh();
@@ -203,11 +279,15 @@ class DraftService
             rescue(fn () => broadcast(new DraftPickMade($payload))->toOthers(), report: false);
             rescue(fn () => broadcast(new DraftTurnChanged($payload))->toOthers(), report: false);
 
-            if ($lockedGame->status === GameStatus::DONE) {
+            if ($lockedGame->status === GameStatus::DRAFTED) {
+                $whatsappMessage = $this->buildWhatsAppMessage($lockedGame);
+
                 rescue(
-                    fn () => broadcast(new DraftFinished($payload, $this->buildWhatsAppMessage($lockedGame)))->toOthers(),
+                    fn () => broadcast(new DraftFinished($payload, $whatsappMessage))->toOthers(),
                     report: false
                 );
+
+                rescue(fn () => $this->whatsAppService->sendToGroup($whatsappMessage), report: false);
             }
 
             return $pick;

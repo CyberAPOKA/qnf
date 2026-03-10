@@ -22,7 +22,7 @@ class DraftController extends Controller
 
     public function show(Request $request, Game $game): Response|RedirectResponse
     {
-        if ($game->status !== GameStatus::DRAFTING) {
+        if (! in_array($game->status, [GameStatus::DRAFTING, GameStatus::DRAFTED])) {
             return redirect()->route('dashboard');
         }
 
