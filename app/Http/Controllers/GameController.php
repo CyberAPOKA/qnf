@@ -10,6 +10,7 @@ use App\Models\GamePlayer;
 use App\Models\User;
 use App\Services\DraftService;
 use App\Services\GameService;
+use App\Services\PaymentService;
 use App\Services\ScoringService;
 use App\Services\WaitlistService;
 use App\Support\GamePayload;
@@ -27,6 +28,7 @@ class GameController extends Controller
         private readonly DraftService $draftService,
         private readonly ScoringService $scoringService,
         private readonly WaitlistService $waitlistService,
+        private readonly PaymentService $paymentService,
     ) {}
 
     public function index(Request $request): Response
@@ -58,6 +60,7 @@ class GameController extends Controller
                     ]),
                 'can_enter_scores' => $this->scoringService->canEnterScores($game),
                 'ranking' => $ranking,
+                'payments' => $this->paymentService->getGamePayments($game->id),
             ]);
         }
 
@@ -78,6 +81,8 @@ class GameController extends Controller
 
         $user = $request->user();
 
+        $payment = $this->paymentService->getPlayerPayment($user->id, $game->id);
+
         return Inertia::render('PlayerDashboard', [
             'game' => $payload,
             'current_user_id' => $user->id,
@@ -86,6 +91,14 @@ class GameController extends Controller
             'waitlist_position' => $waitlistPosition,
             'ranking' => $ranking,
             'suspended_until_round' => $user->suspended_until_round,
+            'payment' => $payment ? [
+                'id' => $payment->id,
+                'amount' => $payment->amount,
+                'pix_payload' => $payment->pix_payload,
+                'qr_code_base64' => $payment->qr_code_base64,
+                'paid_at' => $payment->paid_at?->toIso8601String(),
+                'penalty_rounds' => $payment->penalty_rounds,
+            ] : null,
         ]);
     }
 

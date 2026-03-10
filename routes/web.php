@@ -1,13 +1,20 @@
 <?php
 
 use App\Http\Controllers\AdminGameController;
+use App\Http\Controllers\AdminPaymentController;
 use App\Http\Controllers\AdminPlayerController;
 use App\Http\Controllers\DraftController;
 use App\Http\Controllers\GameController;
+use App\Http\Controllers\MercadoPagoWebhookController;
+use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\StatisticsController;
 use App\Http\Controllers\WhatsAppController;
 use Illuminate\Support\Facades\Route;
+
+// Mercado Pago webhook (public, no auth, no CSRF)
+Route::post('/webhooks/mercadopago', [MercadoPagoWebhookController::class, 'handle'])
+    ->name('webhooks.mercadopago');
 
 Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(function () {
 
@@ -31,9 +38,12 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
         Route::post('/pick', [DraftController::class, 'pick'])->name('games.pick');
     });
 
+    Route::post('/payments/{payment}/confirm', [PaymentController::class, 'confirm'])->name('payments.confirm');
+
     Route::prefix('admin')->group(function () {
         Route::post('/store-player', [AdminGameController::class, 'storePlayer'])->name('admin.store-player');
         Route::get('/players', [AdminPlayerController::class, 'index'])->name('admin.players');
+        Route::get('/payments', [AdminPaymentController::class, 'index'])->name('admin.payments');
         Route::post('/players', [AdminPlayerController::class, 'store'])->name('admin.players.store');
         Route::post('/players/{user}', [AdminPlayerController::class, 'update'])->name('admin.players.update');
         Route::post('/players/{user}/convert-guest', [AdminPlayerController::class, 'convertGuest'])->name('admin.players.convert-guest');

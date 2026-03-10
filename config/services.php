@@ -40,4 +40,14 @@ return [
         'group_id' => env('WHATSAPP_GROUP_ID'),
     ],
 
+    'pix' => [
+        'amount' => (int) env('PIX_AMOUNT', 8),
+    ],
+
+    'mercadopago' => [
+        'access_token' => env('MERCADOPAGO_ACCESS_TOKEN'),
+        'webhook_url' => env('MERCADOPAGO_WEBHOOK_URL'),
+        'payer_email' => env('MERCADOPAGO_PAYER_EMAIL', 'pagamento@qnf.com.br'),
+    ],
+
 ];

@@ -19,7 +19,8 @@
       "Bash(npm --version)",
       "Bash(grep -E \"\\\\.php$\")",
       "Bash(php artisan route:list --name=admin.players)",
-      "Bash(php artisan route:list --name=admin.players.convert)"
+      "Bash(php artisan route:list --name=admin.players.convert)",
+      "Bash(npx vite build)"
     ]
   }
 }

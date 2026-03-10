@@ -1,0 +1,80 @@
+<?php
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+
+class MercadoPagoService
+{
+    private string $accessToken;
+
+    private string $baseUrl = 'https://api.mercadopago.com';
+
+    public function __construct()
+    {
+        $this->accessToken = config('services.mercadopago.access_token');
+    }
+
+    /**
+     * Cria um pagamento Pix no Mercado Pago e retorna os dados do QR code.
+     *
+     * @return array{id: int, qr_code: string, qr_code_base64: string}
+     */
+    public function createPixPayment(int $amountCents, string $description, string $externalReference): array
+    {
+        $amount = $amountCents / 100;
+
+        $response = Http::withToken($this->accessToken)
+            ->withHeaders(['X-Idempotency-Key' => $externalReference])
+            ->post("{$this->baseUrl}/v1/payments", [
+                'transaction_amount' => $amount,
+                'description' => $description,
+                'payment_method_id' => 'pix',
+                'payer' => [
+                    'email' => config('services.mercadopago.payer_email', 'academiaportodefutsal@gmail.com'),
+                ],
+                'external_reference' => $externalReference,
+                'notification_url' => config('services.mercadopago.webhook_url'),
+            ]);
+
+        if (! $response->successful()) {
+            Log::error('Mercado Pago payment creation failed', [
+                'status' => $response->status(),
+                'body' => $response->json(),
+                'external_reference' => $externalReference,
+            ]);
+
+            throw new \RuntimeException('Falha ao criar pagamento no Mercado Pago: '.$response->body());
+        }
+
+        $data = $response->json();
+        $transactionData = $data['point_of_interaction']['transaction_data'] ?? [];
+
+        return [
+            'id' => $data['id'],
+            'qr_code' => $transactionData['qr_code'] ?? '',
+            'qr_code_base64' => $transactionData['qr_code_base64'] ?? '',
+        ];
+    }
+
+    /**
+     * Consulta o status de um pagamento no Mercado Pago.
+     */
+    public function getPayment(int|string $paymentId): ?array
+    {
+        $response = Http::withToken($this->accessToken)
+            ->get("{$this->baseUrl}/v1/payments/{$paymentId}");
+
+        if (! $response->successful()) {
+            Log::warning('Mercado Pago payment query failed', [
+                'payment_id' => $paymentId,
+                'status' => $response->status(),
+            ]);
+
+            return null;
+        }
+
+        return $response->json();
+    }
+}

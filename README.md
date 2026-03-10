@@ -36,6 +36,10 @@ php artisan test
 # Abrir o jogo 
 php artisan futsal:open-week-game {--force}
 
+# Whatsapp
+cd .\whatsapp\
+node .\index.js
+
 Relativo: "php artisan game:test-open 1" — abre em 1 minuto
 Horário fixo: "php artisan game:test-open --s --h=18 --m=0" — abre hoje às 18:00
 ```

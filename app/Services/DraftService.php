@@ -23,6 +23,7 @@ class DraftService
     public function __construct(
         private readonly ScoringService $scoringService,
         private readonly WhatsAppService $whatsAppService,
+        private readonly PaymentService $paymentService,
     ) {}
 
     public const SNAKE_SEQUENCE = [
@@ -112,16 +113,16 @@ class DraftService
         rescue(fn () => $this->whatsAppService->sendToGroup($groupMessage), report: false);
 
         // Mensagem pessoal para cada capitão
-        // foreach ($colors as $index => $color) {
-        //     $captain = $candidates[$index];
-        //     $emoji = $colorEmojis[$color->value];
-        //     $label = $color->label();
+        foreach ($colors as $index => $color) {
+            $captain = $candidates[$index];
+            $emoji = $colorEmojis[$color->value];
+            $label = $color->label();
 
-        //     if ($captain->phone && $captain->whatsapp_notifications) {
-        //         $personalMessage = "Fala, {$captain->name}! ⚽️\n\nVocê foi sorteado como capitão do time {$emoji} *{$label}* na rodada {$round}.\n\nAcesse o app para realizar suas escolhas no draft! 🏆";
-        //         rescue(fn () => $this->whatsAppService->sendToPhone($captain->phone, $personalMessage), report: false);
-        //     }
-        // }
+            if ($captain->phone && $captain->whatsapp_notifications) {
+                $personalMessage = "Fala, {$captain->name}! ⚽️\n\nVocê foi sorteado como capitão do time {$emoji} *{$label}* na rodada {$round}.\n\nAcesse o app para realizar suas escolhas no draft! 🏆";
+                rescue(fn () => $this->whatsAppService->sendToPhone($captain->phone, $personalMessage), report: false);
+            }
+        }
     }
 
     public function currentTurnColor(Game $game): ?TeamColor
@@ -288,6 +289,8 @@ class DraftService
                 );
 
                 rescue(fn () => $this->whatsAppService->sendToGroup($whatsappMessage), report: false);
+
+                rescue(fn () => $this->paymentService->createPaymentsForGame($lockedGame), report: false);
             }
 
             return $pick;

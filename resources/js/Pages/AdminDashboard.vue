@@ -6,11 +6,11 @@ import SecondaryButton from '@/Components/SecondaryButton.vue';
 import GameStatusCard from '@/Components/Game/GameStatusCard.vue';
 import PlayerListCard from '@/Components/Game/PlayerListCard.vue';
 import TeamCard from '@/Components/Game/TeamCard.vue';
-import WhatsAppCard from '@/Components/Game/WhatsAppCard.vue';
 import AddGuestModal from '@/Components/Game/AddGuestModal.vue';
 import AddPlayerModal from '@/Components/Game/AddPlayerModal.vue';
 import ScoreEntryCard from '@/Components/Game/ScoreEntryCard.vue';
 import RankingCard from '@/Components/Game/RankingCard.vue';
+import PaymentManagementCard from '@/Components/Game/PaymentManagementCard.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 import axios from 'axios';
@@ -25,6 +25,7 @@ const props = defineProps({
     all_users: Array,
     can_enter_scores: Boolean,
     ranking: Array,
+    payments: Array,
 });
 
 const { store } = useGameChannel(props);
@@ -221,6 +222,7 @@ const sendWhatsAppTest = async () => {
                             :available-players="availableForTeam" />
                     </div>
                     <ScoreEntryCard :game-id="store.game.id" :teams="store.game.teams" />
+                    <PaymentManagementCard :payments="payments || []" />
                 </template>
 
                 <RankingCard :ranking="ranking || []" />

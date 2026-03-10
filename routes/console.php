@@ -11,3 +11,7 @@ Artisan::command('inspire', function () {
 Schedule::command('futsal:open-week-game')
     ->everyMinute()
     ->timezone('America/Sao_Paulo');
+
+Schedule::command('futsal:check-payment-deadlines')
+    ->everyMinute()
+    ->timezone('America/Sao_Paulo');

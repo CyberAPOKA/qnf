@@ -70,6 +70,9 @@ const suspensionMessage = computed(() => {
                                 <NavLink v-if="$page.props.auth.user.role === 'admin'" :href="route('admin.players')" :active="route().current('admin.players')">
                                     Jogadores
                                 </NavLink>
+                                <NavLink v-if="$page.props.auth.user.role === 'admin'" :href="route('admin.payments')" :active="route().current('admin.payments')">
+                                    Pagamentos
+                                </NavLink>
                             </div>
                         </div>
 
@@ -218,6 +221,9 @@ const suspensionMessage = computed(() => {
                         </ResponsiveNavLink>
                         <ResponsiveNavLink v-if="$page.props.auth.user.role === 'admin'" :href="route('admin.players')" :active="route().current('admin.players')">
                             Jogadores
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink v-if="$page.props.auth.user.role === 'admin'" :href="route('admin.payments')" :active="route().current('admin.payments')">
+                            Pagamentos
                         </ResponsiveNavLink>
                     </div>
 
