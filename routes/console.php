@@ -15,3 +15,7 @@ Schedule::command('futsal:open-week-game')
 Schedule::command('futsal:check-payment-deadlines')
     ->everyMinute()
     ->timezone('America/Sao_Paulo');
+
+Schedule::command('futsal:poll-payments')
+    ->everyMinute()
+    ->timezone('America/Sao_Paulo');
