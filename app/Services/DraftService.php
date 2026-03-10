@@ -86,7 +86,7 @@ class DraftService
             $game->update(['status' => GameStatus::DRAFTING]);
         });
 
-        $this->notifyWhatsapp($game, $candidates, $colors);
+        // $this->notifyWhatsapp($game, $candidates, $colors);
 
         return $candidates->values()->all();
     }
