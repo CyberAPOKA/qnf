@@ -20,7 +20,7 @@ class UserSeeder extends Seeder
 
         // Goleiros
         [
-            'name'     => 'Mateus Nogueira',
+            'name'     => 'Mateus Nogueira (Zé)',
             'phone'    => '555198249498',
             'email'    => 'mateus.nogueira@qnf.com',
             'position' => Position::GOALKEEPER->value,
@@ -76,7 +76,7 @@ class UserSeeder extends Seeder
             'position' => Position::FIXED->value,
         ],
         [
-            'name'  => 'Rodrigo',
+            'name'  => 'Rodrigo (Beto)',
             'phone' => '555198928569',
             'email' => 'rodrigo@qnf.com',
             'position' => Position::FIXED->value,
@@ -180,7 +180,7 @@ class UserSeeder extends Seeder
             'position' => Position::WINGER->value,
         ],
         [
-            'name'  => 'Vitor',
+            'name'  => 'Vitor (BTP)',
             'phone' => '555196705353',
             'email' => 'vitor@qnf.com',
             'position' => Position::WINGER->value,
@@ -200,7 +200,7 @@ class UserSeeder extends Seeder
             'position' => Position::PIVOT->value,
         ],
         [
-            'name'  => 'Jair',
+            'name'  => 'Jair Benhur',
             'phone' => '555199329888',
             'email' => 'jair@qnf.com',
             'position' => Position::PIVOT->value,
