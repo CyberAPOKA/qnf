@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Enums\GameStatus;
 use App\Enums\Position;
 use App\Events\GamePlayerJoined;
+use App\Jobs\CreatePlayerPaymentJob;
 use App\Models\Game;
 use App\Models\GamePlayer;
 use App\Models\User;
@@ -158,6 +159,8 @@ class GameController extends Controller
 
         $freshGame = Game::findOrFail($game->id);
 
+        rescue(fn () => CreatePlayerPaymentJob::dispatchSync($freshGame->id, $request->user()->id), report: false);
+
         if ($freshGame->status === GameStatus::FULL) {
             $this->gameService->handleGameBecameFull($freshGame, $this->draftService);
         } else {
@@ -185,8 +188,11 @@ class GameController extends Controller
 
                 $gamePlayer->update(['dropped_out' => true, 'waitlist_at' => null]);
 
-                if ($lockedGame->status === GameStatus::FULL) {
-                    $lockedGame->update(['status' => GameStatus::OPEN]);
+                if (in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL])) {
+                    $promoted = $this->waitlistService->promoteFromWaitlistBeforeDraft($lockedGame);
+                    if (! $promoted && $lockedGame->status === GameStatus::FULL) {
+                        $lockedGame->update(['status' => GameStatus::OPEN]);
+                    }
                 }
 
                 if ($lockedGame->status === GameStatus::DRAFTED) {
@@ -198,6 +204,9 @@ class GameController extends Controller
         }
 
         $freshGame = Game::findOrFail($game->id);
+
+        rescue(fn () => $this->paymentService->cancelPaymentForPlayer($freshGame->id, $request->user()->id), report: false);
+
         $payload = GamePayload::fromGame($freshGame, $this->draftService);
         rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
 
@@ -210,7 +219,7 @@ class GameController extends Controller
             DB::transaction(function () use ($request, $game): void {
                 $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
 
-                if ($lockedGame->status !== GameStatus::DRAFTED) {
+                if (! in_array($lockedGame->status, [GameStatus::FULL, GameStatus::DRAFTING, GameStatus::DRAFTED])) {
                     throw ValidationException::withMessages(['waitlist' => 'A fila de espera não está disponível.']);
                 }
 

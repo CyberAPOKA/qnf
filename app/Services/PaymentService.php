@@ -19,52 +19,64 @@ class PaymentService
     ) {}
 
     /**
-     * Cria cobranças Pix para todos os jogadores de linha (não-goleiros, não-convidados) do jogo.
+     * Cria cobrança Pix para um jogador específico.
      */
-    public function createPaymentsForGame(Game $game): void
+    public function createPaymentForPlayer(Game $game, User $player): void
     {
-        $amount = (int) config('services.pix.amount', 800);
-
-        $linePlayers = $game->players()
-            ->where('users.position', '!=', Position::GOALKEEPER)
-            ->where('users.guest', false)
-            ->get();
-
-        foreach ($linePlayers as $player) {
-            $existing = Payment::where('game_id', $game->id)
-                ->where('user_id', $player->id)
-                ->first();
-
-            if ($existing) {
-                continue;
-            }
-
-            $externalRef = "QNF-G{$game->id}-U{$player->id}";
-
-            try {
-                $mpData = $this->mercadoPagoService->createPixPayment(
-                    $amount,
-                    "QNF Futsal - Rodada {$game->round}",
-                    $externalRef,
-                    $player->email,
-                );
-
-                Payment::create([
-                    'game_id' => $game->id,
-                    'user_id' => $player->id,
-                    'amount' => $amount,
-                    'pix_payload' => $mpData['qr_code'],
-                    'external_id' => (string) $mpData['id'],
-                    'qr_code_base64' => $mpData['qr_code_base64'],
-                ]);
-            } catch (\Throwable $e) {
-                \Illuminate\Support\Facades\Log::error('Failed to create MP payment', [
-                    'game_id' => $game->id,
-                    'user_id' => $player->id,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        if ($player->position === Position::GOALKEEPER || $player->guest) {
+            return;
         }
+
+        $existing = Payment::where('game_id', $game->id)
+            ->where('user_id', $player->id)
+            ->first();
+
+        if ($existing) {
+            return;
+        }
+
+        $amount = (int) config('services.pix.amount', 800);
+        $externalRef = "QNF-G{$game->id}-U{$player->id}";
+
+        $mpData = $this->mercadoPagoService->createPixPayment(
+            $amount,
+            "QNF Futsal - Rodada {$game->round}",
+            $externalRef,
+            $player->email,
+        );
+
+        Payment::create([
+            'game_id' => $game->id,
+            'user_id' => $player->id,
+            'amount' => $amount,
+            'pix_payload' => $mpData['qr_code'],
+            'external_id' => (string) $mpData['id'],
+            'qr_code_base64' => $mpData['qr_code_base64'],
+        ]);
+    }
+
+    /**
+     * Cancela o pagamento pendente de um jogador e remove o registro local.
+     */
+    public function cancelPaymentForPlayer(int $gameId, int $userId): void
+    {
+        $payment = Payment::where('game_id', $gameId)
+            ->where('user_id', $userId)
+            ->first();
+
+        if (! $payment) {
+            return;
+        }
+
+        if ($payment->isPaid()) {
+            return;
+        }
+
+        if ($payment->external_id) {
+            rescue(fn () => $this->mercadoPagoService->cancelPayment($payment->external_id), report: false);
+        }
+
+        $payment->delete();
     }
 
     /**

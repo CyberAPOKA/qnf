@@ -21,7 +21,7 @@ class GamePayload
             'draftPicks.pickedUser',
         ]);
 
-        $activePlayers = $game->gamePlayers->reject(fn ($gp) => $gp->dropped_out);
+        $activePlayers = $game->gamePlayers->reject(fn ($gp) => $gp->dropped_out || $gp->waitlist_at);
 
         $captainIds = $game->teams->pluck('captain_user_id')->filter()->values();
         $pickedIds = $game->draftPicks->pluck('picked_user_id')->values();

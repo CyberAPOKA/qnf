@@ -15,7 +15,7 @@ class DraftFinished implements ShouldBroadcastNow
     /**
      * Create a new event instance.
      */
-    public function __construct(public array $game, public string $whatsappMessage) {}
+    public function __construct(public array $game) {}
 
     /**
      * Get the channels the event should broadcast on.

@@ -15,7 +15,6 @@ use App\Models\User;
 use App\Support\GamePayload;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Validation\ValidationException;
 
 class DraftService
@@ -23,7 +22,6 @@ class DraftService
     public function __construct(
         private readonly ScoringService $scoringService,
         private readonly WhatsAppService $whatsAppService,
-        private readonly PaymentService $paymentService,
     ) {}
 
     public const SNAKE_SEQUENCE = [
@@ -86,7 +84,7 @@ class DraftService
             $game->update(['status' => GameStatus::DRAFTING]);
         });
 
-        $this->notifyWhatsapp($game, $candidates, $colors);
+        // $this->notifyWhatsapp($game, $candidates, $colors);
 
         return $candidates->values()->all();
     }
@@ -154,7 +152,7 @@ class DraftService
 
     public function makePick(Game $game, int $pickedUserId, int $actorUserId): DraftPick
     {
-        return DB::transaction(function () use ($game, $pickedUserId, $actorUserId): DraftPick {
+        $pick = DB::transaction(function () use ($game, $pickedUserId, $actorUserId): DraftPick {
             $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
             $actor = User::findOrFail($actorUserId);
 
@@ -273,28 +271,32 @@ class DraftService
                 $lockedGame->update(['status' => GameStatus::DRAFTED]);
             }
 
-            $lockedGame->refresh();
-            $lockedGame->loadMissing(['teams.captain', 'draftPicks.pickedUser', 'players']);
-            $payload = GamePayload::fromGame($lockedGame, $this, $this->scoringService);
-
-            rescue(fn () => broadcast(new DraftPickMade($payload))->toOthers(), report: false);
-            rescue(fn () => broadcast(new DraftTurnChanged($payload))->toOthers(), report: false);
-
-            if ($lockedGame->status === GameStatus::DRAFTED) {
-                $whatsappMessage = $this->buildWhatsAppMessage($lockedGame);
-
-                rescue(
-                    fn () => broadcast(new DraftFinished($payload, $whatsappMessage))->toOthers(),
-                    report: false
-                );
-
-                rescue(fn () => $this->whatsAppService->sendToGroup($whatsappMessage), report: false);
-
-                rescue(fn () => $this->paymentService->createPaymentsForGame($lockedGame), report: false);
-            }
-
             return $pick;
         });
+
+        // Side effects AFTER transaction commit — DB changes are now visible to all connections
+        $freshGame = Game::with(['teams.captain', 'draftPicks.pickedUser', 'players'])->findOrFail($game->id);
+        $payload = GamePayload::fromGame($freshGame, $this, $this->scoringService);
+
+        rescue(fn () => broadcast(new DraftPickMade($payload))->toOthers(), report: false);
+        rescue(fn () => broadcast(new DraftTurnChanged($payload))->toOthers(), report: false);
+
+        if ($freshGame->status === GameStatus::DRAFTED) {
+            $slimPayload = [
+                'id' => $freshGame->id,
+                'status' => $freshGame->status->value,
+                'status_label' => $freshGame->status->label(),
+            ];
+
+            rescue(
+                fn () => broadcast(new DraftFinished($slimPayload))->toOthers(),
+                report: false
+            );
+
+            rescue(fn () => $this->whatsAppService->sendToGroup($this->buildWhatsAppMessage($freshGame)), report: false);
+        }
+
+        return $pick;
     }
 
     public function buildWhatsAppMessage(Game $game): string

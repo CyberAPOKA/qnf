@@ -6,6 +6,8 @@ use App\Enums\GameStatus;
 use App\Enums\Position;
 use App\Enums\TeamColor;
 use App\Events\GamePlayerJoined;
+use App\Jobs\CreatePlayerPaymentJob;
+use App\Services\PaymentService;
 use App\Models\DraftPick;
 use App\Models\Game;
 use App\Models\GamePlayer;
@@ -30,6 +32,7 @@ class AdminGameController extends Controller
         private readonly DraftService $draftService,
         private readonly GameService $gameService,
         private readonly WaitlistService $waitlistService,
+        private readonly PaymentService $paymentService,
     ) {}
 
     public function addPlayers(Request $request, Game $game): RedirectResponse
@@ -41,7 +44,7 @@ class AdminGameController extends Controller
             'user_ids.*' => ['integer', 'exists:users,id'],
         ]);
 
-        DB::transaction(function () use ($request, $game) {
+        $addedUserIds = DB::transaction(function () use ($request, $game) {
             $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
 
             if (! in_array($lockedGame->status, [GameStatus::SCHEDULED, GameStatus::OPEN, GameStatus::FULL])) {
@@ -80,9 +83,15 @@ class AdminGameController extends Controller
 
                 $lockedGame->update(['status' => GameStatus::FULL]);
             }
+
+            return $toInsert->all();
         });
 
         $freshGame = Game::findOrFail($game->id);
+
+        foreach ($addedUserIds as $userId) {
+            rescue(fn () => CreatePlayerPaymentJob::dispatchSync($freshGame->id, $userId), report: false);
+        }
 
         if ($freshGame->status === GameStatus::FULL) {
             $this->gameService->handleGameBecameFull($freshGame, $this->draftService);
@@ -215,11 +224,13 @@ class AdminGameController extends Controller
             'color' => ['required', Rule::in(TeamColor::values())],
         ]);
 
-        $userId = $validated['user_id'];
+        $userId = (int) $validated['user_id'];
         $color = $validated['color'];
 
         DB::transaction(function () use ($game, $userId, $color) {
-            $team = Team::where('game_id', $game->id)->where('color', $color)->first();
+            $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
+
+            $team = Team::where('game_id', $lockedGame->id)->where('color', $color)->first();
 
             if ($team && $team->captain_user_id === $userId) {
                 $team->update([
@@ -227,7 +238,7 @@ class AdminGameController extends Controller
                     'first_pick_user_id' => null,
                 ]);
             } else {
-                $pick = DraftPick::where('game_id', $game->id)
+                $pick = DraftPick::where('game_id', $lockedGame->id)
                     ->where('team_color', $color)
                     ->where('picked_user_id', $userId)
                     ->first();
@@ -239,7 +250,22 @@ class AdminGameController extends Controller
                     $pick->delete();
                 }
             }
+
+            $gamePlayer = GamePlayer::where('game_id', $lockedGame->id)
+                ->where('user_id', $userId)
+                ->where('dropped_out', false)
+                ->first();
+
+            if ($gamePlayer) {
+                $gamePlayer->update(['dropped_out' => true, 'waitlist_at' => null]);
+            }
+
+            if ($lockedGame->status === GameStatus::DRAFTED) {
+                $this->waitlistService->promoteToTeam($lockedGame, TeamColor::from($color));
+            }
         });
+
+        rescue(fn () => $this->paymentService->cancelPaymentForPlayer($game->id, $userId), report: false);
 
         $hasScores = Team::where('game_id', $game->id)->whereNotNull('score')->exists();
         if ($hasScores) {
@@ -356,8 +382,11 @@ class AdminGameController extends Controller
 
             $gamePlayer->update(['dropped_out' => true, 'waitlist_at' => null]);
 
-            if ($lockedGame->status === GameStatus::FULL) {
-                $lockedGame->update(['status' => GameStatus::OPEN]);
+            if (in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL])) {
+                $promoted = $this->waitlistService->promoteFromWaitlistBeforeDraft($lockedGame);
+                if (! $promoted && $lockedGame->status === GameStatus::FULL) {
+                    $lockedGame->update(['status' => GameStatus::OPEN]);
+                }
             }
 
             if ($lockedGame->status === GameStatus::DRAFTED) {
@@ -366,6 +395,9 @@ class AdminGameController extends Controller
         });
 
         $freshGame = Game::findOrFail($game->id);
+
+        rescue(fn () => $this->paymentService->cancelPaymentForPlayer($freshGame->id, (int) $validated['user_id']), report: false);
+
         $payload = GamePayload::fromGame($freshGame, $this->draftService);
         rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
 

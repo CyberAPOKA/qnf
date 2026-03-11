@@ -47,7 +47,7 @@ const canJoin = computed(() => {
 
 const canJoinWaitlist = computed(() => {
     if (props.is_goalkeeper || props.dropped_out || props.waitlist_position) return false;
-    return store.game?.status === 'drafted' && !joined.value;
+    return ['full', 'drafting', 'drafted'].includes(store.game?.status) && !joined.value;
 });
 
 const canQuit = computed(() => {

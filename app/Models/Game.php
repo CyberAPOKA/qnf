@@ -45,8 +45,9 @@ class Game extends Model
     public function players(): BelongsToMany
     {
         return $this->belongsToMany(User::class, 'game_players')
-            ->withPivot(['joined_at', 'dropped_out'])
+            ->withPivot(['joined_at', 'dropped_out', 'waitlist_at'])
             ->wherePivot('dropped_out', false)
+            ->wherePivotNull('waitlist_at')
             ->withTimestamps();
     }
 

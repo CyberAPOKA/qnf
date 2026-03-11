@@ -26,8 +26,10 @@ class MercadoPagoService
         $amount = $amountCents / 100;
         $email = $payerEmail ?: 'academiaportodefutsal@gmail.com';
 
+        $idempotencyKey = $externalReference . '-' . now()->timestamp . '-' . mt_rand(1000, 9999);
+
         $response = Http::withToken($this->accessToken)
-            ->withHeaders(['X-Idempotency-Key' => $externalReference])
+            ->withHeaders(['X-Idempotency-Key' => $idempotencyKey])
             ->post("{$this->baseUrl}/v1/payments", [
                 'transaction_amount' => $amount,
                 'description' => $description,
@@ -57,6 +59,29 @@ class MercadoPagoService
             'qr_code' => $transactionData['qr_code'] ?? '',
             'qr_code_base64' => $transactionData['qr_code_base64'] ?? '',
         ];
+    }
+
+    /**
+     * Cancela um pagamento pendente no Mercado Pago.
+     */
+    public function cancelPayment(int|string $paymentId): bool
+    {
+        $response = Http::withToken($this->accessToken)
+            ->put("{$this->baseUrl}/v1/payments/{$paymentId}", [
+                'status' => 'cancelled',
+            ]);
+
+        if (! $response->successful()) {
+            Log::warning('Mercado Pago payment cancellation failed', [
+                'payment_id' => $paymentId,
+                'status' => $response->status(),
+                'body' => $response->json(),
+            ]);
+
+            return false;
+        }
+
+        return true;
     }
 
     /**
