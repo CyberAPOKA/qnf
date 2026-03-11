@@ -21,7 +21,7 @@ class GameService
     {
         $clock = CarbonImmutable::instance($now ?? now(self::TZ))->setTimezone(self::TZ);
         $gameDate = $this->thisWeekThursdayDate($clock);
-        $opensAt = $gameDate->subDay()->setTime(18, 0); // Quarta 18h
+        $opensAt = $gameDate->subDay()->setTime(17, 0); // Quarta 17h
 
         $lastRound = Game::whereYear('date', $gameDate->year)->max('round') ?? 0;
 

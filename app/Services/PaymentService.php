@@ -23,7 +23,7 @@ class PaymentService
      */
     public function createPaymentsForGame(Game $game): void
     {
-        $amount = (int) config('services.pix.amount', 8);
+        $amount = (int) config('services.pix.amount', 800);
 
         $linePlayers = $game->players()
             ->where('users.position', '!=', Position::GOALKEEPER)
