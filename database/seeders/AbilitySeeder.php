@@ -56,7 +56,7 @@ class AbilitySeeder extends Seeder
         $updated = 0;
 
         foreach ($this->abilities as $phone => $ability) {
-            $affected = User::where('phone', $phone)->update(['ability' => $ability]);
+            $affected = User::where('phone', (string) $phone)->update(['ability' => $ability]);
             $updated += $affected;
         }
 
