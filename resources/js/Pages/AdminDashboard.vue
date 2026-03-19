@@ -104,7 +104,18 @@ const copyTeams = async () => {
     const msg = store.game?.whatsapp_message;
     if (!msg) return;
     try {
-        await navigator.clipboard.writeText(msg);
+        if (navigator.clipboard) {
+            await navigator.clipboard.writeText(msg);
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = msg;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
         copyTeamsLabel.value = 'Copiado!';
     } catch {
         copyTeamsLabel.value = 'Erro ao copiar';
