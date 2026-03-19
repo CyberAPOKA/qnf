@@ -374,6 +374,38 @@ class GameHistorySeeder extends Seeder
                 ],
             ],
         ],
+
+        [
+            'date'   => '2026-03-20',
+            'scores' => ['green' => 5, 'yellow' => 1, 'blue' => 0],
+            'green'  => [
+                'captain' => '555199329888', // Jair Benhur ©️
+                'players' => [
+                    '555199304836', // Christian Steffens 🔟
+                    '555198928569', // Rodrigo (Beto)
+                    '555199113865', // Guto Cenci
+                    'guest:gk:João', // João 🧤
+                ],
+            ],
+            'yellow' => [
+                'captain' => '555199885564', // Roth ©️
+                'players' => [
+                    '555198407569', // Bryan Larruscain 🔟
+                    '555196819002', // Brayan Dorneles
+                    '555198456641', // Nycolas Dias
+                    'guest:gk:Gui', // Gui 🧤
+                ],
+            ],
+            'blue'   => [
+                'captain' => '555196272812', // Daniel ©️
+                'players' => [
+                    '555196114386', // Eduardo Santana 🔟
+                    '555196304074', // Gustavo Mendes
+                    '555198249498', // Mateus Nogueira (Zé) 🧤
+                    '555196705353', // Vitor (BTP)
+                ],
+            ],
+        ],
     ];
 
     public function run(): void

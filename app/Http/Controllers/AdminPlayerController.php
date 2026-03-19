@@ -30,6 +30,7 @@ class AdminPlayerController extends Controller
                 'position' => $user->position->value,
                 'position_label' => $user->position->label(),
                 'guest' => $user->guest,
+                'ability' => $user->ability,
                 'active' => $user->active,
                 'suspended_until_round' => $user->suspended_until_round,
                 'photo_front' => $user->photo_front ? Storage::url($user->photo_front) : null,
@@ -93,6 +94,7 @@ class AdminPlayerController extends Controller
             'phone' => ['required', 'string', 'max:20', Rule::unique('users', 'phone')->ignore($user->id)],
             'position' => ['required', Rule::in(Position::values())],
             'active' => ['boolean'],
+            'ability' => ['nullable', 'integer', 'min:1', 'max:10'],
             'photo_front' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
             'photo_side' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
         ]);
@@ -102,6 +104,7 @@ class AdminPlayerController extends Controller
             'phone' => $validated['phone'],
             'email' => $validated['phone'].'@player.local',
             'position' => $validated['position'],
+            'ability' => $validated['ability'] ?? $user->ability,
             'active' => $validated['active'] ?? true,
         ]);
 

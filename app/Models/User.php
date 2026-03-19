@@ -40,6 +40,7 @@ class User extends Authenticatable
         'photo_side',
         'whatsapp_notifications',
         'suspended_until_round',
+        'ability',
         'active',
         'password',
     ];
@@ -78,6 +79,7 @@ class User extends Authenticatable
             'guest' => 'boolean',
             'whatsapp_notifications' => 'boolean',
             'suspended_until_round' => 'integer',
+            'ability' => 'integer',
             'active' => 'boolean',
             'password' => 'hashed',
         ];

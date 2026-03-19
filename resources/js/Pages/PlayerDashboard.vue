@@ -8,6 +8,8 @@ import GameStatusCard from '@/Components/Game/GameStatusCard.vue';
 import PlayerListCard from '@/Components/Game/PlayerListCard.vue';
 import TeamCard from '@/Components/Game/TeamCard.vue';
 import RankingCard from '@/Components/Game/RankingCard.vue';
+import WinsRankingCard from '@/Components/Game/WinsRankingCard.vue';
+import PredictionCard from '@/Components/Game/PredictionCard.vue';
 import PixPaymentCard from '@/Components/Game/PixPaymentCard.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
 import { Link, useForm } from '@inertiajs/vue3';
@@ -22,7 +24,9 @@ const props = defineProps({
     dropped_out: Boolean,
     waitlist_position: Number,
     ranking: Array,
+    wins_ranking: Array,
     payment: Object,
+    prediction: Object,
 });
 
 const { store } = useGameChannel(props);
@@ -154,7 +158,9 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                     <PixPaymentCard v-if="payment" :payment="payment" />
                 </template>
 
+                <PredictionCard :prediction="prediction" />
                 <RankingCard :ranking="ranking || []" />
+                <WinsRankingCard :ranking="wins_ranking || []" />
             </div>
         </div>
 

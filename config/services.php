@@ -42,7 +42,7 @@ return [
     ],
 
     'pix' => [
-        'amount' => (int) env('PIX_AMOUNT', 8),
+        'amount' => (int) env('PIX_AMOUNT', 800),
     ],
 
     'mercadopago' => [

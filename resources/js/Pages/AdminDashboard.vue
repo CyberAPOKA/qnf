@@ -10,6 +10,8 @@ import AddGuestModal from '@/Components/Game/AddGuestModal.vue';
 import AddPlayerModal from '@/Components/Game/AddPlayerModal.vue';
 import ScoreEntryCard from '@/Components/Game/ScoreEntryCard.vue';
 import RankingCard from '@/Components/Game/RankingCard.vue';
+import WinsRankingCard from '@/Components/Game/WinsRankingCard.vue';
+import PredictionCard from '@/Components/Game/PredictionCard.vue';
 import PaymentManagementCard from '@/Components/Game/PaymentManagementCard.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
 import { Link, useForm } from '@inertiajs/vue3';
@@ -25,7 +27,9 @@ const props = defineProps({
     all_users: Array,
     can_enter_scores: Boolean,
     ranking: Array,
+    wins_ranking: Array,
     payments: Array,
+    prediction: Object,
 });
 
 const { store } = useGameChannel(props);
@@ -94,6 +98,19 @@ const teamPlayerIds = computed(() => {
 const availableForTeam = computed(() => {
     return (props.all_users || []).filter((u) => !teamPlayerIds.value.has(u.id));
 });
+
+const copyTeamsLabel = ref('Copiar Times');
+const copyTeams = async () => {
+    const msg = store.game?.whatsapp_message;
+    if (!msg) return;
+    try {
+        await navigator.clipboard.writeText(msg);
+        copyTeamsLabel.value = 'Copiado!';
+    } catch {
+        copyTeamsLabel.value = 'Erro ao copiar';
+    }
+    setTimeout(() => { copyTeamsLabel.value = 'Copiar Times'; }, 2000);
+};
 
 const whatsappTestLabel = ref('Teste WhatsApp');
 const whatsappTesting = ref(false);
@@ -221,11 +238,18 @@ const sendWhatsAppTest = async () => {
                         <TeamCard color="blue" :team="store.game?.teams?.blue" editable :game-id="store.game?.id"
                             :available-players="availableForTeam" />
                     </div>
+                    <button v-if="store.game?.whatsapp_message" @click="copyTeams"
+                        class="w-full rounded-md border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 transition">
+                        <i class="fa-regular fa-copy mr-1.5"></i>
+                        {{ copyTeamsLabel }}
+                    </button>
                     <ScoreEntryCard :game-id="store.game.id" :teams="store.game.teams" />
                     <PaymentManagementCard :payments="payments || []" />
                 </template>
 
+                <PredictionCard :prediction="prediction" />
                 <RankingCard :ranking="ranking || []" />
+                <WinsRankingCard :ranking="wins_ranking || []" />
 
                 <div class="flex justify-center">
                     <button @click="sendWhatsAppTest" :disabled="whatsappTesting"

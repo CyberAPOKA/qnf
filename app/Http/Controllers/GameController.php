@@ -12,6 +12,8 @@ use App\Models\User;
 use App\Services\DraftService;
 use App\Services\GameService;
 use App\Services\PaymentService;
+use App\Services\GamePredictionService;
+use App\Services\RoundWinsRankingService;
 use App\Services\ScoringService;
 use App\Services\WaitlistService;
 use App\Support\GamePayload;
@@ -30,6 +32,8 @@ class GameController extends Controller
         private readonly ScoringService $scoringService,
         private readonly WaitlistService $waitlistService,
         private readonly PaymentService $paymentService,
+        private readonly RoundWinsRankingService $roundWinsRankingService,
+        private readonly GamePredictionService $predictionService,
     ) {}
 
     public function index(Request $request): Response
@@ -42,6 +46,7 @@ class GameController extends Controller
         $isAdmin = $request->user()->role === 'admin';
 
         $ranking = $this->scoringService->getRanking(includeGuests: true);
+        $prediction = $this->predictionService->predict($game);
 
         if ($isAdmin) {
             return Inertia::render('AdminDashboard', [
@@ -61,7 +66,9 @@ class GameController extends Controller
                     ]),
                 'can_enter_scores' => $this->scoringService->canEnterScores($game),
                 'ranking' => $ranking,
+                'wins_ranking' => $this->roundWinsRankingService->getRanking(includeGuests: true),
                 'payments' => $this->paymentService->getGamePayments($game->id),
+                'prediction' => $prediction,
             ]);
         }
 
@@ -91,7 +98,9 @@ class GameController extends Controller
             'dropped_out' => $droppedOut,
             'waitlist_position' => $waitlistPosition,
             'ranking' => $ranking,
+            'wins_ranking' => $this->roundWinsRankingService->getRanking(includeGuests: true),
             'suspended_until_round' => $user->suspended_until_round,
+            'prediction' => $prediction,
             'payment' => $payment ? [
                 'id' => $payment->id,
                 'amount' => $payment->amount,

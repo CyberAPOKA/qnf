@@ -22,7 +22,8 @@
       "Bash(php artisan route:list --name=admin.players.convert)",
       "Bash(npx vite build)",
       "Bash(grep -E \"\\\\.\\(blade|jsx|tsx|js|ts\\)$\")",
-      "Bash(php artisan:*)"
+      "Bash(php artisan:*)",
+      "WebFetch(domain:apidog.com)"
     ]
   }
 }

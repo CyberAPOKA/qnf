@@ -24,7 +24,7 @@ class MercadoPagoService
     public function createPixPayment(int $amountCents, string $description, string $externalReference, string $payerEmail = ''): array
     {
         $amount = $amountCents / 100;
-        $email = $payerEmail ?: 'academiaportodefutsal@gmail.com';
+        $email = $payerEmail ?: "pagamento+{$externalReference}@academiaportodefutsal.com";
 
         $idempotencyKey = $externalReference . '-' . now()->timestamp . '-' . mt_rand(1000, 9999);
 

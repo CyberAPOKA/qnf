@@ -35,6 +35,7 @@ const columns = [
     { key: 'name', label: 'Jogador' },
     { key: 'phone', label: 'Telefone' },
     { key: 'position', label: 'Posição', align: 'center' },
+    { key: 'ability', label: 'Hab.', align: 'center' },
     { key: 'active', label: 'Ativo', align: 'center' },
     { key: 'actions', label: 'Ações', align: 'center' },
 ];
@@ -54,6 +55,7 @@ const form = useForm({
     name: '',
     phone: '',
     position: 'winger',
+    ability: 5,
     password: '',
     active: true,
     photo_front: null,
@@ -100,6 +102,7 @@ const openEdit = (player) => {
     form.name = player.name;
     form.phone = player.phone;
     form.position = player.position;
+    form.ability = player.ability ?? 5;
     form.password = '';
     form.active = player.active;
     form.photo_front = null;
@@ -242,6 +245,13 @@ const unsuspend = () => {
                         <template #cell-position="{ row }">
                             <PositionBadge :position="row.position" :label="positionLabels[row.position] || row.position" />
                         </template>
+                        <template #cell-ability="{ row }">
+                            <span class="font-bold" :class="{
+                                'text-red-600': row.ability <= 3,
+                                'text-yellow-600': row.ability >= 4 && row.ability <= 6,
+                                'text-green-600': row.ability >= 7,
+                            }">{{ row.ability ?? 5 }}</span>
+                        </template>
                         <template #cell-active="{ row }">
                             <span :class="[
                                 'inline-flex rounded-full px-2 py-0.5 text-xs font-semibold',
@@ -295,6 +305,16 @@ const unsuspend = () => {
                             </option>
                         </select>
                         <InputError :message="form.errors.position" class="mt-2" />
+                    </div>
+
+                    <div v-if="isEditing">
+                        <InputLabel for="pl-ability" value="Habilidade (1-10)" />
+                        <div class="mt-1 flex items-center gap-3">
+                            <input id="pl-ability" type="range" min="1" max="10" v-model.number="form.ability"
+                                class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 accent-indigo-600" />
+                            <span class="w-8 text-center text-lg font-bold text-indigo-600">{{ form.ability }}</span>
+                        </div>
+                        <InputError :message="form.errors.ability" class="mt-2" />
                     </div>
 
                     <div v-if="!isEditing && !isConverting">
