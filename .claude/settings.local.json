@@ -23,7 +23,11 @@
       "Bash(npx vite build)",
       "Bash(grep -E \"\\\\.\\(blade|jsx|tsx|js|ts\\)$\")",
       "Bash(php artisan:*)",
-      "WebFetch(domain:apidog.com)"
+      "WebFetch(domain:apidog.com)",
+      "Bash(php -r \"if \\(extension_loaded\\(''imagick''\\)\\) echo ''imagick loaded''; else echo ''imagick NOT loaded'';\")",
+      "Bash(php -r \"$img = new Imagick\\(''c:/Users/Usuario/Desktop/qnf/public/assets/week_team/base_template.png''\\); echo $img->getImageWidth\\(\\) . ''x'' . $img->getImageHeight\\(\\);\")",
+      "Bash(php -r \"$img = getimagesize\\(''c:/Users/Usuario/Desktop/qnf/public/assets/week_team/base_template.png''\\); echo $img[0] . ''x'' . $img[1];\")",
+      "Bash(php -r \"print_r\\(getimagesize\\(''c:/Users/Usuario/Desktop/qnf/public/assets/week_team/base_template.png''\\)\\);\")"
     ]
   }
 }

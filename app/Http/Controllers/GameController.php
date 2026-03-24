@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\GameStatus;
 use App\Enums\Position;
+use Illuminate\Support\Facades\File;
 use App\Events\GamePlayerJoined;
 use App\Jobs\CreatePlayerPaymentJob;
 use App\Models\Game;
@@ -47,6 +48,7 @@ class GameController extends Controller
 
         $ranking = $this->scoringService->getRanking(includeGuests: true);
         $prediction = $this->predictionService->predict($game);
+        $weekTeamImages = $this->getWeekTeamImages();
 
         if ($isAdmin) {
             return Inertia::render('AdminDashboard', [
@@ -69,6 +71,7 @@ class GameController extends Controller
                 'wins_ranking' => $this->roundWinsRankingService->getRanking(includeGuests: true),
                 'payments' => $this->paymentService->getGamePayments($game->id),
                 'prediction' => $prediction,
+                'week_team_images' => $weekTeamImages,
             ]);
         }
 
@@ -101,6 +104,7 @@ class GameController extends Controller
             'wins_ranking' => $this->roundWinsRankingService->getRanking(includeGuests: true),
             'suspended_until_round' => $user->suspended_until_round,
             'prediction' => $prediction,
+            'week_team_images' => $weekTeamImages,
             'payment' => $payment ? [
                 'id' => $payment->id,
                 'amount' => $payment->amount,
@@ -262,5 +266,31 @@ class GameController extends Controller
         }
 
         return back();
+    }
+
+    private function getWeekTeamImages(): array
+    {
+        $lastDoneGame = Game::where('status', GameStatus::DONE)
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $lastDoneGame) {
+            return [];
+        }
+
+        $dir = storage_path('app/public/week_team');
+
+        if (! is_dir($dir)) {
+            return [];
+        }
+
+        $images = [];
+        foreach (File::files($dir) as $file) {
+            if (str_contains($file->getFilename(), '-'.$lastDoneGame->id.'.')) {
+                $images[] = '/storage/week_team/'.$file->getFilename();
+            }
+        }
+
+        return $images;
     }
 }

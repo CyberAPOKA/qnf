@@ -74,6 +74,28 @@ app.post('/send', async (req, res) => {
     }
 });
 
+app.post('/send-image', async (req, res) => {
+    if (!isReady) {
+        return res.status(503).json({ error: 'WhatsApp client not ready' });
+    }
+
+    const { to, imagePath, caption } = req.body;
+    if (!to || !imagePath) {
+        return res.status(400).json({ error: 'Missing "to" or "imagePath"' });
+    }
+
+    try {
+        const { MessageMedia } = pkg;
+        const media = MessageMedia.fromFilePath(imagePath);
+        await client.sendMessage(to, media, { caption: caption || '' });
+        console.log(`Image sent to ${to}`);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Send image failed:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/groups', async (_req, res) => {
     if (!isReady) {
         return res.status(503).json({ error: 'WhatsApp client not ready' });

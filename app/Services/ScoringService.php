@@ -29,7 +29,7 @@ class ScoringService
 
     public function saveScores(Game $game, array $scores, bool $force = false, ?CarbonInterface $now = null): void
     {
-        if ($game->status !== GameStatus::DRAFTED) {
+        if (! in_array($game->status, [GameStatus::DRAFTED, GameStatus::DONE])) {
             throw ValidationException::withMessages([
                 'scores' => 'O jogo precisa estar com os times definidos para registrar o placar.',
             ]);

@@ -1,0 +1,132 @@
+<script setup>
+defineProps({
+  label: {
+    type: String,
+    default: 'CANCEL'
+  }
+});
+
+const emit = defineEmits(['click']);
+</script>
+
+<template>
+  <button class="futuristic-button" @click="emit('click')">
+    <div class="button-inner">
+      <!-- Camada de brilho interno (inset glow) -->
+      <div class="inner-glow"></div>
+      <span class="label">{{ label }}</span>
+    </div>
+    <!-- Detalhe amarelo no canto superior esquerdo -->
+    <div class="corner-accent"></div>
+  </button>
+</template>
+
+<style scoped>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@700&display=swap');
+
+.futuristic-button {
+  position: relative;
+  background-color: #ffffff; /* Cor da borda padrão */
+  padding: 1px; /* Espessura da borda */
+  cursor: pointer;
+  min-width: 320px;
+  height: 50px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  border: none;
+  outline: none;
+  /* Forma chanfrada externa */
+  clip-path: polygon(
+    12px 0, 
+    100% 0, 
+    100% calc(100% - 12px), 
+    calc(100% - 12px) 100%, 
+    0 100%, 
+    0 12px
+  );
+}
+
+.button-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background-color: #000000; /* Fundo preto interno */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  z-index: 2;
+  overflow: hidden;
+    border-top-right-radius: 4px;
+  border-bottom-left-radius: 4px;  
+  /* Forma chanfrada interna */
+  clip-path: polygon(
+    11px 0, 
+    100% 0, 
+    100% calc(100% - 11px), 
+    calc(100% - 11px) 100%, 
+    0 100%, 
+    0 11px
+  );
+}
+
+.inner-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  pointer-events: none;
+  transition: all 0.3s ease;
+  opacity: 0;
+  z-index: 1;
+  /* Brilho interno (inset) usando box-shadow */
+  box-shadow: inset 0 0 20px 5px #ccff00;
+}
+
+.label {
+  color: #ccff00; /* Amarelo neon/esverdeado */
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  z-index: 3;
+  transition: all 0.3s ease;
+}
+
+.corner-accent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 24px;
+  height: 24px;
+  background-color: #ccff00;
+  z-index: 4;
+  /* Triângulo no canto superior esquerdo */
+  clip-path: polygon(0 0, 100% 0, 0 100%);
+  transition: all 0.3s ease;
+}
+
+/* Efeitos de HOVER conforme solicitado */
+.futuristic-button:hover {
+  background-color: #ccff00; /* Borda muda para amarelo no hover */
+}
+
+.futuristic-button:hover .inner-glow {
+  opacity: 1; /* Ativa o brilho interno forte */
+  box-shadow: inset 0 0 8px 2px #ccff00; /* Sombra interna mais forte */
+}
+
+.futuristic-button:hover .label {
+  text-shadow: 0 0 12px rgba(204, 255, 0, 0.9);
+}
+
+/* Efeito de clique */
+.futuristic-button:active {
+  transform: scale(0.98);
+  transition: all 0.1s ease;
+}
+</style>

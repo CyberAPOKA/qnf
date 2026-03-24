@@ -12,10 +12,12 @@ import WinsRankingCard from '@/Components/Game/WinsRankingCard.vue';
 import PredictionCard from '@/Components/Game/PredictionCard.vue';
 import PixPaymentCard from '@/Components/Game/PixPaymentCard.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
+import WeekTeamCard from '@/Components/Game/WeekTeamCard.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 import { useGameChannel } from '@/composables/useGameChannel';
 import { useDraftRedirect } from '@/composables/useDraftRedirect';
 import { useCountdown } from '@/composables/useCountdown';
+import FuturisticButton from '@/Components/FuturisticButton.vue';
 
 const props = defineProps({
     game: Object,
@@ -25,6 +27,7 @@ const props = defineProps({
     waitlist_position: Number,
     ranking: Array,
     wins_ranking: Array,
+    week_team_images: Array,
     payment: Object,
     prediction: Object,
 });
@@ -89,6 +92,9 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
 
         <div class="p-2 lg:p-4">
             <div class="mx-auto max-w-3xl space-y-4">
+                <FuturisticButton label="What's Up Danger?" />
+                <WeekTeamCard :images="week_team_images || []" />
+
                 <GameStatusCard :status="store.game?.status"
                     :status-label="store.game?.status_label" :players-count="store.game?.players_count"
                     :round="store.game?.round">

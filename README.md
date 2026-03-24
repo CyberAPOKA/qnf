@@ -30,15 +30,20 @@ php artisan reverb:start
 php artisan queue:work
 php artisan schedule:work
 
-php artisan migrate:fresh --seed
-php artisan test
-
-# Abrir o jogo 
-php artisan futsal:open-week-game {--force}
-
 # Whatsapp
 cd .\whatsapp\
 node .\index.js
+
+php artisan migrate:fresh --seed
+php artisan test
+
+# testar geração de imagens
+php artisan tinker
+$game = App\Models\Game::with(['teams.captain', 'draftPicks.pickedUser'])->find(12);
+app(App\Services\WeekTeamImageService::class)->generate($game);
+
+# Abrir o jogo 
+php artisan futsal:open-week-game {--force}
 
 Relativo: "php artisan game:test-open 1" — abre em 1 minuto
 Horário fixo: "php artisan game:test-open --s --h=18 --m=0" — abre hoje às 18:00

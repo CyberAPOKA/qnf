@@ -7,6 +7,7 @@ use App\Enums\Position;
 use App\Enums\TeamColor;
 use App\Events\GamePlayerJoined;
 use App\Jobs\CreatePlayerPaymentJob;
+use App\Jobs\GenerateWeekTeamImageJob;
 use App\Services\PaymentService;
 use App\Models\DraftPick;
 use App\Models\Game;
@@ -420,6 +421,8 @@ class AdminGameController extends Controller
         } catch (ValidationException $exception) {
             return back()->withErrors($exception->errors());
         }
+
+        GenerateWeekTeamImageJob::dispatch($game->id);
 
         return back();
     }

@@ -14,12 +14,14 @@ import WinsRankingCard from '@/Components/Game/WinsRankingCard.vue';
 import PredictionCard from '@/Components/Game/PredictionCard.vue';
 import PaymentManagementCard from '@/Components/Game/PaymentManagementCard.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
+import WeekTeamCard from '@/Components/Game/WeekTeamCard.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 import axios from 'axios';
 
 import { useGameChannel } from '@/composables/useGameChannel';
 import { useDraftRedirect } from '@/composables/useDraftRedirect';
 import MultiSelect from 'primevue/multiselect';
+import FuturisticButton from '@/Components/FuturisticButton.vue';
 
 const props = defineProps({
     game: Object,
@@ -28,6 +30,7 @@ const props = defineProps({
     can_enter_scores: Boolean,
     ranking: Array,
     wins_ranking: Array,
+    week_team_images: Array,
     payments: Array,
     prediction: Object,
 });
@@ -154,6 +157,8 @@ const sendWhatsAppTest = async () => {
 
         <div class="p-1 lg:p-4">
             <div class="mx-auto max-w-3xl space-y-4">
+                <WeekTeamCard :images="week_team_images || []" />
+
                 <GameStatusCard :status="store.game?.status" :status-label="store.game?.status_label"
                     :players-count="store.game?.players_count" :round="store.game?.round">
                     <template #details>
@@ -269,6 +274,8 @@ const sendWhatsAppTest = async () => {
                         {{ whatsappTestLabel }}
                     </button>
                 </div>
+
+                <FuturisticButton label="What's Up Danger?"/>
             </div>
         </div>
 

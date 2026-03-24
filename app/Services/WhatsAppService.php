@@ -34,6 +34,22 @@ class WhatsAppService
         return $this->send($this->groupId, $message);
     }
 
+    public function sendImageToGroup(string $imagePath, string $caption = ''): bool
+    {
+        if (! $this->active) {
+            Log::info('[WhatsApp] (inactive) Group image:', ['image' => $imagePath, 'caption' => $caption]);
+
+            return false;
+        }
+
+        if (! $this->groupId) {
+            Log::warning('WhatsApp group ID not configured.');
+            return false;
+        }
+
+        return $this->sendImage($this->groupId, $imagePath, $caption);
+    }
+
     public function sendToPhone(string $phone, string $message): bool
     {
         if (! $this->active) {
@@ -43,6 +59,27 @@ class WhatsAppService
         $chatId = preg_replace('/\D/', '', $phone) . '@c.us';
 
         return $this->send($chatId, $message);
+    }
+
+    private function sendImage(string $to, string $imagePath, string $caption): bool
+    {
+        try {
+            $response = Http::timeout(30)->post("{$this->serviceUrl}/send-image", [
+                'to' => $to,
+                'imagePath' => $imagePath,
+                'caption' => $caption,
+            ]);
+
+            if ($response->successful()) {
+                return true;
+            }
+
+            Log::error('WhatsApp send image failed', ['to' => $to, 'error' => $response->json('error')]);
+            return false;
+        } catch (\Exception $e) {
+            Log::error('WhatsApp image service error', ['to' => $to, 'error' => $e->getMessage()]);
+            return false;
+        }
     }
 
     private function send(string $to, string $message): bool
