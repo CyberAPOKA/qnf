@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, onMounted, onUnmounted, nextTick, watch } from 'vue';
 import DataTable from '@/Components/DataTable.vue';
 import FireIcon from '@/Components/Game/FireIcon.vue';
 import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
@@ -7,6 +7,9 @@ import PositionBadge from '@/Components/Game/PositionBadge.vue';
 import { useClipboard } from '@/composables/useClipboard';
 
 const showPhotos = ref(true);
+const rankingWrapper = ref(null);
+let canvasInstances = [];
+let animFrameId = null;
 
 const props = defineProps({
     ranking: {
@@ -64,15 +67,17 @@ const goalkeepers = computed(() =>
 );
 
 const lineRowClass = (row) => {
-    if (row.zeroPoints) return rowBgColors.zero;
-    if (row.medal) return rowBgColors[row.medal];
-    return '';
+    const classes = [];
+    if (row.win_streak >= 3) classes.push('qnf-streak-row');
+    if (row.zeroPoints) classes.push(rowBgColors.zero);
+    else if (row.medal) classes.push(rowBgColors[row.medal]);
+    return classes.join(' ');
 };
 
 const baseLineColumns = [
     { key: 'rank', label: 'Rank', align: 'center' },
     { key: 'photo', label: 'Foto', align: 'center' },
-    { key: 'name', label: 'Jogador', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
+    { key: 'name', label: 'Jogador', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
     { key: 'total_points', label: 'PTS', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
     { key: 'games_played', label: 'PJ', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
     { key: 'last_results', label: 'Últimas 5', align: 'center' },
@@ -115,10 +120,145 @@ const rankingMessage = computed(() => {
 
 const { label: copyRankingLabel, copy: copyRanking } = useClipboard();
 const copyRankingMessage = () => copyRanking(rankingMessage.value);
+
+// --- Native Canvas Fire Particles ---
+
+const COLORS = ['#ff3b00', '#ff6a00', '#ff9500', '#ffcc00', '#ffee00', '#fff2a0'];
+
+function rand(min, max) {
+    return Math.random() * (max - min) + min;
+}
+
+function createParticle(w, h) {
+    return {
+        x: rand(0, w),
+        y: h + rand(0, 10),
+        vx: rand(-0.3, 0.3),
+        vy: rand(-0.2, -0.8),
+        r: rand(1.5, 4),
+        opacity: rand(0.5, 1),
+        color: COLORS[Math.floor(rand(0, COLORS.length))],
+        life: 0,
+        maxLife: rand(100, 280),
+        drift: rand(-0.015, 0.015),
+    };
+}
+
+function initFireCanvas() {
+    destroyFireCanvas();
+    if (!rankingWrapper.value) return;
+
+    const wrapper = rankingWrapper.value;
+    const rows = wrapper.querySelectorAll('.qnf-streak-row');
+    if (!rows.length) return;
+
+    const wrapperRect = wrapper.getBoundingClientRect();
+
+    rows.forEach((tr, i) => {
+        const rect = tr.getBoundingClientRect();
+        const canvas = document.createElement('canvas');
+        const dpr = window.devicePixelRatio || 1;
+        const w = rect.width;
+        const h = rect.height;
+
+        canvas.width = w * dpr;
+        canvas.height = h * dpr;
+        canvas.style.cssText = `
+            position: absolute;
+            top: ${rect.top - wrapperRect.top}px;
+            left: ${rect.left - wrapperRect.left}px;
+            width: ${w}px;
+            height: ${h}px;
+            pointer-events: none;
+            z-index: 4;
+        `;
+
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+
+        wrapper.appendChild(canvas);
+
+        const particles = [];
+        for (let j = 0; j < 30; j++) {
+            const p = createParticle(w, h);
+            p.life = rand(0, p.maxLife);
+            particles.push(p);
+        }
+
+        canvasInstances.push({ canvas, ctx, particles, w, h });
+    });
+
+    animate();
+}
+
+function animate() {
+    for (const inst of canvasInstances) {
+        const { ctx, particles, w, h } = inst;
+        ctx.clearRect(0, 0, w, h);
+
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.life++;
+            p.x += p.vx + Math.sin(p.life * 0.05) * p.drift * 10;
+            p.y += p.vy;
+            p.vx += p.drift;
+
+            const lifeRatio = p.life / p.maxLife;
+            const alpha = lifeRatio < 0.1
+                ? p.opacity * (lifeRatio / 0.1)
+                : p.opacity * (1 - lifeRatio);
+
+            if (p.life >= p.maxLife || alpha <= 0) {
+                particles[i] = createParticle(w, h);
+                continue;
+            }
+
+            const shrink = 1 - lifeRatio * 0.5;
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r * shrink, 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = Math.max(0, alpha);
+            ctx.fill();
+
+            // Glow
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r * shrink * 2.5, 0, Math.PI * 2);
+            ctx.fillStyle = p.color;
+            ctx.globalAlpha = Math.max(0, alpha * 0.15);
+            ctx.fill();
+        }
+
+        ctx.globalAlpha = 1;
+    }
+
+    animFrameId = requestAnimationFrame(animate);
+}
+
+function destroyFireCanvas() {
+    if (animFrameId) {
+        cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+    }
+    for (const { canvas } of canvasInstances) {
+        canvas.remove();
+    }
+    canvasInstances = [];
+}
+
+onMounted(() => {
+    nextTick(() => setTimeout(initFireCanvas, 200));
+});
+
+onUnmounted(destroyFireCanvas);
+
+watch([linePlayers, showPhotos], () => {
+    nextTick(() => setTimeout(initFireCanvas, 200));
+});
 </script>
 
 <template>
-    <div class="rounded-xl bg-white sm:px-2 lg:p-4 shadow">
+    <div ref="rankingWrapper" class="rounded-xl bg-white sm:px-2 lg:p-4 shadow" style="position: relative;">
         <div class="flex items-center justify-between p-2">
             <h3 class="text-base font-semibold text-gray-900">Ranking - Linha</h3>
             <div class="flex items-center gap-3">
@@ -161,12 +301,16 @@ const copyRankingMessage = () => copyRanking(rankingMessage.value);
                 <PlayerPhoto :src="row.photo_front" :initial="row.initial" :alt="row.name" />
             </template>
             <template #cell-name="{ row }">
-                <div class="flex items-center gap-1">
-                    <FireIcon :streak="row.win_streak" />
-                    <span class="text-sm md:text-base lg:text-lg font-medium text-gray-900">
-                        {{ row.name }}
-                    </span>
-                    <PositionBadge v-if="!showPhotos" :position="row.position" :label="positionLabels[row.position] || row.position" />
+                <div>
+                    <div :class="row.win_streak ? 'flex items-center lg:gap-1' : ''">
+                        <FireIcon :streak="row.win_streak" />
+                        <span class="text-sm md:text-base lg:text-lg font-medium text-gray-900">
+                            {{ row.name }}
+                        </span>
+                        <FireIcon :streak="row.win_streak" />
+                    </div>
+                    <PositionBadge v-if="!showPhotos" :position="row.position"
+                        :label="positionLabels[row.position] || row.position" />
                 </div>
             </template>
             <template #cell-last_results="{ row }">
@@ -211,3 +355,50 @@ const copyRankingMessage = () => copyRanking(rankingMessage.value);
     </div>
 </template>
 
+<style>
+/* Pulsing glow around streak rows */
+.qnf-streak-row {
+    animation: qnfOuterGlow 2s ease-in-out infinite;
+}
+
+@keyframes qnfOuterGlow {
+    0% {
+        box-shadow:
+            0 0 12px 3px rgba(255, 59, 0, 0.5),
+            0 0 30px 8px rgba(255, 90, 0, 0.2),
+            inset 0 0 40px 10px rgba(255, 80, 0, 0.25),
+            inset 0 0 80px 20px rgba(255, 120, 0, 0.1);
+    }
+
+    33% {
+        box-shadow:
+            0 0 18px 5px rgba(255, 140, 0, 0.6),
+            0 0 40px 10px rgba(255, 120, 0, 0.25),
+            inset 0 0 50px 15px rgba(255, 120, 0, 0.3),
+            inset 0 0 100px 25px rgba(255, 160, 0, 0.12);
+    }
+
+    66% {
+        box-shadow:
+            0 0 14px 4px rgba(255, 200, 0, 0.5),
+            0 0 35px 8px rgba(255, 160, 0, 0.2),
+            inset 0 0 45px 12px rgba(255, 100, 0, 0.28),
+            inset 0 0 90px 22px rgba(255, 140, 0, 0.1);
+    }
+
+    100% {
+        box-shadow:
+            0 0 12px 3px rgba(255, 59, 0, 0.5),
+            0 0 30px 8px rgba(255, 90, 0, 0.2),
+            inset 0 0 40px 10px rgba(255, 80, 0, 0.25),
+            inset 0 0 80px 20px rgba(255, 120, 0, 0.1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .qnf-streak-row {
+        animation: none !important;
+        box-shadow: 0 0 12px 3px rgba(255, 100, 0, 0.4);
+    }
+}
+</style>

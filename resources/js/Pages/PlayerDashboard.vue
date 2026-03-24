@@ -121,10 +121,8 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                             </template>
 
                             <template v-else>
-                                <PrimaryButton v-if="canJoin" class="w-full justify-center py-3 text-base"
-                                    :disabled="form.processing" @click="joinGame">
-                                    Eu quero jogar
-                                </PrimaryButton>
+                                <FuturisticButton v-if="canJoin" label="Eu quero jogar" class="w-full justify-center py-3 text-base"
+                                    :disabled="form.processing" @click="joinGame" />
 
                                 <PrimaryButton v-if="canJoinWaitlist"
                                     class="w-full justify-center py-3 text-base !bg-amber-500 hover:!bg-amber-600 focus:!bg-amber-600"

@@ -25,6 +25,8 @@
     "dependencies": {
         "@fortawesome/fontawesome-free": "^7.2.0",
         "@primevue/themes": "^4.5.4",
+        "@tsparticles/slim": "^3.9.1",
+        "@tsparticles/vue3": "^3.0.1",
         "laravel-echo": "^2.3.0",
         "pinia": "^3.0.4",
         "primevue": "^4.5.4",
