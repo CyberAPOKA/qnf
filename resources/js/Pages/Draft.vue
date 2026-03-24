@@ -6,6 +6,8 @@ import SecondaryButton from '@/Components/SecondaryButton.vue';
 import ConfirmationModal from '@/Components/ConfirmationModal.vue';
 import DraftStatusCard from '@/Components/Game/DraftStatusCard.vue';
 import TeamCard from '@/Components/Game/TeamCard.vue';
+import FireIcon from '@/Components/Game/FireIcon.vue';
+import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
 
 import { router, useForm } from '@inertiajs/vue3';
@@ -37,6 +39,8 @@ const canPick = computed(() => {
     return isMyTurn.value;
 });
 
+const isDoublePick = computed(() => store.game?.is_double_pick === true);
+
 const myTeamPlayers = computed(() => {
     const color = store.game?.turn_color;
     if (!color || !isMyTurn.value) return [];
@@ -53,11 +57,30 @@ const teamLinePickCount = computed(() => {
 
 const canPickPlayer = (player) => {
     if (!isMyTurn.value) return false;
-    if (teamHasGoalkeeper.value && player.position === 'goalkeeper') return false;
-    if (teamLinePickCount.value >= 3 && player.position !== 'goalkeeper') return false;
+
+    // Already selected in double pick mode
+    if (isDoublePick.value && isSelected(player.id)) return true;
+
+    let gkCount = teamHasGoalkeeper.value ? 1 : 0;
+    let lineCount = teamLinePickCount.value;
+
+    // Account for already-selected players in double pick mode
+    if (isDoublePick.value && selectedIds.value.length > 0) {
+        const available = store.game?.available_players || [];
+        for (const id of selectedIds.value) {
+            if (id === player.id) continue;
+            const sel = available.find(p => p.id === id);
+            if (sel?.position === 'goalkeeper') gkCount++;
+            else if (sel) lineCount++;
+        }
+    }
+
+    if (gkCount >= 1 && player.position === 'goalkeeper') return false;
+    if (lineCount >= 3 && player.position !== 'goalkeeper') return false;
     return true;
 };
 
+// --- Single pick mode ---
 const playerToConfirm = ref(null);
 
 const confirmPick = (player) => {
@@ -77,6 +100,70 @@ const pickUser = () => {
         onFinish: () => { playerToConfirm.value = null; },
     });
 };
+
+// --- Double pick mode ---
+const selectedIds = ref([]);
+const showDoubleConfirm = ref(false);
+const doublePickProcessing = ref(false);
+
+const toggleSelection = (player) => {
+    const idx = selectedIds.value.indexOf(player.id);
+    if (idx >= 0) {
+        selectedIds.value.splice(idx, 1);
+    } else if (selectedIds.value.length < 2) {
+        selectedIds.value.push(player.id);
+    }
+};
+
+const isSelected = (playerId) => selectedIds.value.includes(playerId);
+
+const selectedPlayers = computed(() => {
+    const available = store.game?.available_players || [];
+    return selectedIds.value.map(id => available.find(p => p.id === id)).filter(Boolean);
+});
+
+const confirmDoublePick = () => {
+    if (selectedIds.value.length !== 2) return;
+    showDoubleConfirm.value = true;
+};
+
+const cancelDoublePick = () => {
+    showDoubleConfirm.value = false;
+};
+
+const submitDoublePick = () => {
+    if (!store.game || selectedIds.value.length !== 2) return;
+    doublePickProcessing.value = true;
+
+    const gameId = store.game.id;
+    const [firstId, secondId] = selectedIds.value;
+
+    router.post(route('games.pick', gameId), { user_id: firstId }, {
+        preserveScroll: true,
+        preserveState: true,
+        onSuccess: () => {
+            router.post(route('games.pick', gameId), { user_id: secondId }, {
+                preserveScroll: true,
+                preserveState: false,
+                onFinish: () => {
+                    doublePickProcessing.value = false;
+                    showDoubleConfirm.value = false;
+                    selectedIds.value = [];
+                },
+            });
+        },
+        onError: () => {
+            doublePickProcessing.value = false;
+            showDoubleConfirm.value = false;
+        },
+    });
+};
+
+// Reset selections when turn changes
+watch(() => store.game?.turn_color, () => {
+    selectedIds.value = [];
+    showDoubleConfirm.value = false;
+});
 
 const roundText = computed(() => {
     const picksCount = store.game?.picks?.length || 0;
@@ -101,22 +188,30 @@ watch(() => store.game?.status, (status) => {
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">Draft dos Times</h2>
         </template>
 
-        <div class="p-2 lg:p-4">
-            <div class="mx-auto max-w-6xl space-y-4">
+        <div class="p-1 lg:p-4" :class="{ '!pb-24': isDoublePick && isMyTurn }">
+            <div class="mx-auto max-w-6xl space-y-3">
                 <DraftStatusCard :round-text="roundText" :pick-text="pickText" :status="store.game?.status || ''"
                     :is-my-turn="isMyTurn" :turn-captain-name="turnCaptainName" />
 
-                <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div class="grid grid-cols-3 gap-1 lg:gap-2">
                     <TeamCard color="green" :team="store.game?.teams?.green" />
                     <TeamCard color="yellow" :team="store.game?.teams?.yellow" />
                     <TeamCard color="blue" :team="store.game?.teams?.blue" />
                 </div>
 
-                <div v-if="store.game?.status === 'drafting'" class="rounded-xl bg-white p-2 lg:p-4 shadow">
-                    <h3 class="text-lg font-bold text-red-500 text-center">
-                        <i class="fa-solid fa-triangle-exclamation"></i>
-                        Clique e confirme para escolher
-                        <i class="fa-solid fa-triangle-exclamation"></i>
+                <div v-if="store.game?.status === 'drafting'" class="rounded-xl bg-white p-1 lg:p-4 shadow">
+                    <h3 class="text-lg font-bold text-center"
+                        :class="isDoublePick && isMyTurn ? 'text-purple-600' : 'text-red-500'">
+                        <template v-if="isDoublePick && isMyTurn">
+                            <i class="fa-solid fa-people-arrows"></i>
+                            Escolha dupla! Selecione 2 jogadores
+                            <i class="fa-solid fa-people-arrows"></i>
+                        </template>
+                        <template v-else>
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            Clique e confirme para escolher
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                        </template>
                     </h3>
                     <div class="flex justify-between flex-wrap mt-1">
                         <span class="text-purple-900">
@@ -132,33 +227,74 @@ watch(() => store.game?.status, (status) => {
                             Pontos
                         </span>
                     </div>
-                    <ul class="mt-3 space-y-2">
+                    <ul class="mt-2 space-y-2">
                         <li v-for="player in store.game?.available_players || []" :key="player.id"
-                            class="flex flex-col gap-2 rounded-lg border border-gray-100 p-2">
+                            class="flex flex-col gap-2 rounded-lg border border-gray-500 p-1 transition-colors shadow"
+                            :class="[
+                                isDoublePick && isMyTurn && isSelected(player.id)
+                                    ? 'border-purple-500 bg-purple-50'
+                                    : 'border-gray-100',
+                                isDoublePick && isMyTurn && canPickPlayer(player) ? 'cursor-pointer' : ''
+                            ]"
+                            @click="isDoublePick && isMyTurn && canPickPlayer(player) ? toggleSelection(player) : null">
 
-                            <div class="flex items-center justify-between">
-                                <p class="text-sm font-semibold text-gray-900">{{ player.name }}</p>
-                                <PrimaryButton v-if="canPickPlayer(player)" class="px-4 py-2 text-sm"
-                                    :disabled="pickForm.processing" @click="confirmPick(player)">
-                                    Escolher
-                                </PrimaryButton>
-                            </div>
-                            <div class="flex items-center gap-4">
-                                <PositionBadge :position="player.position" :label="player.position_label" />
-                                <div class="flex items-center text-purple-900">
-                                    <i class="fa-solid fa-ranking-star"></i>
-                                    <span v-if="player.rank != null && player.position !== 'goalkeeper'"
-                                        class="font-bold">
-                                        {{ player.rank }}º
-                                    </span>
+                            <div class="flex items-center justify-between gap-4">
+                                <!-- Photo -->
+                                <div class="shrink-0">
+                                    <PlayerPhoto :src="player.photo_front" :initial="player.initial" :alt="player.name"
+                                        size="lg" />
                                 </div>
-                                <div class="flex items-center text-blue-900">
-                                    <i class="fa-solid fa-futbol"></i>
-                                    <span class="font-bold">{{ player.games_played }}</span>
+
+                                <!-- Info -->
+                                <div class="flex-1 min-w-0 flex flex-col justify-between">
+                                    <div class="flex items-center gap-2">
+                                        <FireIcon :streak="player.win_streak" />
+                                        <p class="font-bold text-gray-900 truncate">{{ player.name }}</p>
+                                        <PositionBadge :position="player.position" :label="player.position_label" />
+                                    </div>
+                                    <div class="flex items-center gap-4">
+                                        <div class="flex items-center text-purple-900">
+                                            <i class="fa-solid fa-ranking-star"></i>
+                                            <span v-if="player.rank != null && player.position !== 'goalkeeper'"
+                                                class="font-bold">
+                                                {{ player.rank }}º
+                                            </span>
+                                        </div>
+                                        <div class="flex items-center text-blue-900">
+                                            <i class="fa-solid fa-futbol"></i>
+                                            <span class="font-bold">{{ player.games_played }}</span>
+                                        </div>
+                                        <div class="flex items-center text-[#B8860B]">
+                                            <i class="fa-solid fa-trophy"></i>
+                                            <span class="font-bold">{{ player.total_points }}</span>
+                                        </div>
+                                    </div>
+                                    <div v-if="player.last_results?.length" class="flex items-center gap-1">
+                                        <span v-for="(result, i) in player.last_results" :key="i">
+                                            <i v-if="result === 1"
+                                                class="fa-regular fa-circle-check text-green-600 text-xs"></i>
+                                            <i v-else class="fa-regular fa-circle-xmark text-red-500 text-xs"></i>
+                                        </span>
+                                    </div>
                                 </div>
-                                <div class="flex items-center text-[#B8860B]">
-                                    <i class="fa-solid fa-trophy"></i>
-                                    <span class="font-bold">{{ player.total_points }}</span>
+
+                                <!-- Action: single pick button OR double pick checkbox -->
+                                <div class="shrink-0">
+                                    <template v-if="isDoublePick && isMyTurn">
+                                        <div v-if="canPickPlayer(player)"
+                                            class="flex h-6 w-6 items-center justify-center rounded border-2 transition-colors"
+                                            :class="isSelected(player.id)
+                                                ? 'border-purple-600 bg-purple-600 text-white'
+                                                : 'border-gray-300 bg-white'">
+                                            <i v-if="isSelected(player.id)" class="fa-solid fa-check text-xs"></i>
+                                        </div>
+                                    </template>
+                                    <template v-else>
+                                        <PrimaryButton v-if="canPickPlayer(player)" class="px-4 py-2 text-sm"
+                                            :disabled="pickForm.processing" @click="confirmPick(player)">
+                                            Escolher
+                                        </PrimaryButton>
+                                    </template>
                                 </div>
                             </div>
                         </li>
@@ -167,15 +303,81 @@ watch(() => store.game?.status, (status) => {
 
             </div>
         </div>
+
+        <!-- Fixed bottom bar for double pick -->
+        <Teleport to="body">
+            <div v-if="isDoublePick && isMyTurn && store.game?.status === 'drafting'"
+                class="fixed bottom-0 inset-x-0 z-50 border-t bg-white p-4 shadow-[0_-4px_12px_rgba(0,0,0,0.1)]">
+                <div class="mx-auto max-w-6xl flex items-center justify-between gap-4">
+                    <div class="text-sm text-gray-600">
+                        <span class="font-semibold">{{ selectedIds.length }}/2</span> selecionados
+                        <template v-if="selectedPlayers.length">
+                            <span class="hidden sm:inline"> —
+                                <span v-for="(p, i) in selectedPlayers" :key="p.id">
+                                    <strong>{{ p.name }}</strong><span v-if="i === 0 && selectedPlayers.length === 2">,
+                                    </span>
+                                </span>
+                            </span>
+                        </template>
+                    </div>
+                    <PrimaryButton :disabled="selectedIds.length !== 2 || doublePickProcessing"
+                        @click="confirmDoublePick" class="bg-purple-600 hover:bg-purple-700 px-6 py-3 text-base">
+                        <i class="fa-solid fa-check-double mr-2"></i>
+                        Escolher 2
+                    </PrimaryButton>
+                </div>
+            </div>
+        </Teleport>
+
+        <!-- Single pick confirmation modal -->
         <ConfirmationModal :show="playerToConfirm !== null" @close="cancelPick">
             <template #title>Confirmar escolha</template>
             <template #content>
-                <p class="text-gray-900">Deseja escolher <strong class="text-base">{{ playerToConfirm?.name }}</strong>?</p>
+                <div class="flex items-center gap-3">
+                    <div class="shrink-0">
+                        <PlayerPhoto :src="playerToConfirm?.photo_front" :initial="playerToConfirm?.initial"
+                            :alt="playerToConfirm?.name" size="lg" />
+                    </div>
+                    <p class="text-gray-900">Deseja escolher
+                        <strong class="text-base">
+                            {{ playerToConfirm?.name }}
+                        </strong>?
+                    </p>
+                </div>
             </template>
             <template #footer>
                 <SecondaryButton @click="cancelPick">Cancelar</SecondaryButton>
                 <PrimaryButton class="ms-3" :disabled="pickForm.processing" @click="pickUser">
                     Confirmar
+                </PrimaryButton>
+            </template>
+        </ConfirmationModal>
+
+        <!-- Double pick confirmation modal -->
+        <ConfirmationModal :show="showDoubleConfirm" @close="cancelDoublePick">
+            <template #title>Confirmar escolha dupla</template>
+            <template #content>
+                <p class="text-gray-900 mb-4">Deseja escolher estes 2 jogadores?</p>
+                <div class="grid grid-cols-2 gap-2">
+                    <div v-for="player in selectedPlayers" :key="player.id"
+                        class="flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 p-3">
+                        <div class="shrink-0">
+                            <PlayerPhoto :src="player.photo_front" :initial="player.initial" :alt="player.name"
+                                size="lg" />
+                        </div>
+                        <div>
+                            <p class="font-semibold text-gray-900">{{ player.name }}</p>
+                            <PositionBadge :position="player.position" :label="player.position_label" />
+                        </div>
+                    </div>
+                </div>
+            </template>
+            <template #footer>
+                <SecondaryButton @click="cancelDoublePick">Cancelar</SecondaryButton>
+                <PrimaryButton class="ms-3 bg-purple-600 hover:bg-purple-700" :disabled="doublePickProcessing"
+                    @click="submitDoublePick">
+                    <i v-if="doublePickProcessing" class="fa-solid fa-spinner fa-spin mr-2"></i>
+                    Confirmar escolha dupla
                 </PrimaryButton>
             </template>
         </ConfirmationModal>

@@ -23,6 +23,10 @@ class PaymentService
      */
     public function createPaymentForPlayer(Game $game, User $player): void
     {
+        if (! config('services.mercadopago.active', true)) {
+            return;
+        }
+
         if ($player->position === Position::GOALKEEPER || $player->guest) {
             return;
         }

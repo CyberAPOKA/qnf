@@ -88,7 +88,7 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
         </template>
 
         <div class="p-2 lg:p-4">
-            <div class="mx-auto max-w-xl space-y-4">
+            <div class="mx-auto max-w-3xl space-y-4">
                 <GameStatusCard :status="store.game?.status"
                     :status-label="store.game?.status_label" :players-count="store.game?.players_count"
                     :round="store.game?.round">
@@ -150,7 +150,7 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                 <PlayerListCard v-if="!['drafted', 'done'].includes(store.game?.status)" :players="store.game?.players || []" />
 
                 <template v-if="['drafted', 'done'].includes(store.game?.status)">
-                    <div class="grid grid-cols-1 gap-3">
+                    <div class="grid grid-cols-3 gap-1 lg:gap-2">
                         <TeamCard color="green" :team="store.game?.teams?.green" />
                         <TeamCard color="yellow" :team="store.game?.teams?.yellow" />
                         <TeamCard color="blue" :team="store.game?.teams?.blue" />

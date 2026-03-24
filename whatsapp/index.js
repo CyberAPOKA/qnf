@@ -8,6 +8,10 @@ const PORT = process.env.WHATSAPP_PORT || 3001;
 
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/nicomeyer96/whatsapp-web.js-version-fix/main/bypass/webVersion',
+    },
     puppeteer: {
         headless: true,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,

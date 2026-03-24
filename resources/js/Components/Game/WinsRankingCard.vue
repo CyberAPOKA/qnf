@@ -1,6 +1,10 @@
 <script setup>
+import { computed, ref } from 'vue';
 import DataTable from '@/Components/DataTable.vue';
+import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
+
+const showPhotos = ref(true);
 
 defineProps({
     ranking: {
@@ -32,21 +36,32 @@ const rowClass = (row) => {
     return rowBgColors[row.rank] || '';
 };
 
-const columns = [
+const baseColumns = [
     { key: 'rank', label: '#' },
+    { key: 'photo', label: '' },
     { key: 'name', label: 'Jogador', class: 'font-bold text-lg text-gray-900' },
     { key: 'total_score', label: 'Vitórias', align: 'center', class: 'font-bold text-lg text-gray-900' },
     { key: 'games_played', label: 'Jogos', align: 'center', class: 'font-bold text-lg text-gray-900' },
     { key: 'avg_score', label: 'Média', align: 'center', class: 'font-bold text-lg text-gray-900' },
 ];
+
+const columns = computed(() =>
+    showPhotos.value ? baseColumns : baseColumns.filter((c) => c.key !== 'photo'),
+);
 </script>
 
 <template>
     <div class="rounded-xl bg-white p-2 lg:p-4 shadow">
-        <h3 class="mb-3 text-base font-semibold text-gray-900">
-            <i class="fa-solid fa-ranking-star mr-1 text-amber-500"></i>
-            Ranking de Vitórias
-        </h3>
+        <div class="flex items-center justify-between">
+            <h3 class="text-base font-semibold text-gray-900">
+                <i class="fa-solid fa-ranking-star mr-1 text-amber-500"></i>
+                Ranking de Vitórias
+            </h3>
+            <label class="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+                <input type="checkbox" v-model="showPhotos" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                Fotos
+            </label>
+        </div>
 
         <DataTable :columns="columns" :rows="ranking" :row-class="rowClass"
             empty-message="Nenhum jogo finalizado ainda.">
@@ -56,6 +71,9 @@ const columns = [
                         :class="medalColors[row.rank]"></i>
                 </span>
                 <span v-else class="font-bold text-lg text-gray-900">{{ row.rank }}º</span>
+            </template>
+            <template #cell-photo="{ row }">
+                <PlayerPhoto :src="row.photo_front" :initial="row.initial" :alt="row.name" />
             </template>
             <template #cell-name="{ row }">
                 <div class="flex items-center gap-2">

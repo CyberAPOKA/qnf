@@ -62,7 +62,7 @@ const members = computed(() => {
             id: props.team.captain.id,
             name: props.team.captain.name,
             badgeIcon: 'fa-solid fa-copyright',
-            badgeClass: 'text-gray-900',
+            badgeClass: 'text-gray-900  lg:text-lg',
         });
     }
 
@@ -71,10 +71,10 @@ const members = computed(() => {
         let badgeClass = '';
         if (player.position === 'goalkeeper') {
             badgeIcon = 'fa-solid fa-mitten';
-            badgeClass = 'text-gray-900';
+            badgeClass = 'text-gray-900  lg:text-lg';
         } else if (player.is_first_pick) {
             badgeIcon = 'fa-solid fa-1';
-            badgeClass = 'text-gray-900';
+            badgeClass = 'text-gray-900  lg:text-lg';
         }
         list.push({
             id: player.id,
@@ -152,22 +152,26 @@ const addMember = () => {
         onSuccess: () => { selectedPlayer.value = null; },
     });
 };
+
+const firstName = (name) => {
+    return name.split(' ')[0];
+};
 </script>
 
 <template>
-    <div class="rounded-xl p-4 border" :class="[config.bg, config.text, config.border]">
-        <div class="mb-2 flex items-center justify-between">
-            <p class="text-lg font-bold">{{ config.label }}</p>
-            <span v-if="team?.score != null" class="text-lg font-bold">{{ team.score }}</span>
+    <div class="rounded-md lg:rounded-xl p-1 lg:p-4 border" :class="[config.bg, config.text, config.border]">
+        <div class="flex items-center justify-between">
+            <p class=" lg:text-lg font-bold">{{ config.label }}</p>
+            <span v-if="team?.score != null" class=" lg:text-lg font-bold">{{ team.score }}</span>
         </div>
-        <ul class="space-y-1 text-sm">
-            <li v-for="member in members" :key="member.id" class="flex items-center gap-1.5">
-                <i class="fa-solid fa-circle text-[12px]" :class="config.dot"></i>
-                <span class="text-base font-bold">{{ member.name }}</span>
+        <ul class="space-y-1 ">
+            <li v-for="member in members" :key="member.id" class="flex items-center gap-1 lg:gap-2">
+                <i class="fa-solid fa-circle text-[8px] lg:" :class="config.dot"></i>
+                <span class=" lg:text-lg font-bold">{{ firstName(member.name) }}</span>
                 <i v-if="member.badgeIcon" :class="[member.badgeIcon, member.badgeClass]"></i>
                 <button v-if="editable" @click="removeMember(member.id)" :disabled="removeForm.processing"
                     class="ml-auto rounded p-1 text-red-500 hover:bg-red-100 hover:text-red-700 transition">
-                    <i class="fa-solid fa-xmark text-sm"></i>
+                    <i class="fa-solid fa-xmark "></i>
                 </button>
             </li>
         </ul>
@@ -178,14 +182,14 @@ const addMember = () => {
                 <template #option="{ option }">
                     <div class="flex items-center gap-2">
                         <span>{{ option.name }}</span>
-                        <span class="rounded-full px-2 py-0.5 text-xs font-semibold bg-gray-100 text-gray-700">
+                        <span class="rounded-full px-2 py-0.5  font-semibold bg-gray-100 text-gray-700">
                             {{ option.position_label }}
                         </span>
                     </div>
                 </template>
             </Select>
             <button @click="addMember" :disabled="addForm.processing || !selectedPlayer"
-                class="rounded-md bg-white px-3 py-1.5 text-sm font-semibold shadow-sm border border-gray-300 hover:bg-gray-50 disabled:opacity-50">
+                class="rounded-md bg-white px-3 py-1.5  font-semibold shadow-sm border border-gray-300 hover:bg-gray-50 disabled:opacity-50">
                 <i class="fa-solid fa-plus"></i>
             </button>
         </div>

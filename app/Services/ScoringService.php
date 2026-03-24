@@ -8,6 +8,7 @@ use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class ScoringService
@@ -145,10 +146,11 @@ class ScoringService
                 'users.id',
                 'users.name',
                 'users.position',
+                'users.photo_front',
                 DB::raw('COUNT(game_players.id) as games_played'),
                 DB::raw("CASE WHEN users.position = 'goalkeeper' THEN COUNT(game_players.id) ELSE CAST(SUM(game_players.points) AS UNSIGNED) END as total_points"),
             )
-            ->groupBy('users.id', 'users.name', 'users.position');
+            ->groupBy('users.id', 'users.name', 'users.position', 'users.photo_front');
 
         if ($excludeGameId !== null) {
             $query->where('game_players.game_id', '!=', $excludeGameId);
@@ -198,10 +200,28 @@ class ScoringService
     }
 
     /**
+     * Últimos N resultados de cada jogador (1 = vitória, 0 = derrota).
+     * Retorna array keyed por user_id => [1, 0, 1, 1, 0] (mais recente primeiro).
+     */
+    public function getLastResults(int $count = 5): array
+    {
+        $rows = DB::table('game_players')
+            ->join('games', 'game_players.game_id', '=', 'games.id')
+            ->where('games.status', GameStatus::DONE->value)
+            ->orderBy('games.date', 'desc')
+            ->select('game_players.user_id', 'game_players.points')
+            ->get();
+
+        $results = [];
+        foreach ($rows->groupBy('user_id') as $userId => $games) {
+            $results[$userId] = $games->take($count)->pluck('points')->map(fn ($p) => (int) $p)->reverse()->values()->all();
+        }
+
+        return $results;
+    }
+
+    /**
      * Ranking agregado de todos os jogos finalizados.
-     *
-     * Delega para getPlayerStats() e aplica ordenação/limite.
-     * Ordenação: pontos desc → jogos desc (desempate) → nome asc
      */
     /**
      * Atribui ranking competitivo (1, 2, 2, 4) a uma coleção de stats,
@@ -264,6 +284,7 @@ class ScoringService
             ->values();
 
         $streaks = $this->getWinStreaks();
+        $lastResults = $this->getLastResults();
         $currentRanks = $this->assignRanks($currentStats);
 
         // Compute previous ranking (excluding last completed game)
@@ -287,7 +308,7 @@ class ScoringService
         $gkRank = 0;
         $gkLast = [null, null];
 
-        return $sorted->map(function ($row) use (&$linePos, &$lineRank, &$lineLast, &$gkPos, &$gkRank, &$gkLast, $streaks, $previousRanks) {
+        return $sorted->map(function ($row) use (&$linePos, &$lineRank, &$lineLast, &$gkPos, &$gkRank, &$gkLast, $streaks, $lastResults, $previousRanks) {
             $player = (array) $row;
             $pts = (int) $player['total_points'];
             $gp = (int) $player['games_played'];
@@ -308,7 +329,12 @@ class ScoringService
                 $player['rank'] = $lineRank;
             }
 
+            $player['photo_front'] = $player['photo_front']
+                ? '/storage/'.$player['photo_front']
+                : null;
+            $player['initial'] = mb_strtoupper(mb_substr($player['name'], 0, 1));
             $player['win_streak'] = $streaks[$player['id']] ?? 0;
+            $player['last_results'] = $lastResults[$player['id']] ?? [];
 
             // rank_change: positive = subiu, negative = desceu, 0 = manteve, null = novo
             if (isset($previousRanks[$player['id']])) {

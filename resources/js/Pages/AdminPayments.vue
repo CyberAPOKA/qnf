@@ -45,7 +45,7 @@ const totalCount = () => props.payments.length;
             <h2 class="font-semibold text-xl text-gray-800 leading-tight">Pagamentos</h2>
         </template>
 
-        <div class="p-2 lg:p-4">
+        <div class="p-1 lg:p-4">
             <div class="mx-auto max-w-2xl space-y-4">
                 <!-- Select de rodada -->
                 <div class="rounded-xl bg-white p-4 shadow">

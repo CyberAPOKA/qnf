@@ -24,8 +24,8 @@ const wonColumns = [
             <TitleCard />
         </template>
 
-        <div class="p-2 lg:p-4">
-            <div class="mx-auto max-w-xl space-y-4">
+        <div class="p-1 lg:p-4">
+            <div class="mx-auto max-w-3xl space-y-4">
                 <div class="rounded-xl bg-white p-4 shadow">
                     <h3 class="mb-3 text-base font-semibold text-gray-900">Mais joguei com</h3>
                     <DataTable

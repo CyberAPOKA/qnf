@@ -16,7 +16,15 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        $this->call(UserSeeder::class);
-        $this->call(GameHistorySeeder::class);
+        if (!app()->environment('local')) {
+            return;
+        }
+
+        $this->call([
+            UserSeeder::class,
+            GameHistorySeeder::class,
+            AbilitySeeder::class,
+            PlayerPhotoSeeder::class
+        ]);
     }
 }

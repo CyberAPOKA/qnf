@@ -21,6 +21,8 @@ class WhatsAppService
     public function sendToGroup(string $message): bool
     {
         if (! $this->active) {
+            Log::info('[WhatsApp] (inactive) Group message:', ['message' => $message]);
+
             return false;
         }
 

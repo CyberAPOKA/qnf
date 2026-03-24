@@ -371,7 +371,7 @@ class AdminGameController extends Controller
         DB::transaction(function () use ($game, $validated): void {
             $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
 
-            if (! in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL, GameStatus::DRAFTED])) {
+            if (! in_array($lockedGame->status, [GameStatus::SCHEDULED, GameStatus::OPEN, GameStatus::FULL, GameStatus::DRAFTED])) {
                 throw ValidationException::withMessages(['remove' => 'Não é possível remover jogadores neste momento.']);
             }
 

@@ -56,11 +56,12 @@ class RoundWinsRankingService
                 'users.id',
                 'users.name',
                 'users.position',
+                'users.photo_front',
                 DB::raw('CAST(SUM(player_scores.score) AS UNSIGNED) as total_score'),
                 DB::raw('COUNT(DISTINCT player_scores.game_id) as games_played'),
                 DB::raw('ROUND(SUM(player_scores.score) / COUNT(DISTINCT player_scores.game_id), 1) as avg_score'),
             )
-            ->groupBy('users.id', 'users.name', 'users.position');
+            ->groupBy('users.id', 'users.name', 'users.position', 'users.photo_front');
 
         if (! $includeGuests) {
             $playerTeamScores->where('users.guest', false);
@@ -93,6 +94,8 @@ class RoundWinsRankingService
                 'id' => $row->id,
                 'name' => $row->name,
                 'position' => $row->position,
+                'photo_front' => $row->photo_front ? '/storage/'.$row->photo_front : null,
+                'initial' => mb_strtoupper(mb_substr($row->name, 0, 1)),
                 'total_score' => $score,
                 'games_played' => (int) $row->games_played,
                 'avg_score' => $avg,

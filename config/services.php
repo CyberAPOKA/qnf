@@ -46,6 +46,7 @@ return [
     ],
 
     'mercadopago' => [
+        'active' => env('PAYMENTS_ACTIVE', true),
         'access_token' => env('MERCADOPAGO_ACCESS_TOKEN'),
         'webhook_url' => env('MERCADOPAGO_WEBHOOK_URL'),
     ],

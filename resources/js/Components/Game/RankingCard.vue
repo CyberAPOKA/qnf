@@ -1,8 +1,12 @@
 <script setup>
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import DataTable from '@/Components/DataTable.vue';
+import FireIcon from '@/Components/Game/FireIcon.vue';
+import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
 import { useClipboard } from '@/composables/useClipboard';
+
+const showPhotos = ref(true);
 
 const props = defineProps({
     ranking: {
@@ -65,22 +69,30 @@ const lineRowClass = (row) => {
     return '';
 };
 
-const lineColumns = [
-    { key: 'rank', label: '#' },
-    { key: 'name', label: 'Jogador', class: 'font-bold text-lg text-gray-900' },
-    { key: 'total_points', label: 'Pontos', align: 'center', class: 'font-bold text-lg text-gray-900' },
-    { key: 'games_played', label: 'Jogos', align: 'center', class: 'font-bold text-lg text-gray-900' },
-    { key: 'rank_change', label: '', align: 'center' },
-    // { key: 'win_streak', label: 'Sequência', align: 'center', class: 'font-bold text-lg text-gray-900' },
+const baseLineColumns = [
+    { key: 'rank', label: 'Rank', align: 'center' },
+    { key: 'photo', label: 'Foto', align: 'center' },
+    { key: 'name', label: 'Jogador', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
+    { key: 'total_points', label: 'PTS', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
+    { key: 'games_played', label: 'PJ', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
+    { key: 'last_results', label: 'Últimas 5', align: 'center' },
 ];
 
-const goalkeeperColumns = [
-    { key: 'rank', label: '#' },
-    { key: 'name', label: 'Jogador', class: 'font-bold text-lg text-gray-900' },
-    { key: 'total_points', label: 'Pontos', align: 'center', class: 'font-bold text-lg text-gray-900' },
-    { key: 'games_played', label: 'Jogos', align: 'center', class: 'font-bold text-lg text-gray-900' },
-    { key: 'rank_change', label: '', align: 'center' },
+const baseGoalkeeperColumns = [
+    { key: 'rank', label: 'Rank', align: 'center' },
+    { key: 'photo', label: '' },
+    { key: 'name', label: 'Jogador', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
+    { key: 'total_points', label: 'PTS', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
+    { key: 'games_played', label: 'PJ', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
 ];
+
+const lineColumns = computed(() =>
+    showPhotos.value ? baseLineColumns : baseLineColumns.filter((c) => c.key !== 'photo'),
+);
+
+const goalkeeperColumns = computed(() =>
+    showPhotos.value ? baseGoalkeeperColumns : baseGoalkeeperColumns.filter((c) => c.key !== 'photo'),
+);
 
 // --- Ranking WhatsApp message ---
 
@@ -106,44 +118,64 @@ const copyRankingMessage = () => copyRanking(rankingMessage.value);
 </script>
 
 <template>
-    <div class="rounded-xl bg-white p-2 lg:p-4 shadow">
-        <div class="mb-3 flex items-center justify-between">
+    <div class="rounded-xl bg-white sm:px-2 lg:p-4 shadow">
+        <div class="flex items-center justify-between p-2">
             <h3 class="text-base font-semibold text-gray-900">Ranking - Linha</h3>
-            <button v-if="rankingMessage" @click="copyRankingMessage"
-                class="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition">
-                <i class="fa-brands fa-whatsapp mr-1"></i>
-                {{ copyRankingLabel }}
-            </button>
+            <div class="flex items-center gap-3">
+                <label class="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+                    <input type="checkbox" v-model="showPhotos"
+                        class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
+                    Fotos
+                </label>
+                <button v-if="rankingMessage" @click="copyRankingMessage"
+                    class="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition">
+                    <i class="fa-brands fa-whatsapp mr-1"></i>
+                    {{ copyRankingLabel }}
+                </button>
+            </div>
         </div>
         <DataTable :columns="lineColumns" :rows="linePlayers" :row-class="lineRowClass"
             empty-message="Nenhum jogo finalizado ainda.">
             <template #cell-rank="{ row }">
-                <span v-if="row.medal" class="text-lg">
-                    <i class="!text-2xl fa-solid fa-medal drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]"
-                        :class="medalColors[row.medal]"></i>
-                </span>
-                <span v-else class="font-bold text-lg text-gray-900">{{ row.rank }}º</span>
-            </template>
-            <template #cell-name="{ row }">
-                <div class="flex items-center gap-2">
-                    <i v-if="row.win_streak >= 3" class="fa-solid fa-fire qnf-fire"></i>
-                    <span class="font-medium text-gray-900">{{ row.name }}</span>
-                    <PositionBadge :position="row.position" :label="positionLabels[row.position] || row.position" />
+                <div class="flex flex-col items-center">
+                    <span v-if="row.medal" class="text-lg">
+                        <i class="!text-2xl fa-solid fa-medal drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]"
+                            :class="medalColors[row.medal]"></i>
+                    </span>
+                    <span v-else class="font-bold text-sm sm:text-base lg:text-lg text-gray-900">{{ row.rank }}º</span>
+                    <span v-if="row.rank_change === null" class="text-xs text-blue-500 font-semibold">NOVO</span>
+                    <span v-else-if="row.rank_change > 0" class="text-green-600 flex items-center gap-0.5">
+                        <i class="fa-solid fa-circle-up text-xs"></i>
+                        <span class="text-xs font-bold">{{ row.rank_change }}</span>
+                    </span>
+                    <span v-else-if="row.rank_change < 0" class="text-red-500 flex items-center gap-0.5">
+                        <i class="fa-solid fa-circle-down text-xs"></i>
+                        <span class="text-xs font-bold">{{ Math.abs(row.rank_change) }}</span>
+                    </span>
+                    <span v-else class="text-gray-400">
+                        <i class="fa-solid fa-circle-minus text-xs"></i>
+                    </span>
                 </div>
             </template>
-            <template #cell-rank_change="{ row }">
-                <span v-if="row.rank_change === null" class="text-xs text-blue-500 font-semibold">NOVO</span>
-                <span v-else-if="row.rank_change > 0" class="text-green-600 flex items-center justify-center gap-0.5">
-                    <i class="fa-solid fa-circle-up"></i>
-                    <span class="text-xs font-bold">{{ row.rank_change }}</span>
-                </span>
-                <span v-else-if="row.rank_change < 0" class="text-red-500 flex items-center justify-center gap-0.5">
-                    <i class="fa-solid fa-circle-down"></i>
-                    <span class="text-xs font-bold">{{ Math.abs(row.rank_change) }}</span>
-                </span>
-                <span v-else class="text-gray-400">
-                    <i class="fa-solid fa-circle-minus"></i>
-                </span>
+            <template #cell-photo="{ row }">
+                <PlayerPhoto :src="row.photo_front" :initial="row.initial" :alt="row.name" />
+            </template>
+            <template #cell-name="{ row }">
+                <div class="flex items-center gap-1">
+                    <FireIcon :streak="row.win_streak" />
+                    <span class="text-sm md:text-base lg:text-lg font-medium text-gray-900">
+                        {{ row.name }}
+                    </span>
+                    <PositionBadge v-if="!showPhotos" :position="row.position" :label="positionLabels[row.position] || row.position" />
+                </div>
+            </template>
+            <template #cell-last_results="{ row }">
+                <div class="flex items-center justify-center">
+                    <span v-for="(result, i) in row.last_results" :key="i">
+                        <i v-if="result === 1" class="fa-regular fa-circle-check text-green-600 text-xs"></i>
+                        <i v-else class="fa-regular fa-circle-xmark text-red-500 text-xs"></i>
+                    </span>
+                </div>
             </template>
         </DataTable>
     </div>
@@ -151,55 +183,31 @@ const copyRankingMessage = () => copyRanking(rankingMessage.value);
     <div class="rounded-xl bg-white p-2 lg:p-4 shadow">
         <h3 class="mb-3 text-base font-semibold text-gray-900">Ranking - Goleiros</h3>
 
-        <DataTable :columns="goalkeeperColumns" :rows="goalkeepers" empty-message="Nenhum goleiro com jogos ainda.">
+        <DataTable :columns="goalkeeperColumns" :rows="goalkeepers" empty-message="Nenhum goleiro com PJ ainda.">
             <template #cell-rank="{ row }">
-                <span class="font-bold text-lg text-gray-900">{{ row.rank }}º</span>
-            </template>
-            <template #cell-name="{ row }">
-                <div class="flex items-center gap-2">
-                    <span class="font-medium text-gray-900">{{ row.name }}</span>
-                    <PositionBadge :position="row.position" :label="positionLabels[row.position] || row.position" />
+                <div class="flex flex-col items-center">
+                    <span class="font-bold text-sm sm:text-base lg:text-lg text-gray-900">{{ row.rank }}º</span>
+                    <span v-if="row.rank_change === null" class="text-xs text-blue-500 font-semibold">NOVO</span>
+                    <span v-else-if="row.rank_change > 0" class="text-green-600 flex items-center gap-0.5">
+                        <i class="fa-solid fa-circle-up text-xs"></i>
+                        <span class="text-xs font-bold">{{ row.rank_change }}</span>
+                    </span>
+                    <span v-else-if="row.rank_change < 0" class="text-red-500 flex items-center gap-0.5">
+                        <i class="fa-solid fa-circle-down text-xs"></i>
+                        <span class="text-xs font-bold">{{ Math.abs(row.rank_change) }}</span>
+                    </span>
+                    <span v-else class="text-gray-400">
+                        <i class="fa-solid fa-circle-minus text-xs"></i>
+                    </span>
                 </div>
             </template>
-            <template #cell-rank_change="{ row }">
-                <span v-if="row.rank_change === null" class="text-xs text-blue-500 font-semibold">NOVO</span>
-                <span v-else-if="row.rank_change > 0" class="text-green-600 flex items-center justify-center gap-0.5">
-                    <i class="fa-solid fa-circle-up"></i>
-                    <span class="text-xs font-bold">{{ row.rank_change }}</span>
-                </span>
-                <span v-else-if="row.rank_change < 0" class="text-red-500 flex items-center justify-center gap-0.5">
-                    <i class="fa-solid fa-circle-down"></i>
-                    <span class="text-xs font-bold">{{ Math.abs(row.rank_change) }}</span>
-                </span>
-                <span v-else class="text-gray-400">
-                    <i class="fa-solid fa-circle-minus"></i>
-                </span>
+            <template #cell-photo="{ row }">
+                <PlayerPhoto :src="row.photo_front" :initial="row.initial" :alt="row.name" />
+            </template>
+            <template #cell-name="{ row }">
+                <span class="font-medium text-gray-900">{{ row.name }}</span>
             </template>
         </DataTable>
     </div>
 </template>
 
-<style scoped>
-.qnf-fire {
-    color: #ff3b30;
-    filter: drop-shadow(0 0 10px rgba(255, 90, 0, .75));
-    animation: qnfFlame .55s ease-in-out infinite alternate;
-}
-
-@keyframes qnfFlame {
-    0% {
-        transform: translateY(1px) scale(.98) rotate(-6deg);
-        filter: drop-shadow(0 0 8px rgba(255, 110, 0, .65));
-    }
-    100% {
-        transform: translateY(-2px) scale(1.08) rotate(6deg);
-        filter: drop-shadow(0 0 14px rgba(255, 180, 0, .85));
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .qnf-fire {
-        animation: none !important;
-    }
-}
-</style>

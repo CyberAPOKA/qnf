@@ -34,6 +34,8 @@ class GamePayload
 
         $statsMap = collect();
         $rankMap = collect();
+        $lastResultsMap = [];
+        $winStreaksMap = [];
 
         if ($scoringService !== null) {
             $availableIds = $availableUsers->pluck('id')->all();
@@ -43,12 +45,17 @@ class GamePayload
 
             $rankMap = collect($scoringService->getRanking(limit: 999, includeGuests: true))
                 ->pluck('rank', 'id');
+
+            $lastResultsMap = $scoringService->getLastResults();
+            $winStreaksMap = $scoringService->getWinStreaks();
         }
 
         $availablePlayers = $availableUsers
-            ->map(function ($user) use ($statsMap, $rankMap) {
+            ->map(function ($user) use ($statsMap, $rankMap, $lastResultsMap, $winStreaksMap) {
                 $data = (new PlayerResource($user))->withStats($statsMap->get($user->id))->resolve();
                 $data['rank'] = $rankMap->get($user->id);
+                $data['last_results'] = $lastResultsMap[$user->id] ?? [];
+                $data['win_streak'] = $winStreaksMap[$user->id] ?? 0;
 
                 return $data;
             })
@@ -63,6 +70,11 @@ class GamePayload
         $teamsPayload = $draftService->teamsWithPlayers($game);
         $turnColor = $draftService->currentTurnColor($game);
 
+        $totalPicks = $game->draftPicks->count();
+        $isDoublePick = $totalPicks < 11
+            && isset(DraftService::SNAKE_SEQUENCE[$totalPicks + 1])
+            && $turnColor === DraftService::SNAKE_SEQUENCE[$totalPicks + 1];
+
         return [
             'id' => $game->id,
             'date' => optional($game->date)->toDateString(),
@@ -76,6 +88,7 @@ class GamePayload
             'teams' => $teamsPayload,
             'picks' => DraftPickResource::collection($game->draftPicks->sortBy('id')->values())->resolve(),
             'turn_color' => $turnColor?->value,
+            'is_double_pick' => $isDoublePick,
             'available_players' => $availablePlayers,
             'whatsapp_message' => in_array($game->status, [GameStatus::DRAFTED, GameStatus::DONE]) ? $draftService->buildWhatsAppMessage($game) : null,
         ];

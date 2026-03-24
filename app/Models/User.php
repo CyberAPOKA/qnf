@@ -11,6 +11,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Jetstream\HasProfilePhoto;
+use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
@@ -100,6 +101,21 @@ class User extends Authenticatable
     public function captainedTeams(): HasMany
     {
         return $this->hasMany(Team::class, 'captain_user_id');
+    }
+
+    public function getPhotoFrontUrlAttribute(): ?string
+    {
+        return $this->photo_front ? Storage::url($this->photo_front) : null;
+    }
+
+    public function getPhotoSideUrlAttribute(): ?string
+    {
+        return $this->photo_side ? Storage::url($this->photo_side) : null;
+    }
+
+    public function getInitialAttribute(): string
+    {
+        return mb_strtoupper(mb_substr($this->name, 0, 1));
     }
 
     public function isSuspended(int $currentRound): bool

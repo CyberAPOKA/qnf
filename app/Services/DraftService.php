@@ -281,6 +281,8 @@ class DraftService
         rescue(fn () => broadcast(new DraftPickMade($payload))->toOthers(), report: false);
         rescue(fn () => broadcast(new DraftTurnChanged($payload))->toOthers(), report: false);
 
+        rescue(fn () => $this->notifyPick($freshGame, $pick), report: false);
+
         if ($freshGame->status === GameStatus::DRAFTED) {
             $slimPayload = [
                 'id' => $freshGame->id,
@@ -297,6 +299,80 @@ class DraftService
         }
 
         return $pick;
+    }
+
+    private function notifyPick(Game $game, DraftPick $pick): void
+    {
+        $colorEmojis = [
+            TeamColor::GREEN->value => '🟢',
+            TeamColor::YELLOW->value => '🟡',
+            TeamColor::BLUE->value => '🔵',
+        ];
+
+        $pick->loadMissing('pickedUser');
+        $pickIndex = $game->draftPicks()->where('id', '<=', $pick->id)->count() - 1;
+        $teamColor = $pick->team_color;
+
+        // If this is the first pick of a double, skip — the second pick will send both
+        if ($pickIndex < 11 && isset(self::SNAKE_SEQUENCE[$pickIndex + 1]) && self::SNAKE_SEQUENCE[$pickIndex + 1] === $teamColor) {
+            return;
+        }
+
+        $team = $game->teams->firstWhere('color', $teamColor);
+        $captain = $team?->captain;
+        $emoji = $colorEmojis[$teamColor->value] ?? '';
+        $teamLabel = $teamColor->label();
+
+        // Check if this is the second pick of a double
+        $isSecondOfDouble = $pickIndex > 0
+            && isset(self::SNAKE_SEQUENCE[$pickIndex - 1])
+            && self::SNAKE_SEQUENCE[$pickIndex - 1] === $teamColor;
+
+        if ($isSecondOfDouble) {
+            $previousPick = $game->draftPicks()
+                ->with('pickedUser')
+                ->orderByDesc('id')
+                ->skip(1)
+                ->first();
+
+            $firstName = $previousPick?->pickedUser?->name ?? '?';
+            $secondName = $pick->pickedUser->name;
+
+            $isFirstGk = $previousPick?->pickedUser?->position === Position::GOALKEEPER;
+            $isSecondGk = $pick->pickedUser->position === Position::GOALKEEPER;
+
+            if ($isFirstGk && $isSecondGk) {
+                $message = "Capitão *{$captain->name}* escolheu os Goleiros *{$firstName}* e *{$secondName}* para o Time {$teamLabel} {$emoji}";
+            } elseif ($isFirstGk) {
+                $message = "Capitão *{$captain->name}* escolheu o Goleiro *{$firstName}* e *{$secondName}* para o Time {$teamLabel} {$emoji}";
+            } elseif ($isSecondGk) {
+                $message = "Capitão *{$captain->name}* escolheu *{$firstName}* e o Goleiro *{$secondName}* para o Time {$teamLabel} {$emoji}";
+            } else {
+                $message = "Capitão *{$captain->name}* escolheu *{$firstName}* e *{$secondName}* para o Time {$teamLabel} {$emoji}";
+            }
+        } else {
+            $pickedName = $pick->pickedUser->name;
+            $isGoalkeeper = $pick->pickedUser->position === Position::GOALKEEPER;
+
+            $message = $isGoalkeeper
+                ? "Capitão *{$captain->name}* escolheu o Goleiro *{$pickedName}* para o Time {$teamLabel} {$emoji}"
+                : "Capitão *{$captain->name}* escolheu *{$pickedName}* para o Time {$teamLabel} {$emoji}";
+        }
+
+        // Next turn info
+        $nextTurnColor = $this->currentTurnColor($game);
+        if ($nextTurnColor && $game->status === GameStatus::DRAFTING) {
+            $nextTeam = $game->teams->firstWhere('color', $nextTurnColor);
+            $nextCaptain = $nextTeam?->captain;
+            $nextEmoji = $colorEmojis[$nextTurnColor->value] ?? '';
+            $nextLabel = $nextTurnColor->label();
+
+            if ($nextCaptain) {
+                $message .= "\n\nVez de *{$nextCaptain->name}* escolher para o Time {$nextLabel} {$nextEmoji}";
+            }
+        }
+
+        $this->whatsAppService->sendToGroup($message);
     }
 
     public function buildWhatsAppMessage(Game $game): string

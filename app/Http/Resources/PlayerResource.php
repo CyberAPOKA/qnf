@@ -25,6 +25,8 @@ class PlayerResource extends JsonResource
             'position' => $this->position->value,
             'position_label' => $this->position->label(),
             'guest' => $this->guest,
+            'photo_front' => $this->photo_front ? '/storage/'.$this->photo_front : null,
+            'initial' => mb_strtoupper(mb_substr($this->name, 0, 1)),
             'games_played' => $this->stats?->games_played ?? 0,
             'total_points' => $this->stats?->total_points ?? 0,
         ];

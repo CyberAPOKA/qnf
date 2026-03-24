@@ -25,7 +25,7 @@ const unpaidCount = () => props.payments.filter(p => !p.paid_at).length;
 
 <template>
     <div v-if="payments.length" class="rounded-xl bg-white p-2 lg:p-4 shadow">
-        <div class="mb-3 flex items-center justify-between">
+        <div class="flex items-center justify-between">
             <h3 class="text-base font-semibold text-gray-900">
                 <i class="fa-brands fa-pix text-[#32BCAD] mr-1"></i>
                 Pagamentos

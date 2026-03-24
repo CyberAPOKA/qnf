@@ -41,8 +41,8 @@ const alignClass = (align) => {
         <table v-else class="w-full text-sm">
             <thead>
                 <tr class="border-b text-left text-xs font-semibold uppercase text-gray-900">
-                    <th v-if="numbered" class="pb-2 pr-2">#</th>
-                    <th v-for="col in columns" :key="col.key" class="pb-2 pr-2 last:pr-0"
+                    <th v-if="numbered" class="pb-1 pr-1 lg:pb-2 lg:pr-2">#</th>
+                    <th v-for="col in columns" :key="col.key" class="pb-1 pr-1 lg:pb-2 lg:pr-2 last:pr-0"
                         :class="alignClass(col.align)">
                         {{ col.label }}
                     </th>
@@ -51,8 +51,8 @@ const alignClass = (align) => {
             <tbody>
                 <tr v-for="(row, index) in rows" :key="row[rowKey] ?? index" class="border-b last:border-0"
                     :class="rowClass ? rowClass(row, index) : ''">
-                    <td v-if="numbered" class="py-2 pr-2 font-bold text-gray-900">{{ index + 1 }}</td>
-                    <td v-for="col in columns" :key="col.key" class="py-2 pr-2 last:pr-0"
+                    <td v-if="numbered" class="py-1 pr-1 lg:py-2 lg:pr-2 font-bold text-gray-900">{{ index + 1 }}</td>
+                    <td v-for="col in columns" :key="col.key" class="py-1 pr-1 lg:py-2 lg:pr-2 last:pr-0"
                         :class="[alignClass(col.align), col.class]">
                         <slot :name="'cell-' + col.key" :row="row" :value="row[col.key]" :index="index">
                             {{ row[col.key] }}

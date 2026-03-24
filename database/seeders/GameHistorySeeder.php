@@ -375,6 +375,7 @@ class GameHistorySeeder extends Seeder
             ],
         ],
 
+        // ─── RODADA 10 ────────────────────────────────────
         [
             'date'   => '2026-03-20',
             'scores' => ['green' => 5, 'yellow' => 1, 'blue' => 0],
@@ -403,6 +404,39 @@ class GameHistorySeeder extends Seeder
                     '555196304074', // Gustavo Mendes
                     '555198249498', // Mateus Nogueira (Zé) 🧤
                     '555196705353', // Vitor (BTP)
+                ],
+            ],
+        ],
+
+        // ─── RODADA 11 (CORRIGIDA) ─────────────────────────
+        [
+            'date'   => '2026-03-27',
+            'scores' => ['green' => 1, 'yellow' => 3, 'blue' => 6],
+            'green'  => [
+                'captain' => '555195486465', // Salenave ©️
+                'players' => [
+                    '555198928569', // Rodrigo (Beto) 🔟
+                    'guest:Julio Brill',
+                    '555196819002', // Brayan Dorneles
+                    '555199562969', // Silvio Schneider 🧤
+                ],
+            ],
+            'yellow' => [
+                'captain' => '555199304836', // Christian Steffens ©️
+                'players' => [
+                    '555199329888', // Jair Benhur 🔟
+                    '555196853483', // Motta
+                    '555196272812', // Daniel
+                    'guest:gk:João',
+                ],
+            ],
+            'blue'   => [
+                'captain' => '555199113865', // Guto Cenci ©️
+                'players' => [
+                    '555195864516', // Jean Barbosa 🔟
+                    '555199233129', // Rogério
+                    '555198249498', // Mateus Nogueira (Zé) 🧤
+                    '555199885564', // Roth
                 ],
             ],
         ],
