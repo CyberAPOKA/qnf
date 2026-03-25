@@ -54,7 +54,8 @@ const confirmRemove = () => {
                     <div class="flex flex-col items-center justify-center">
                         <PlayerPhoto :src="player.photo_front || '/assets/week_team/unknown_player.png'"
                             :initial="player.initial" :alt="player.name" size="md" />
-                        <span class="font-bold text-white lg:text-lg mt-1 absolute bottom-1 lg:bottom-3">
+                        <div class="border border-b border-orange-400 mt-2 w-full"></div>
+                        <span class="font-bold text-white lg:text-lg">
                             {{ player.name }}
                         </span>
                         <Button v-if="editable" severity="danger" size="small" @click="askRemove(player)"

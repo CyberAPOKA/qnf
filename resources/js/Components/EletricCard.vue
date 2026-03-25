@@ -17,7 +17,7 @@ defineProps({
                 class="pointer-events-none absolute inset-0 opacity-[0.06] bg-[repeating-linear-gradient(180deg,rgba(255,255,255,0.2)_0px,rgba(255,255,255,0.2)_1px,transparent_2px,transparent_4px)]">
             </div>
 
-            <div class="relative z-[2] flex h-full flex-col p-2 sm:p-4">
+            <div class="relative z-[2] flex h-full flex-col p-1 sm:p-2">
                 <div v-if="badge" class="mb-3">
                     <span
                         class="inline-flex rounded-full border border-white/20 bg-white/5 px-3 py-1 text-[10px] font-semibold tracking-wide text-[#f7e7d2]">

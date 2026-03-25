@@ -230,49 +230,54 @@ watch([linePlayers, showPhotos], refreshFire);
 </template>
 
 <style>
-/* Pulsing glow around streak rows */
 .qnf-streak-row {
-    animation: qnfOuterGlow 2s ease-in-out infinite;
+    position: relative;
+    z-index: 0;
+    -webkit-transform: translateZ(0);
+    transform: translateZ(0);
+    animation: qnfPulse 2.2s ease-in-out infinite;
 }
 
-@keyframes qnfOuterGlow {
+.qnf-streak-row > td {
+    background-color: rgba(255, 120, 0, 0.10);
+}
+
+.qnf-streak-row > td:first-child {
+    border-top-left-radius: 10px;
+    border-bottom-left-radius: 10px;
+}
+
+.qnf-streak-row > td:last-child {
+    border-top-right-radius: 10px;
+    border-bottom-right-radius: 10px;
+}
+
+@keyframes qnfPulse {
     0% {
         box-shadow:
-            0 0 12px 3px rgba(255, 59, 0, 0.5),
-            0 0 30px 8px rgba(255, 90, 0, 0.2),
-            inset 0 0 40px 10px rgba(255, 80, 0, 0.25),
-            inset 0 0 80px 20px rgba(255, 120, 0, 0.1);
+            inset 0 0 25px rgba(255, 140, 0, 0.45),
+            inset 0 0 60px rgba(255, 180, 0, 0.20),
+            0 0 0 2px rgba(255, 120, 0, 0.6),
+            0 0 18px rgba(255, 100, 0, 0.45),
+            0 0 40px rgba(255, 180, 0, 0.35);
     }
 
-    33% {
+    50% {
         box-shadow:
-            0 0 18px 5px rgba(255, 140, 0, 0.6),
-            0 0 40px 10px rgba(255, 120, 0, 0.25),
-            inset 0 0 50px 15px rgba(255, 120, 0, 0.3),
-            inset 0 0 100px 25px rgba(255, 160, 0, 0.12);
-    }
-
-    66% {
-        box-shadow:
-            0 0 14px 4px rgba(255, 200, 0, 0.5),
-            0 0 35px 8px rgba(255, 160, 0, 0.2),
-            inset 0 0 45px 12px rgba(255, 100, 0, 0.28),
-            inset 0 0 90px 22px rgba(255, 140, 0, 0.1);
+            inset 0 0 35px rgba(255, 140, 0, 0.55),
+            inset 0 0 90px rgba(255, 180, 0, 0.25),
+            0 0 0 2px rgba(255, 120, 0, 0.7),
+            0 0 25px rgba(255, 120, 0, 0.6),
+            0 0 60px rgba(255, 200, 0, 0.45);
     }
 
     100% {
         box-shadow:
-            0 0 12px 3px rgba(255, 59, 0, 0.5),
-            0 0 30px 8px rgba(255, 90, 0, 0.2),
-            inset 0 0 40px 10px rgba(255, 80, 0, 0.25),
-            inset 0 0 80px 20px rgba(255, 120, 0, 0.1);
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .qnf-streak-row {
-        animation: none !important;
-        box-shadow: 0 0 12px 3px rgba(255, 100, 0, 0.4);
+            inset 0 0 25px rgba(255, 140, 0, 0.45),
+            inset 0 0 60px rgba(255, 180, 0, 0.20),
+            0 0 0 2px rgba(255, 120, 0, 0.6),
+            0 0 18px rgba(255, 100, 0, 0.45),
+            0 0 40px rgba(255, 180, 0, 0.35);
     }
 }
 </style>
