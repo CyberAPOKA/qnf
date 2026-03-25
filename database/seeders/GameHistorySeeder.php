@@ -408,7 +408,7 @@ class GameHistorySeeder extends Seeder
             ],
         ],
 
-        // ─── RODADA 11 (CORRIGIDA) ─────────────────────────
+        // ─── RODADA 11 ─────────────────────────
         [
             'date'   => '2026-03-27',
             'scores' => ['green' => 1, 'yellow' => 3, 'blue' => 6],

@@ -77,7 +77,8 @@ const downloadAll = () => {
         <div class="flex items-center justify-between mb-3">
             <h3 class="text-lg font-bold text-yellow-400">
                 <i class="fa-solid fa-star mr-2"></i>
-                Time da Semana
+                <span v-if="images.length > 1">Times da semana</span>
+                <span v-else>Time da Semana</span>
             </h3>
             <div class="flex items-center gap-2">
                 <button @click="downloadAll"

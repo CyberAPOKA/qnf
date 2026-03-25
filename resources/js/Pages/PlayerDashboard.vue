@@ -18,6 +18,7 @@ import { useGameChannel } from '@/composables/useGameChannel';
 import { useDraftRedirect } from '@/composables/useDraftRedirect';
 import { useCountdown } from '@/composables/useCountdown';
 import FuturisticButton from '@/Components/FuturisticButton.vue';
+import Button from 'primevue/button';
 
 const props = defineProps({
     game: Object,
@@ -90,14 +91,12 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
             <TitleCard />
         </template>
 
-        <div class="p-2 lg:p-4">
+        <div class="px-1 py-2 sm:p-2 lg:p-4">
             <div class="mx-auto max-w-3xl space-y-4">
-                <FuturisticButton label="What's Up Danger?" />
                 <WeekTeamCard :images="week_team_images || []" />
 
-                <GameStatusCard :status="store.game?.status"
-                    :status-label="store.game?.status_label" :players-count="store.game?.players_count"
-                    :round="store.game?.round">
+                <GameStatusCard :status="store.game?.status" :status-label="store.game?.status_label"
+                    :players-count="store.game?.players_count" :round="store.game?.round">
                     <template #actions>
 
                         <div v-if="store.game?.status === 'scheduled'" class="text-center">
@@ -121,8 +120,9 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                             </template>
 
                             <template v-else>
-                                <FuturisticButton v-if="canJoin" label="Eu quero jogar" class="w-full justify-center py-3 text-base"
-                                    :disabled="form.processing" @click="joinGame" />
+                                <FuturisticButton v-if="canJoin" label="Eu quero jogar"
+                                    class="w-full justify-center py-3 text-base" :disabled="form.processing"
+                                    @click="joinGame" />
 
                                 <PrimaryButton v-if="canJoinWaitlist"
                                     class="w-full justify-center py-3 text-base !bg-amber-500 hover:!bg-amber-600 focus:!bg-amber-600"
@@ -130,10 +130,9 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                                     Entrar na fila de espera
                                 </PrimaryButton>
 
-                                <button v-if="canQuit" @click="showQuitModal = true"
-                                    class="w-full rounded-md border border-red-300 bg-white px-4 py-3 text-base font-semibold text-red-600 shadow-sm hover:bg-red-50">
+                                <Button v-if="canQuit" @click="showQuitModal = true" severity="danger" fluid>
                                     Eu quero desistir
-                                </button>
+                                </Button>
                             </template>
                         </template>
 
@@ -151,7 +150,8 @@ const { countdown } = useCountdown(() => store.game?.opens_at);
                     </template>
                 </GameStatusCard>
 
-                <PlayerListCard v-if="!['drafted', 'done'].includes(store.game?.status)" :players="store.game?.players || []" />
+                <PlayerListCard v-if="!['drafted', 'done'].includes(store.game?.status)"
+                    :players="store.game?.players || []" />
 
                 <template v-if="['drafted', 'done'].includes(store.game?.status)">
                     <div class="grid grid-cols-3 gap-1 lg:gap-2">

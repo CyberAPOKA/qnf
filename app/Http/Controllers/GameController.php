@@ -4,7 +4,6 @@ namespace App\Http\Controllers;
 
 use App\Enums\GameStatus;
 use App\Enums\Position;
-use Illuminate\Support\Facades\File;
 use App\Events\GamePlayerJoined;
 use App\Jobs\CreatePlayerPaymentJob;
 use App\Models\Game;
@@ -17,6 +16,8 @@ use App\Services\GamePredictionService;
 use App\Services\RoundWinsRankingService;
 use App\Services\ScoringService;
 use App\Services\WaitlistService;
+use App\Services\WeekTeamImageService;
+use Illuminate\Http\JsonResponse;
 use App\Support\GamePayload;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -268,29 +269,27 @@ class GameController extends Controller
         return back();
     }
 
+    public function generateRandomWeekTeam(Request $request, WeekTeamImageService $imageService): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $paths = $imageService->generateRandom();
+
+        $images = array_map(fn ($p) => '/storage/'.$p, $paths);
+
+        return response()->json(['images' => $images]);
+    }
+
     private function getWeekTeamImages(): array
     {
         $lastDoneGame = Game::where('status', GameStatus::DONE)
             ->orderByDesc('id')
             ->first();
 
-        if (! $lastDoneGame) {
+        if (! $lastDoneGame || empty($lastDoneGame->week_team_images)) {
             return [];
         }
 
-        $dir = storage_path('app/public/week_team');
-
-        if (! is_dir($dir)) {
-            return [];
-        }
-
-        $images = [];
-        foreach (File::files($dir) as $file) {
-            if (str_contains($file->getFilename(), '-'.$lastDoneGame->id.'.')) {
-                $images[] = '/storage/week_team/'.$file->getFilename();
-            }
-        }
-
-        return $images;
+        return array_map(fn ($p) => '/storage/'.$p, $lastDoneGame->week_team_images);
     }
 }

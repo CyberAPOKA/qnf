@@ -22,6 +22,7 @@ import { useGameChannel } from '@/composables/useGameChannel';
 import { useDraftRedirect } from '@/composables/useDraftRedirect';
 import MultiSelect from 'primevue/multiselect';
 import FuturisticButton from '@/Components/FuturisticButton.vue';
+import EletricCard from '@/Components/EletricCard.vue';
 
 const props = defineProps({
     game: Object,
@@ -147,6 +148,21 @@ const sendWhatsAppTest = async () => {
     }
 };
 
+const randomTeamLoading = ref(false);
+const randomTeamImages = ref([]);
+
+const generateRandomTeam = async () => {
+    if (randomTeamLoading.value) return;
+    randomTeamLoading.value = true;
+    try {
+        const { data } = await axios.post(route('api.week-team.random'));
+        randomTeamImages.value = data.images || [];
+    } catch (e) {
+        console.error('Failed to generate random team', e);
+    } finally {
+        randomTeamLoading.value = false;
+    }
+};
 </script>
 
 <template>
@@ -157,7 +173,7 @@ const sendWhatsAppTest = async () => {
 
         <div class="p-1 lg:p-4">
             <div class="mx-auto max-w-3xl space-y-4">
-                <WeekTeamCard :images="week_team_images || []" />
+                <WeekTeamCard :images="props.week_team_images || []" />
 
                 <GameStatusCard :status="store.game?.status" :status-label="store.game?.status_label"
                     :players-count="store.game?.players_count" :round="store.game?.round">
@@ -275,7 +291,11 @@ const sendWhatsAppTest = async () => {
                     </button>
                 </div>
 
-                <FuturisticButton label="What's Up Danger?"/>
+                <FuturisticButton :label="randomTeamLoading ? 'Gerando...' : 'What\'s Up Danger?'" @click="generateRandomTeam" />
+                <div v-if="randomTeamImages.length" class="space-y-2">
+                    <img v-for="(src, i) in randomTeamImages" :key="i" :src="src" alt="Time aleatório"
+                        class="w-full rounded-lg shadow" />
+                </div>
             </div>
         </div>
 

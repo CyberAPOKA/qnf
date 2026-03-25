@@ -422,7 +422,7 @@ class AdminGameController extends Controller
             return back()->withErrors($exception->errors());
         }
 
-        GenerateWeekTeamImageJob::dispatch($game->id);
+        GenerateWeekTeamImageJob::dispatchSync($game->id);
 
         return back();
     }

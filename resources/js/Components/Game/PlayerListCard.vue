@@ -3,7 +3,8 @@ import { ref } from 'vue';
 import { useForm } from '@inertiajs/vue3';
 import Button from 'primevue/button';
 import Dialog from 'primevue/dialog';
-import PositionBadge from '@/Components/Game/PositionBadge.vue';
+import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
+import EletricCard from '@/Components/EletricCard.vue';
 
 const props = defineProps({
     players: {
@@ -45,26 +46,25 @@ const confirmRemove = () => {
 
 <template>
     <div class="rounded-xl bg-white p-2 lg:p-4 shadow" v-if="players.length">
-        <h3 class="text-base font-semibold text-gray-900">Inscritos</h3>
-        <ul class="mt-3 space-y-2">
-            <li v-for="player in players" :key="player.id"
-                class="flex items-center justify-between rounded-lg border border-gray-100 px-3 py-2">
-                <div class="flex items-center gap-2">
-                    <span class="text-sm font-medium text-gray-900">{{ player.name }}</span>
-                    <PositionBadge :position="player.position" :label="player.position_label" />
-                    <span v-if="player.guest"
-                        class="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-semibold text-orange-700">
-                        Convidado
-                    </span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <Button v-if="editable" severity="danger" size="small"
-                        @click="askRemove(player)">
-                        Remover <i class="fa-solid fa-xmark"></i>
-                    </Button>
-                </div>
-            </li>
-        </ul>
+        <h3 class="text-2xl font-bold text-gray-900 text-center">Inscritos</h3>
+
+        <div class="grid grid-cols-2 lg:grid-cols-3 gap-2">
+            <EletricCard v-for="player in players" :key="player.id" class="flex flex-col items-center gap-2">
+                <template #default>
+                    <div class="flex flex-col items-center justify-center">
+                        <PlayerPhoto :src="player.photo_front || '/assets/week_team/unknown_player.png'"
+                            :initial="player.initial" :alt="player.name" size="md" />
+                        <span class="font-bold text-white lg:text-lg mt-1 absolute bottom-1 lg:bottom-3">
+                            {{ player.name }}
+                        </span>
+                        <Button v-if="editable" severity="danger" size="small" @click="askRemove(player)"
+                            class="!w-fit !absolute !top-2 !right-2">
+                            <i class="fa-solid fa-xmark"></i>
+                        </Button>
+                    </div>
+                </template>
+            </EletricCard>
+        </div>
 
         <Dialog v-model:visible="confirmVisible" modal header="Remover jogador" :style="{ width: '20rem' }">
             <p class="text-sm text-gray-700">

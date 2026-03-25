@@ -16,6 +16,8 @@ class GamePlayerResource extends JsonResource
             'position' => $this->user->position->value,
             'position_label' => $this->user->position->label(),
             'guest' => $this->user->guest,
+            'photo_front' => $this->user->photo_front_url,
+            'initial' => $this->user->initial,
             'joined_at' => $this->joined_at?->toIso8601String(),
         ];
     }

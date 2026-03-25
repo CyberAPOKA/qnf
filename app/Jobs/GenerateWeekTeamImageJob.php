@@ -30,11 +30,18 @@ class GenerateWeekTeamImageJob implements ShouldQueue
         $paths = $imageService->generate($game);
 
         if (empty($paths)) {
+            $game->update(['week_team_images' => null]);
             Log::info('Week team image: no winners (all tied)', ['game_id' => $this->gameId]);
             return;
         }
 
-        Log::info('Week team images generated', ['game_id' => $this->gameId, 'paths' => $paths]);
+        $updated = $game->update(['week_team_images' => $paths]);
+        Log::info('Week team images generated', [
+            'game_id' => $this->gameId,
+            'paths' => $paths,
+            'db_updated' => $updated,
+            'saved_value' => $game->fresh()->week_team_images,
+        ]);
 
         $round = $game->round ?? $this->gameId;
 

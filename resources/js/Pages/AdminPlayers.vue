@@ -3,6 +3,7 @@ import { ref, computed } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
 import DataTable from '@/Components/DataTable.vue';
+import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
 import DialogModal from '@/Components/DialogModal.vue';
 import InputError from '@/Components/InputError.vue';
@@ -234,10 +235,7 @@ const unsuspend = () => {
                         empty-message="Nenhum jogador cadastrado.">
                         <template #cell-name="{ row }">
                             <div class="flex items-center gap-3">
-                                <img v-if="row.photo_front" :src="row.photo_front" class="h-8 w-8 rounded-full object-cover" />
-                                <div v-else class="flex h-8 w-8 items-center justify-center rounded-full bg-gray-200 text-xs font-bold text-gray-500">
-                                    {{ row.name.charAt(0) }}
-                                </div>
+                                <PlayerPhoto :src="row.photo_front" :initial="row.name.charAt(0)" :alt="row.name" size="sm" />
                                 <span class="font-medium text-gray-900">{{ row.name }}</span>
                                 <span v-if="row.guest" class="rounded bg-yellow-100 px-1.5 py-0.5 text-xs text-yellow-700">Convidado</span>
                             </div>

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue';
+import { computed, ref, watch, onMounted, nextTick } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
@@ -9,9 +9,11 @@ import TeamCard from '@/Components/Game/TeamCard.vue';
 import FireIcon from '@/Components/Game/FireIcon.vue';
 import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
+import Button from 'primevue/button';
 
 import { router, useForm } from '@inertiajs/vue3';
 import { useGameChannel } from '@/composables/useGameChannel';
+import { useFireParticles } from '@/composables/useFireParticles';
 
 const props = defineProps({
     game: Object,
@@ -21,6 +23,15 @@ const props = defineProps({
 
 const { store } = useGameChannel(props);
 const pickForm = useForm({ user_id: null });
+const draftListWrapper = ref(null);
+const { init: initFire } = useFireParticles();
+
+function refreshFire() {
+    nextTick(() => setTimeout(() => initFire(draftListWrapper.value, '.qnf-draft-fire'), 200));
+}
+
+onMounted(refreshFire);
+watch(() => store.game?.available_players, refreshFire);
 
 const turnCaptainName = computed(() => {
     const color = store.game?.turn_color;
@@ -227,32 +238,33 @@ watch(() => store.game?.status, (status) => {
                             Pontos
                         </span>
                     </div>
-                    <ul class="mt-2 space-y-2">
+                    <ul ref="draftListWrapper" class="mt-2 space-y-2" style="position: relative;">
                         <li v-for="player in store.game?.available_players || []" :key="player.id"
                             class="flex flex-col gap-2 rounded-lg border border-gray-500 p-1 transition-colors shadow"
                             :class="[
                                 isDoublePick && isMyTurn && isSelected(player.id)
                                     ? 'border-purple-500 bg-purple-50'
                                     : 'border-gray-100',
-                                isDoublePick && isMyTurn && canPickPlayer(player) ? 'cursor-pointer' : ''
+                                isDoublePick && isMyTurn && canPickPlayer(player) ? 'cursor-pointer' : '',
+                                player.win_streak >= 3 ? 'qnf-draft-fire' : ''
                             ]"
                             @click="isDoublePick && isMyTurn && canPickPlayer(player) ? toggleSelection(player) : null">
 
-                            <div class="flex items-center justify-between gap-4">
+                            <div class="flex items-center justify-between gap-1">
                                 <!-- Photo -->
                                 <div class="shrink-0">
                                     <PlayerPhoto :src="player.photo_front" :initial="player.initial" :alt="player.name"
-                                        size="lg" />
+                                        size="md" class="max-w-28 md:max-w-none"/>
                                 </div>
 
                                 <!-- Info -->
                                 <div class="flex-1 min-w-0 flex flex-col justify-between">
-                                    <div class="flex items-center gap-2">
+                                    <div class="flex items-center">
                                         <FireIcon :streak="player.win_streak" />
                                         <p class="font-bold text-gray-900 truncate">{{ player.name }}</p>
                                         <PositionBadge :position="player.position" :label="player.position_label" />
                                     </div>
-                                    <div class="flex items-center gap-4">
+                                    <div class="flex items-center gap-2">
                                         <div class="flex items-center text-purple-900">
                                             <i class="fa-solid fa-ranking-star"></i>
                                             <span v-if="player.rank != null && player.position !== 'goalkeeper'"
@@ -290,10 +302,10 @@ watch(() => store.game?.status, (status) => {
                                         </div>
                                     </template>
                                     <template v-else>
-                                        <PrimaryButton v-if="canPickPlayer(player)" class="px-4 py-2 text-sm"
+                                        <Button v-if="canPickPlayer(player)" severity="contrast"
                                             :disabled="pickForm.processing" @click="confirmPick(player)">
                                             Escolher
-                                        </PrimaryButton>
+                                        </Button>
                                     </template>
                                 </div>
                             </div>
@@ -336,7 +348,7 @@ watch(() => store.game?.status, (status) => {
                 <div class="flex items-center gap-3">
                     <div class="shrink-0">
                         <PlayerPhoto :src="playerToConfirm?.photo_front" :initial="playerToConfirm?.initial"
-                            :alt="playerToConfirm?.name" size="lg" />
+                            :alt="playerToConfirm?.name" size="md" />
                     </div>
                     <p class="text-gray-900">Deseja escolher
                         <strong class="text-base">
@@ -360,10 +372,10 @@ watch(() => store.game?.status, (status) => {
                 <p class="text-gray-900 mb-4">Deseja escolher estes 2 jogadores?</p>
                 <div class="grid grid-cols-2 gap-2">
                     <div v-for="player in selectedPlayers" :key="player.id"
-                        class="flex items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 p-3">
+                        class="flex flex-col items-center gap-2 rounded-lg border border-purple-200 bg-purple-50 p-3">
                         <div class="shrink-0">
                             <PlayerPhoto :src="player.photo_front" :initial="player.initial" :alt="player.name"
-                                size="lg" />
+                                size="md" />
                         </div>
                         <div>
                             <p class="font-semibold text-gray-900">{{ player.name }}</p>
@@ -383,3 +395,47 @@ watch(() => store.game?.status, (status) => {
         </ConfirmationModal>
     </AppLayout>
 </template>
+
+<style>
+.qnf-draft-fire {
+    animation: qnfDraftGlow 2s ease-in-out infinite;
+}
+
+@keyframes qnfDraftGlow {
+    0% {
+        box-shadow:
+            0 0 12px 3px rgba(255, 59, 0, 0.5),
+            0 0 30px 8px rgba(255, 90, 0, 0.2),
+            inset 0 0 40px 10px rgba(255, 80, 0, 0.25),
+            inset 0 0 80px 20px rgba(255, 120, 0, 0.1);
+    }
+    33% {
+        box-shadow:
+            0 0 18px 5px rgba(255, 140, 0, 0.6),
+            0 0 40px 10px rgba(255, 120, 0, 0.25),
+            inset 0 0 50px 15px rgba(255, 120, 0, 0.3),
+            inset 0 0 100px 25px rgba(255, 160, 0, 0.12);
+    }
+    66% {
+        box-shadow:
+            0 0 14px 4px rgba(255, 200, 0, 0.5),
+            0 0 35px 8px rgba(255, 160, 0, 0.2),
+            inset 0 0 45px 12px rgba(255, 100, 0, 0.28),
+            inset 0 0 90px 22px rgba(255, 140, 0, 0.1);
+    }
+    100% {
+        box-shadow:
+            0 0 12px 3px rgba(255, 59, 0, 0.5),
+            0 0 30px 8px rgba(255, 90, 0, 0.2),
+            inset 0 0 40px 10px rgba(255, 80, 0, 0.25),
+            inset 0 0 80px 20px rgba(255, 120, 0, 0.1);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .qnf-draft-fire {
+        animation: none !important;
+        box-shadow: 0 0 12px 3px rgba(255, 100, 0, 0.4);
+    }
+}
+</style>

@@ -18,13 +18,13 @@ class WeekTeamImageService
     private const LABEL_MARGIN_TOP = -30;
 
     private const POSITIONS = [
-        'captain'      => ['x' => 0,   'y' => 350, 'w' => 550, 'h' => 1650],
-
-        'goalkeeper'   => ['x' => 660, 'y' => 180, 'w' => 250, 'h' => 400,  'label_mt' => -50],
-        'fixed'        => ['x' => 660, 'y' => 500, 'w' => 250, 'h' => 400,  'label_mt' => -50],
-        'winger_left'  => ['x' => 440, 'y' => 630, 'w' => 250, 'h' => 400,  'label_mt' => -50],
-        'winger_right' => ['x' => 860, 'y' => 630, 'w' => 250, 'h' => 400,  'label_mt' => -50],
-        'pivot'        => ['x' => 660, 'y' => 930, 'w' => 250, 'h' => 400,  'label_mt' => -50],
+        'captain'      => ['x' => -20, 'y' => 950, 'w' => 600, 'h' => 1100],
+ 
+        'goalkeeper'   => ['x' => 690,  'y' => 300,  'w' => 200, 'h' => 300,  'label_mt' => -50],
+        'fixed'        => ['x' => 690,  'y' => 650,  'w' => 200, 'h' => 300,  'label_mt' => -50],
+        'winger_left'  => ['x' => 470,  'y' => 770,  'w' => 200, 'h' => 300,  'label_mt' => -50],
+        'winger_right' => ['x' => 890,  'y' => 770,  'w' => 200, 'h' => 300,  'label_mt' => -50],
+        'pivot'        => ['x' => 690,  'y' => 1070,  'w' => 200, 'h' => 300,  'label_mt' => -50],
     ];
 
     /**
@@ -32,16 +32,15 @@ class WeekTeamImageService
      */
     public function generate(Game $game): array
     {
-        $outputDir = storage_path('app/public/week_team');
+        $round = $game->round ?? $game->id;
+        $outputDir = storage_path("app/public/week_team/{$round}");
+
+        // Clean previous images for this round
+        if (is_dir($outputDir)) {
+            File::cleanDirectory($outputDir);
+        }
 
         File::ensureDirectoryExists($outputDir);
-
-        // Delete any previous images for this game
-        foreach (File::files($outputDir) as $file) {
-            if (str_contains($file->getFilename(), '-'.$game->id.'.')) {
-                File::delete($file->getPathname());
-            }
-        }
 
         $game->loadMissing(['teams.captain', 'draftPicks.pickedUser']);
         $winnerColors = $this->getWinnerColors($game);
@@ -59,14 +58,63 @@ class WeekTeamImageService
                 continue;
             }
 
-            $path = $this->generateImage($game, $color, $players, $outputDir);
+            $path = $this->generateImage($color, $players, $outputDir, "week_team/{$round}");
             $paths[] = $path;
         }
 
         return $paths;
     }
 
-    protected function generateImage(Game $game, TeamColor $color, array $players, string $outputDir): string
+    /**
+     * Generate a random "week team" image with random players.
+     *
+     * @return string[] List of generated image paths
+     */
+    public function generateRandom(): array
+    {
+        $outputDir = storage_path('app/public/week_team/random');
+
+        if (is_dir($outputDir)) {
+            File::cleanDirectory($outputDir);
+        }
+
+        File::ensureDirectoryExists($outputDir);
+
+        $allPlayers = User::where('role', '!=', 'admin')
+            ->where('active', true)
+            ->where('guest', false)
+            ->get();
+
+        $goalkeepers = $allPlayers->filter(fn (User $u) => $u->position === Position::GOALKEEPER)->shuffle();
+        $linePlayers = $allPlayers->filter(fn (User $u) => $u->position !== Position::GOALKEEPER)->shuffle();
+
+        if ($goalkeepers->isEmpty() || $linePlayers->count() < 4) {
+            return [];
+        }
+
+        $captain = $linePlayers->shift();
+        $gk = $goalkeepers->first();
+
+        $allLine = collect([$captain])->merge($linePlayers->take(3))->shuffle();
+
+        $players = [
+            'captain'      => $captain,
+            'goalkeeper'   => $gk,
+            'fixed'        => $allLine->get(0),
+            'winger_left'  => $allLine->get(1),
+            'winger_right' => $allLine->get(2),
+            'pivot'        => $allLine->get(3),
+        ];
+
+        $colors = collect(TeamColor::cases())->shuffle();
+        $color = $colors->first();
+
+        $path = $this->generateImage($color, $players, $outputDir, 'week_team/random');
+
+        return [$path];
+    }
+
+    protected function generateImage(TeamColor $color, array $players, string $outputDir, string $relativePath): string
     {
         $basePath = public_path('assets/week_team/base_template.png');
 
@@ -127,13 +175,13 @@ class WeekTeamImageService
             );
         }
 
-        $fileName = 'week-team-game-'.$color->value.'-'.$game->id.'.png';
+        $fileName = 'team-'.$color->value.'.png';
         $fullPath = $outputDir.DIRECTORY_SEPARATOR.$fileName;
 
         imagepng($canvas, $fullPath);
         imagedestroy($canvas);
 
-        return 'week_team/'.$fileName;
+        return $relativePath.'/'.$fileName;
     }
 
     protected function resolvePlayersForColor(Game $game, TeamColor $color): array

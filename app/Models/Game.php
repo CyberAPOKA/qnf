@@ -20,6 +20,7 @@ class Game extends Model
         'round',
         'status',
         'created_by',
+        'week_team_images',
     ];
 
     protected function casts(): array
@@ -29,6 +30,7 @@ class Game extends Model
             'opens_at' => 'datetime',
             'closes_at' => 'datetime',
             'status' => GameStatus::class,
+            'week_team_images' => 'array',
         ];
     }
 
