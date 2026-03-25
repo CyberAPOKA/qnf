@@ -291,7 +291,9 @@ const generateRandomTeam = async () => {
                     </button>
                 </div>
 
-                <FuturisticButton :label="randomTeamLoading ? 'Gerando...' : 'What\'s Up Danger?'" @click="generateRandomTeam" />
+                <!-- GenerateMockRandomTeamButton -->
+
+                <!-- <FuturisticButton :label="randomTeamLoading ? 'Gerando...' : 'What\'s Up Danger?'" @click="generateRandomTeam" /> -->
                 <div v-if="randomTeamImages.length" class="space-y-2">
                     <img v-for="(src, i) in randomTeamImages" :key="i" :src="src" alt="Time aleatório"
                         class="w-full rounded-lg shadow" />
