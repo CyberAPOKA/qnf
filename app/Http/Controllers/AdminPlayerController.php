@@ -73,11 +73,17 @@ class AdminPlayerController extends Controller
         ];
 
         if ($request->hasFile('photo_front')) {
-            $data['photo_front'] = $request->file('photo_front')->store('players', 'public');
+            $path = $request->file('photo_front')->store('players', 'public');
+            if ($path) {
+                $data['photo_front'] = $path;
+            }
         }
 
         if ($request->hasFile('photo_side')) {
-            $data['photo_side'] = $request->file('photo_side')->store('players', 'public');
+            $path = $request->file('photo_side')->store('players', 'public');
+            if ($path) {
+                $data['photo_side'] = $path;
+            }
         }
 
         User::create($data);
@@ -109,17 +115,32 @@ class AdminPlayerController extends Controller
         ]);
 
         if ($request->hasFile('photo_front')) {
-            if ($user->photo_front) {
-                Storage::disk('public')->delete($user->photo_front);
+            $file = $request->file('photo_front');
+            \Log::info('photo_front upload attempt', [
+                'original_name' => $file->getClientOriginalName(),
+                'size' => $file->getSize(),
+                'mime' => $file->getMimeType(),
+                'error' => $file->getError(),
+                'is_valid' => $file->isValid(),
+            ]);
+            $path = $file->store('players', 'public');
+            \Log::info('photo_front store result', ['path' => $path]);
+            if ($path) {
+                if ($user->photo_front) {
+                    Storage::disk('public')->delete($user->photo_front);
+                }
+                $user->photo_front = $path;
             }
-            $user->photo_front = $request->file('photo_front')->store('players', 'public');
         }
 
         if ($request->hasFile('photo_side')) {
-            if ($user->photo_side) {
-                Storage::disk('public')->delete($user->photo_side);
+            $path = $request->file('photo_side')->store('players', 'public');
+            if ($path) {
+                if ($user->photo_side) {
+                    Storage::disk('public')->delete($user->photo_side);
+                }
+                $user->photo_side = $path;
             }
-            $user->photo_side = $request->file('photo_side')->store('players', 'public');
         }
 
         $user->save();
@@ -150,17 +171,23 @@ class AdminPlayerController extends Controller
         ]);
 
         if ($request->hasFile('photo_front')) {
-            if ($user->photo_front) {
-                Storage::disk('public')->delete($user->photo_front);
+            $path = $request->file('photo_front')->store('players', 'public');
+            if ($path) {
+                if ($user->photo_front) {
+                    Storage::disk('public')->delete($user->photo_front);
+                }
+                $user->photo_front = $path;
             }
-            $user->photo_front = $request->file('photo_front')->store('players', 'public');
         }
 
         if ($request->hasFile('photo_side')) {
-            if ($user->photo_side) {
-                Storage::disk('public')->delete($user->photo_side);
+            $path = $request->file('photo_side')->store('players', 'public');
+            if ($path) {
+                if ($user->photo_side) {
+                    Storage::disk('public')->delete($user->photo_side);
+                }
+                $user->photo_side = $path;
             }
-            $user->photo_side = $request->file('photo_side')->store('players', 'public');
         }
 
         $user->save();
