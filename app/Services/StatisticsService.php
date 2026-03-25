@@ -65,17 +65,13 @@ class StatisticsService
                 SELECT t.game_id, t.color, t.captain_user_id AS user_id
                 FROM teams t
                 INNER JOIN games g ON g.id = t.game_id
-                INNER JOIN users u ON u.id = t.captain_user_id
                 WHERE g.status = ?
                   AND t.captain_user_id IS NOT NULL
-                  AND u.position != 'goalkeeper'
                 UNION ALL
                 SELECT dp.game_id, dp.team_color AS color, dp.picked_user_id AS user_id
                 FROM draft_picks dp
                 INNER JOIN games g ON g.id = dp.game_id
-                INNER JOIN users u ON u.id = dp.picked_user_id
                 WHERE g.status = ?
-                  AND u.position != 'goalkeeper'
             ),
             pair_counts AS (
                 SELECT
