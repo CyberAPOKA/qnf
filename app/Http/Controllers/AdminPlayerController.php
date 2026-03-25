@@ -33,8 +33,8 @@ class AdminPlayerController extends Controller
                 'ability' => $user->ability,
                 'active' => $user->active,
                 'suspended_until_round' => $user->suspended_until_round,
-                'photo_front' => $user->photo_front ? Storage::url($user->photo_front) : null,
-                'photo_side' => $user->photo_side ? Storage::url($user->photo_side) : null,
+                'photo_front' => $user->photo_front_url,
+                'photo_side' => $user->photo_side_url,
             ]);
 
         $doneGames = Game::where('status', GameStatus::DONE)

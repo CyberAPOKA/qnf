@@ -330,7 +330,7 @@ class ScoringService
             }
 
             $player['photo_front'] = $player['photo_front']
-                ? '/storage/'.$player['photo_front']
+                ? Storage::disk('public')->url($player['photo_front'])
                 : null;
             $player['initial'] = mb_strtoupper(mb_substr($player['name'], 0, 1));
             $player['win_streak'] = $streaks[$player['id']] ?? 0;

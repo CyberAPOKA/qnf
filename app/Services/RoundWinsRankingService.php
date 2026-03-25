@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\GameStatus;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class RoundWinsRankingService
 {
@@ -94,7 +95,7 @@ class RoundWinsRankingService
                 'id' => $row->id,
                 'name' => $row->name,
                 'position' => $row->position,
-                'photo_front' => $row->photo_front ? '/storage/'.$row->photo_front : null,
+                'photo_front' => $row->photo_front ? Storage::disk('public')->url($row->photo_front) : null,
                 'initial' => mb_strtoupper(mb_substr($row->name, 0, 1)),
                 'total_score' => $score,
                 'games_played' => (int) $row->games_played,

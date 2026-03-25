@@ -105,12 +105,12 @@ class User extends Authenticatable
 
     public function getPhotoFrontUrlAttribute(): ?string
     {
-        return $this->photo_front ? Storage::url($this->photo_front) : null;
+        return $this->photo_front ? Storage::disk('public')->url($this->photo_front) : null;
     }
 
     public function getPhotoSideUrlAttribute(): ?string
     {
-        return $this->photo_side ? Storage::url($this->photo_side) : null;
+        return $this->photo_side ? Storage::disk('public')->url($this->photo_side) : null;
     }
 
     public function getInitialAttribute(): string
