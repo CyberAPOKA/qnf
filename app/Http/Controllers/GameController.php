@@ -16,6 +16,7 @@ use App\Services\GamePredictionService;
 use App\Services\RoundWinsRankingService;
 use App\Services\ScoringService;
 use App\Services\WaitlistService;
+use App\Services\CaptainsImageService;
 use App\Services\WeekTeamImageService;
 use Illuminate\Http\JsonResponse;
 use App\Support\GamePayload;
@@ -278,6 +279,37 @@ class GameController extends Controller
         $images = array_map(fn ($p) => '/storage/'.$p, $paths);
 
         return response()->json(['images' => $images]);
+    }
+
+    public function generateCaptainsImage(Request $request, CaptainsImageService $imageService): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $game = $this->gameService->getOrCreateThisWeekGame();
+        $path = $imageService->generate($game);
+
+        if (! $path) {
+            return response()->json(['error' => 'Jogadores insuficientes para gerar capitães.'], 422);
+        }
+
+        return response()->json(['image' => '/storage/' . $path]);
+    }
+
+    public function createPayments(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $game = Game::where('status', GameStatus::DRAFTED)
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $game) {
+            return response()->json(['error' => 'Nenhum jogo com status "drafted" encontrado.'], 422);
+        }
+
+        $count = $this->paymentService->createPaymentsForGame($game);
+
+        return response()->json(['message' => "{$count} pagamentos criados.", 'count' => $count]);
     }
 
     private function getWeekTeamImages(): array

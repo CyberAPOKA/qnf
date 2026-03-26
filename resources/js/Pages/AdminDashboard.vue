@@ -148,6 +148,40 @@ const sendWhatsAppTest = async () => {
     }
 };
 
+const captainsLoading = ref(false);
+const captainsImage = ref(null);
+
+const generateCaptains = async () => {
+    if (captainsLoading.value) return;
+    captainsLoading.value = true;
+    try {
+        const { data } = await axios.post(route('api.captains.generate'));
+        captainsImage.value = data.image + '?t=' + Date.now();
+    } catch (e) {
+        console.error('Failed to generate captains image', e);
+    } finally {
+        captainsLoading.value = false;
+    }
+};
+
+const paymentsLoading = ref(false);
+const paymentsResult = ref(null);
+
+const createPayments = async () => {
+    if (paymentsLoading.value) return;
+    paymentsLoading.value = true;
+    paymentsResult.value = null;
+    try {
+        const { data } = await axios.post(route('api.payments.create-all'));
+        paymentsResult.value = data.message;
+    } catch (e) {
+        paymentsResult.value = e.response?.data?.error || 'Erro ao criar pagamentos';
+    } finally {
+        paymentsLoading.value = false;
+        setTimeout(() => { paymentsResult.value = null; }, 4000);
+    }
+};
+
 const randomTeamLoading = ref(false);
 const randomTeamImages = ref([]);
 
@@ -258,8 +292,8 @@ const generateRandomTeam = async () => {
                     </div>
                 </div>
 
-                <PlayerListCard v-if="!['drafted', 'done'].includes(store.game?.status)" :players="store.game?.players || []"
-                    :game-id="store.game?.id" editable />
+                <PlayerListCard v-if="!['drafted', 'done'].includes(store.game?.status)"
+                    :players="store.game?.players || []" :game-id="store.game?.id" editable />
 
                 <template v-if="['drafted', 'done'].includes(store.game?.status)">
                     <div class="grid grid-cols-3 gap-1 lg:gap-2">
@@ -277,6 +311,15 @@ const generateRandomTeam = async () => {
                     </button>
                     <ScoreEntryCard :game-id="store.game.id" :teams="store.game.teams" />
                     <PaymentManagementCard :payments="payments || []" />
+
+                    <div class="flex flex-col items-center gap-2">
+                        <button @click="createPayments" :disabled="paymentsLoading"
+                            class="w-full rounded-md bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-50 transition">
+                            <i class="fa-solid fa-credit-card mr-1.5"></i>
+                            {{ paymentsLoading ? 'Criando...' : 'Criar Pagamentos' }}
+                        </button>
+                        <p v-if="paymentsResult" class="text-sm font-medium text-gray-700">{{ paymentsResult }}</p>
+                    </div>
                 </template>
 
                 <PredictionCard :prediction="prediction" />
@@ -290,6 +333,10 @@ const generateRandomTeam = async () => {
                         {{ whatsappTestLabel }}
                     </button>
                 </div>
+
+                <FuturisticButton :label="captainsLoading ? 'Gerando...' : 'Gerar Capitães'" @click="generateCaptains" />
+                <img v-if="captainsImage" :src="captainsImage" alt="Capitães" class="w-full rounded-lg shadow" />
+
 
                 <!-- GenerateMockRandomTeamButton -->
 

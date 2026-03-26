@@ -21,6 +21,7 @@ class Game extends Model
         'status',
         'created_by',
         'week_team_images',
+        'captains_image',
     ];
 
     protected function casts(): array

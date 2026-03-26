@@ -54,5 +54,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
     Route::prefix('api')->group(function () {
         Route::post('/whatsapp/send-test', [WhatsAppController::class, 'sendTest'])->name('api.whatsapp.send-test');
         Route::post('/week-team/random', [GameController::class, 'generateRandomWeekTeam'])->name('api.week-team.random');
+        Route::post('/captains/generate', [GameController::class, 'generateCaptainsImage'])->name('api.captains.generate');
+        Route::post('/payments/create-all', [GameController::class, 'createPayments'])->name('api.payments.create-all');
     });
 });

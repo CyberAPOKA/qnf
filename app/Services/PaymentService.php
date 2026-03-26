@@ -60,6 +60,27 @@ class PaymentService
     }
 
     /**
+     * Cria cobranças para todos os jogadores elegíveis de um jogo.
+     */
+    public function createPaymentsForGame(Game $game): int
+    {
+        $game->loadMissing('players');
+
+        $count = 0;
+
+        foreach ($game->players as $player) {
+            if ($player->position === Position::GOALKEEPER || $player->guest) {
+                continue;
+            }
+
+            $this->createPaymentForPlayer($game, $player);
+            $count++;
+        }
+
+        return $count;
+    }
+
+    /**
      * Cancela o pagamento pendente de um jogador e remove o registro local.
      */
     public function cancelPaymentForPlayer(int $gameId, int $userId): void

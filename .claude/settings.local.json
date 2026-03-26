@@ -29,7 +29,16 @@
       "Bash(php -r \"$img = getimagesize\\(''c:/Users/Usuario/Desktop/qnf/public/assets/week_team/base_template.png''\\); echo $img[0] . ''x'' . $img[1];\")",
       "Bash(php -r \"print_r\\(getimagesize\\(''c:/Users/Usuario/Desktop/qnf/public/assets/week_team/base_template.png''\\)\\);\")",
       "Bash(node -e \"const pkg = require\\(''@tsparticles/engine''\\); console.log\\(Object.keys\\(pkg\\).filter\\(k => k.includes\\(''load''\\) || k === ''tsParticles''\\).join\\('', ''\\)\\)\")",
-      "Bash(node -e \"const { tsParticles } = require\\(''@tsparticles/engine''\\); const m = tsParticles.load; console.log\\(typeof m, m.toString\\(\\).substring\\(0, 200\\)\\)\")"
+      "Bash(node -e \"const { tsParticles } = require\\(''@tsparticles/engine''\\); const m = tsParticles.load; console.log\\(typeof m, m.toString\\(\\).substring\\(0, 200\\)\\)\")",
+      "Bash(find /c/Users/Usuario/Desktop/qnf -type f -name *games* -path */migrations/*)",
+      "Bash(grep -r captains /c/Users/Usuario/Desktop/qnf --include=*.php --include=*.vue --include=*.js)",
+      "Bash(find /c/Users/Usuario/Desktop/qnf/public/assets -type f -name *.png)",
+      "Bash(find /c/Users/Usuario/Desktop/qnf/app/Services -type f -name *.php)",
+      "Bash(xargs basename:*)",
+      "Bash(grep -r \"captains\\\\|Captains\" /c/Users/Usuario/Desktop/qnf --include=*.php --include=*.vue --include=*.js)",
+      "Bash(identify /c/Users/Usuario/Desktop/qnf/public/assets/captains/base_captains.png)",
+      "Bash(php -r \"$info = getimagesize\\(''C:/Users/Usuario/Desktop/qnf/public/assets/captains/base_captains.png''\\); echo ''Width: ''.$info[0].'' Height: ''.$info[1];\")",
+      "Bash(php -r \"echo json_encode\\(getimagesize\\(''C:/Users/Usuario/Desktop/qnf/public/assets/captains/base_captains.png''\\)\\);\")"
     ]
   }
 }
