@@ -9,6 +9,7 @@ use App\Models\Payment;
 use App\Models\User;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 class PaymentService
 {
@@ -73,8 +74,12 @@ class PaymentService
                 continue;
             }
 
-            $this->createPaymentForPlayer($game, $player);
-            $count++;
+            try {
+                $this->createPaymentForPlayer($game, $player);
+                $count++;
+            } catch (\Throwable $e) {
+                Log::error("Falha ao criar pagamento para jogador {$player->id}: {$e->getMessage()}");
+            }
         }
 
         return $count;
