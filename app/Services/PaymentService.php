@@ -22,14 +22,14 @@ class PaymentService
     /**
      * Cria cobrança Pix para um jogador específico.
      */
-    public function createPaymentForPlayer(Game $game, User $player): void
+    public function createPaymentForPlayer(Game $game, User $player): bool
     {
         if (! config('services.mercadopago.active', true)) {
-            return;
+            return false;
         }
 
         if ($player->position === Position::GOALKEEPER || $player->guest) {
-            return;
+            return false;
         }
 
         $existing = Payment::where('game_id', $game->id)
@@ -37,7 +37,7 @@ class PaymentService
             ->first();
 
         if ($existing) {
-            return;
+            return false;
         }
 
         $amount = (int) config('services.pix.amount', 800);
@@ -58,6 +58,8 @@ class PaymentService
             'external_id' => (string) $mpData['id'],
             'qr_code_base64' => $mpData['qr_code_base64'],
         ]);
+
+        return true;
     }
 
     /**
@@ -75,8 +77,9 @@ class PaymentService
             }
 
             try {
-                $this->createPaymentForPlayer($game, $player);
-                $count++;
+                if ($this->createPaymentForPlayer($game, $player)) {
+                    $count++;
+                }
             } catch (\Throwable $e) {
                 Log::error("Falha ao criar pagamento para jogador {$player->id}: {$e->getMessage()}");
             }
