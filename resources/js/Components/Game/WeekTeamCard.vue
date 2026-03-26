@@ -8,17 +8,61 @@ const props = defineProps({
 const currentIndex = ref(0);
 const isPlaying = ref(false);
 const audio = ref(null);
+const glitching = ref(false);
 
 let interval = null;
+let glitchInterval = null;
+let glitchDelay = null;
+let glitchRunning = false;
+
+const flash = (duration = 100) => new Promise(resolve => {
+    glitching.value = true;
+    setTimeout(() => { glitching.value = false; setTimeout(resolve, 80); }, duration);
+});
+
+const runGlitchCycle = async () => {
+    await flash(100);
+    await flash(100);
+    await flash(100);
+    await new Promise(r => setTimeout(r, 1000));
+    await flash(100);
+    await flash(100);
+};
+
+const startGlitchLoop = () => {
+    if (glitchRunning) return;
+    glitchRunning = true;
+    const loop = async () => {
+        if (!glitchRunning) return;
+        await runGlitchCycle();
+        if (!glitchRunning) return;
+        glitchInterval = setTimeout(loop, 6000);
+    };
+    loop();
+};
+
+const stopGlitchLoop = () => {
+    glitchRunning = false;
+    glitching.value = false;
+    if (glitchInterval) { clearTimeout(glitchInterval); glitchInterval = null; }
+    if (glitchDelay) { clearTimeout(glitchDelay); glitchDelay = null; }
+};
+
+const scheduleGlitch = () => {
+    stopGlitchLoop();
+    glitchDelay = setTimeout(() => startGlitchLoop(), 21000);
+};
 
 const toggleMusic = () => {
     if (!audio.value) return;
     if (isPlaying.value) {
         audio.value.pause();
         isPlaying.value = false;
+        stopGlitchLoop();
     } else {
         audio.value.play();
         isPlaying.value = true;
+        scheduleGlitch();
     }
 };
 
@@ -26,11 +70,14 @@ const tryAutoplay = () => {
     if (!audio.value || isPlaying.value) return;
     audio.value.play().then(() => {
         isPlaying.value = true;
+        scheduleGlitch();
     }).catch(() => {
-        // Autoplay blocked — play on first user interaction
         const playOnInteraction = () => {
             if (audio.value && !isPlaying.value) {
-                audio.value.play().then(() => { isPlaying.value = true; }).catch(() => {});
+                audio.value.play().then(() => {
+                    isPlaying.value = true;
+                    scheduleGlitch();
+                }).catch(() => {});
             }
             document.removeEventListener('click', playOnInteraction);
             document.removeEventListener('touchstart', playOnInteraction);
@@ -44,7 +91,7 @@ onMounted(() => {
     if (props.images.length > 1) {
         interval = setInterval(() => {
             currentIndex.value = (currentIndex.value + 1) % props.images.length;
-        }, 5000);
+        }, 10000);
     }
 
     if (props.images.length) {
@@ -54,6 +101,7 @@ onMounted(() => {
 
 onUnmounted(() => {
     if (interval) clearInterval(interval);
+    stopGlitchLoop();
     if (audio.value) {
         audio.value.pause();
         audio.value = null;
@@ -98,10 +146,12 @@ const downloadAll = () => {
         </div>
 
         <div class="relative overflow-hidden rounded-lg">
-            <transition name="fade" mode="out-in">
+            <transition name="fade">
                 <img :key="currentIndex" :src="images[currentIndex]" alt="Time da Semana"
-                    class="w-full rounded-lg" />
+                    class="w-full rounded-lg absolute inset-0"
+                    :class="{ 'glitch-flash': glitching }" />
             </transition>
+            <img :src="images[0]" alt="" class="w-full rounded-lg invisible" aria-hidden="true" />
 
             <div v-if="images.length > 1" class="flex justify-center gap-2 mt-2">
                 <button v-for="(_, i) in images" :key="i" @click="currentIndex = i"
@@ -119,11 +169,21 @@ const downloadAll = () => {
 <style scoped>
 .fade-enter-active,
 .fade-leave-active {
-    transition: opacity 0.4s ease;
+    transition: opacity 1.2s ease-in-out;
 }
 
 .fade-enter-from,
 .fade-leave-to {
     opacity: 0;
+}
+
+.fade-leave-active {
+    position: absolute;
+    inset: 0;
+}
+
+.glitch-flash {
+    filter: invert(1) hue-rotate(180deg) saturate(2.5) brightness(1.3);
+    transition: filter 0.05s;
 }
 </style>

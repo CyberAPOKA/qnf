@@ -14,6 +14,11 @@ export const useGameStore = defineStore('game', {
             this.channelName = game ? `game.${game.id}` : null
         },
         patchFromEvent(payload) {
+            if (payload?._slim) {
+                this.game = { ...this.game, ...payload }
+                return
+            }
+
             if (payload?.game) {
                 this.game = payload.game
                 this.channelName = payload.game ? `game.${payload.game.id}` : null

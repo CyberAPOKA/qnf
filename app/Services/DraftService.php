@@ -276,10 +276,15 @@ class DraftService
 
         // Side effects AFTER transaction commit — DB changes are now visible to all connections
         $freshGame = Game::with(['teams.captain', 'draftPicks.pickedUser', 'players'])->findOrFail($game->id);
-        $payload = GamePayload::fromGame($freshGame, $this, $this->scoringService);
 
-        rescue(fn () => broadcast(new DraftPickMade($payload))->toOthers(), report: false);
-        rescue(fn () => broadcast(new DraftTurnChanged($payload))->toOthers(), report: false);
+        $slimPickPayload = [
+            '_slim' => true,
+            'id' => $freshGame->id,
+            'status' => $freshGame->status->value,
+        ];
+
+        rescue(fn () => broadcast(new DraftPickMade($slimPickPayload))->toOthers(), report: false);
+        rescue(fn () => broadcast(new DraftTurnChanged($slimPickPayload))->toOthers(), report: false);
 
         rescue(fn () => $this->notifyPick($freshGame, $pick), report: false);
 
