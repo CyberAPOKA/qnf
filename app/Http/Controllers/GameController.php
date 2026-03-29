@@ -322,6 +322,13 @@ class GameController extends Controller
             return [];
         }
 
+        $nextGameExists = Game::where('id', '>', $lastDoneGame->id)
+            ->exists();
+
+        if ($nextGameExists) {
+            return [];
+        }
+
         return array_map(fn ($p) => '/storage/'.$p, $lastDoneGame->week_team_images);
     }
 }
