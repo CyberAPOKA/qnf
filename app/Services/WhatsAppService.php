@@ -8,12 +8,14 @@ use Illuminate\Support\Facades\Log;
 class WhatsAppService
 {
     private bool $active;
+    private bool $playerActive;
     private string $serviceUrl;
     private ?string $groupId;
 
     public function __construct()
     {
         $this->active = (bool) config('services.whatsapp.active', false);
+        $this->playerActive = (bool) config('services.whatsapp.player_active', false);
         $this->serviceUrl = config('services.whatsapp.url', 'http://127.0.0.1:3001');
         $this->groupId = config('services.whatsapp.group_id');
     }
@@ -52,7 +54,7 @@ class WhatsAppService
 
     public function sendToPhone(string $phone, string $message): bool
     {
-        if (! $this->active) {
+        if (! $this->active || ! $this->playerActive) {
             return false;
         }
 

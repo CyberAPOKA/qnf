@@ -20,9 +20,10 @@ class CaptainsImageService
     ];
 
     /**
+     * @param  User[]|null  $captains  Specific captains to use; if null, picks random ones.
      * @return string|null Relative storage path of the generated image
      */
-    public function generate(Game $game): ?string
+    public function generate(Game $game, ?array $captains = null): ?string
     {
         $round = $game->round ?? $game->id;
         $outputDir = storage_path("app/public/captains/{$round}");
@@ -33,7 +34,7 @@ class CaptainsImageService
 
         File::ensureDirectoryExists($outputDir);
 
-        $captains = $this->pickRandomCaptains();
+        $captains = $captains ?? $this->pickRandomCaptains();
 
         if (count($captains) < 3) {
             return null;

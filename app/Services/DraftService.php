@@ -22,6 +22,7 @@ class DraftService
     public function __construct(
         private readonly ScoringService $scoringService,
         private readonly WhatsAppService $whatsAppService,
+        private readonly CaptainsImageService $captainsImageService,
     ) {}
 
     public const SNAKE_SEQUENCE = [
@@ -84,12 +85,14 @@ class DraftService
             $game->update(['status' => GameStatus::DRAFTING]);
         });
 
-        $this->notifyWhatsapp($game, $candidates, $colors);
+        $imagePath = rescue(fn () => $this->captainsImageService->generate($game, $candidates->values()->all()));
+
+        $this->notifyWhatsapp($game, $candidates, $colors, $imagePath);
 
         return $candidates->values()->all();
     }
 
-    private function notifyWhatsapp(Game $game, $candidates, array $colors): void
+    private function notifyWhatsapp(Game $game, $candidates, array $colors, ?string $imagePath = null): void
     {
         $colorEmojis = [
             TeamColor::GREEN->value => '🟢',
@@ -108,7 +111,13 @@ class DraftService
         $lines[] = '';
         $lines[] = 'Capitães, acessem o app para realizarem o draft! 🏆';
         $groupMessage = implode("\n", $lines);
-        rescue(fn () => $this->whatsAppService->sendToGroup($groupMessage), report: false);
+
+        if ($imagePath) {
+            $fullImagePath = storage_path('app/public/' . $imagePath);
+            rescue(fn () => $this->whatsAppService->sendImageToGroup($fullImagePath, $groupMessage), report: false);
+        } else {
+            rescue(fn () => $this->whatsAppService->sendToGroup($groupMessage), report: false);
+        }
 
         // Mensagem pessoal para cada capitão
         foreach ($colors as $index => $color) {

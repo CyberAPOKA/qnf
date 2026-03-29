@@ -37,6 +37,7 @@ return [
 
     'whatsapp' => [
         'active' => env('WHATSAPP_ACTIVE', false),
+        'player_active' => env('WHATSAPP_PLAYER_ACTIVE', false),
         'url' => env('WHATSAPP_SERVICE_URL', 'http://127.0.0.1:3001'),
         'group_id' => env('WHATSAPP_GROUP_ID'),
     ],
