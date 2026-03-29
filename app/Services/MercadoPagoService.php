@@ -30,12 +30,15 @@ class MercadoPagoService
 
         $idempotencyKey = $externalReference . '-' . now()->timestamp . '-' . mt_rand(1000, 9999);
 
+        $expiration = now()->addDays(5)->toIso8601String();
+
         $response = Http::withToken($this->accessToken)
             ->withHeaders(['X-Idempotency-Key' => $idempotencyKey])
             ->post("{$this->baseUrl}/v1/payments", [
                 'transaction_amount' => $amount,
                 'description' => $description,
                 'payment_method_id' => 'pix',
+                'date_of_expiration' => $expiration,
                 'payer' => [
                     'email' => $email,
                 ],
