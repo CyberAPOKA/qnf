@@ -7,7 +7,6 @@ use App\Events\CaptainsDrawn;
 use App\Events\GameBecameFull;
 use App\Models\Game;
 use App\Models\User;
-use App\Services\DraftService;
 use App\Support\GamePayload;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
@@ -20,20 +19,24 @@ class GameService
     public function getOrCreateThisWeekGame(?User $admin = null, ?CarbonInterface $now = null): Game
     {
         $clock = CarbonImmutable::instance($now ?? now(self::TZ))->setTimezone(self::TZ);
-        $gameDate = $this->thisWeekMondayDate($clock);
-        $opensAt = $gameDate->subDay()->setTime(17, 0); // Domingo 17h
+        $gameDate = $this->resolveGameDate($clock);
+        $opensAt = $gameDate->subDay()->setTime(17, 0);
+
+        $existingGame = Game::whereDate('date', $gameDate->toDateString())->first();
+
+        if ($existingGame) {
+            return $existingGame;
+        }
 
         $lastRound = Game::whereYear('date', $gameDate->year)->max('round') ?? 0;
 
-        return Game::firstOrCreate(
-            ['date' => $gameDate->toDateString()],
-            [
-                'opens_at' => $opensAt,
-                'round' => $lastRound + 1,
-                'status' => GameStatus::SCHEDULED,
-                'created_by' => $admin?->id,
-            ]
-        );
+        return Game::create([
+            'date' => $gameDate->toDateString(),
+            'opens_at' => $opensAt,
+            'round' => $lastRound + 1,
+            'status' => GameStatus::SCHEDULED,
+            'created_by' => $admin?->id,
+        ]);
     }
 
     public function openGameIfNeeded(?CarbonInterface $now = null): ?Game
@@ -88,17 +91,22 @@ class GameService
         rescue(fn () => broadcast(new CaptainsDrawn($freshGame->id, $payload))->toOthers(), report: false);
     }
 
+    private function resolveGameDate(CarbonInterface $date): CarbonImmutable
+    {
+        $base = CarbonImmutable::instance($date)->setTimezone(self::TZ);
+        $thisMonday = $this->thisWeekMondayDate($base);
+
+        if ($base->isSaturday() || $base->isSunday()) {
+            return $thisMonday->addWeek();
+        }
+
+        return $thisMonday;
+    }
+
     public function thisWeekMondayDate(CarbonInterface $date): CarbonImmutable
     {
         $base = CarbonImmutable::instance($date)->setTimezone(self::TZ);
-        $dow = $base->dayOfWeekIso; // 1=Seg, 2=Ter, ..., 6=Sáb, 7=Dom
 
-        if ($dow >= 6) {
-            // Sábado ou Domingo → próxima segunda (nova rodada)
-            return $base->next(CarbonInterface::MONDAY)->startOfDay();
-        }
-
-        // Segunda a Sexta → segunda da semana atual (rodada em andamento)
         return $base->startOfWeek(CarbonInterface::MONDAY)->startOfDay();
     }
 }
