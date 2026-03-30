@@ -165,16 +165,17 @@ class PaymentService
         foreach ($unpaidPayments as $payment) {
             $gameDate = CarbonImmutable::instance($payment->game->date)->setTimezone(self::TZ);
 
-            $saturdayDeadline = $gameDate->addDays(2)->setTime(0, 15);
-            $sundayDeadline = $gameDate->addDays(3)->setTime(0, 15);
-            $mondayDeadline = $gameDate->addDays(4)->setTime(0, 15);
+            // Jogo na segunda: Qua sem penalidade, Qui 1 rodada, Sex 2 rodadas, após Sex 3 rodadas
+            $wednesdayDeadline = $gameDate->addDays(2)->setTime(0, 15);  // Quarta 00:15
+            $thursdayDeadline = $gameDate->addDays(3)->setTime(0, 15);   // Quinta 00:15
+            $fridayDeadline = $gameDate->addDays(4)->setTime(0, 15);     // Sexta 00:15
 
             $newPenalty = 0;
-            if ($now->gte($mondayDeadline)) {
+            if ($now->gte($fridayDeadline)) {
                 $newPenalty = 3;
-            } elseif ($now->gte($sundayDeadline)) {
+            } elseif ($now->gte($thursdayDeadline)) {
                 $newPenalty = 2;
-            } elseif ($now->gte($saturdayDeadline)) {
+            } elseif ($now->gte($wednesdayDeadline)) {
                 $newPenalty = 1;
             }
 
