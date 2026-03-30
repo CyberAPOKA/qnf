@@ -92,6 +92,8 @@ class GameService
     {
         $base = CarbonImmutable::instance($date)->setTimezone(self::TZ);
 
-        return $base->startOfWeek(CarbonInterface::MONDAY)->startOfDay();
+        // Semana do jogo começa no sábado: Sáb e Dom apontam para a próxima segunda,
+        // Seg a Sex apontam para a segunda que já passou (ou hoje).
+        return $base->startOfWeek(CarbonInterface::SATURDAY)->addDays(2)->startOfDay();
     }
 }
