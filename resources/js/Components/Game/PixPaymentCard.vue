@@ -74,10 +74,10 @@ const formatAmount = (cents) => {
 
             <div class="rounded-lg bg-gray-50 p-3 text-sm text-gray-600 space-y-1">
                 <p class="font-semibold text-gray-700">Prazos de pagamento:</p>
-                <p><i class="fa-solid fa-clock text-yellow-500 mr-1"></i> Até sábado 00:15 — sem penalidade</p>
-                <p><i class="fa-solid fa-clock text-orange-500 mr-1"></i> Até domingo 00:15 — 1 rodada de suspensão</p>
-                <p><i class="fa-solid fa-clock text-red-500 mr-1"></i> Até segunda 00:15 — 2 rodadas de suspensão</p>
-                <p><i class="fa-solid fa-ban text-red-700 mr-1"></i> Após segunda — suspenso até pagar + 3 rodadas</p>
+                <p><i class="fa-solid fa-clock text-yellow-500 mr-1"></i> Até quarta 00:15 — sem penalidade</p>
+                <p><i class="fa-solid fa-clock text-orange-500 mr-1"></i> Até quinta 00:15 — 1 rodada de suspensão</p>
+                <p><i class="fa-solid fa-clock text-red-500 mr-1"></i> Até sexta 00:15 — 2 rodadas de suspensão</p>
+                <p><i class="fa-solid fa-ban text-red-700 mr-1"></i> Após sexta — suspenso até pagar + 3 rodadas</p>
             </div>
         </div>
     </div>
