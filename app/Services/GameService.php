@@ -22,6 +22,15 @@ class GameService
         $gameDate = $this->resolveGameDate($clock);
         $opensAt = $gameDate->subDay()->setTime(17, 0);
 
+        // Se já existe um jogo não finalizado, retorna ele (evita criar rodada duplicada)
+        $activeGame = Game::where('status', '!=', GameStatus::DONE)
+            ->orderByDesc('date')
+            ->first();
+
+        if ($activeGame) {
+            return $activeGame;
+        }
+
         $existingGame = Game::whereDate('date', $gameDate->toDateString())->first();
 
         if ($existingGame) {
