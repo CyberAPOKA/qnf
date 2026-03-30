@@ -20,10 +20,8 @@ class GameService
     public function getOrCreateThisWeekGame(?User $admin = null, ?CarbonInterface $now = null): Game
     {
         $clock = CarbonImmutable::instance($now ?? now(self::TZ))->setTimezone(self::TZ);
-        $gameDate = $this->thisWeekSundayDate($clock);
-        $opensAt = $gameDate->setTime(17, 0); // Domingo 17h
-        // $gameDate = $this->thisWeekThursdayDate($clock);
-        // $opensAt = $gameDate->subDay()->setTime(17, 0); // Quarta 17h
+        $gameDate = $this->thisWeekMondayDate($clock);
+        $opensAt = $gameDate->subDay()->setTime(17, 0); // Domingo 17h
 
         $lastRound = Game::whereYear('date', $gameDate->year)->max('round') ?? 0;
 
@@ -90,17 +88,10 @@ class GameService
         rescue(fn () => broadcast(new CaptainsDrawn($freshGame->id, $payload))->toOthers(), report: false);
     }
 
-    public function thisWeekSundayDate(CarbonInterface $date): CarbonImmutable
+    public function thisWeekMondayDate(CarbonInterface $date): CarbonImmutable
     {
         $base = CarbonImmutable::instance($date)->setTimezone(self::TZ);
 
-        return $base->startOfWeek(CarbonInterface::MONDAY)->addDays(6)->startOfDay();
+        return $base->startOfWeek(CarbonInterface::MONDAY)->startOfDay();
     }
-
-    // public function thisWeekThursdayDate(CarbonInterface $date): CarbonImmutable
-    // {
-    //     $base = CarbonImmutable::instance($date)->setTimezone(self::TZ);
-    //
-    //     return $base->startOfWeek(CarbonInterface::MONDAY)->addDays(3)->startOfDay();
-    // }
 }

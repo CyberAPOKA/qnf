@@ -38,7 +38,10 @@
       "Bash(grep -r \"captains\\\\|Captains\" /c/Users/Usuario/Desktop/qnf --include=*.php --include=*.vue --include=*.js)",
       "Bash(identify /c/Users/Usuario/Desktop/qnf/public/assets/captains/base_captains.png)",
       "Bash(php -r \"$info = getimagesize\\(''C:/Users/Usuario/Desktop/qnf/public/assets/captains/base_captains.png''\\); echo ''Width: ''.$info[0].'' Height: ''.$info[1];\")",
-      "Bash(php -r \"echo json_encode\\(getimagesize\\(''C:/Users/Usuario/Desktop/qnf/public/assets/captains/base_captains.png''\\)\\);\")"
+      "Bash(php -r \"echo json_encode\\(getimagesize\\(''C:/Users/Usuario/Desktop/qnf/public/assets/captains/base_captains.png''\\)\\);\")",
+      "Bash(grep -r \"nova rodada\\\\|new.*game\\\\|create.*game\" /c/Users/Usuario/Desktop/qnf --include=*.php --include=*.js --include=*.vue)",
+      "Bash(find /c/Users/Usuario/Desktop/qnf/tests -name *Game* -type f)",
+      "Bash(grep -r \"forceOpenThisWeekGame\\\\|openGameIfNeeded\" /c/Users/Usuario/Desktop/qnf/tests --include=*.php)"
     ]
   }
 }
