@@ -88,7 +88,7 @@ class GameService
             $draftService->drawCaptains($game);
         } catch (ValidationException) {
             $payload = GamePayload::fromGame($game->refresh(), $draftService);
-            rescue(fn () => broadcast(new GameBecameFull($game->id, $payload))->toOthers(), report: false);
+            rescue(fn() => broadcast(new GameBecameFull($game->id, $payload))->toOthers(), report: false);
 
             return;
         }
@@ -96,8 +96,8 @@ class GameService
         $freshGame = Game::findOrFail($game->id);
         $payload = GamePayload::fromGame($freshGame, $draftService);
 
-        rescue(fn () => broadcast(new GameBecameFull($freshGame->id, $payload))->toOthers(), report: false);
-        rescue(fn () => broadcast(new CaptainsDrawn($freshGame->id, $payload))->toOthers(), report: false);
+        rescue(fn() => broadcast(new GameBecameFull($freshGame->id, $payload))->toOthers(), report: false);
+        rescue(fn() => broadcast(new CaptainsDrawn($freshGame->id, $payload))->toOthers(), report: false);
     }
 
     private function resolveGameDate(CarbonInterface $date): CarbonImmutable
@@ -105,11 +105,9 @@ class GameService
         $base = CarbonImmutable::instance($date)->setTimezone(self::TZ);
         $thisMonday = $this->thisWeekMondayDate($base);
 
-        if ($base->isFriday() || $base->isSaturday() || $base->isSunday()) {
-            return $thisMonday->addWeek();
-        }
-
-        return $thisMonday;
+        return $base->dayOfWeekIso >= 5
+            ? $thisMonday->addWeek()
+            : $thisMonday;
     }
 
     public function thisWeekMondayDate(CarbonInterface $date): CarbonImmutable
