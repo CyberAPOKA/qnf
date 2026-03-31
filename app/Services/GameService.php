@@ -105,7 +105,7 @@ class GameService
         $base = CarbonImmutable::instance($date)->setTimezone(self::TZ);
         $thisMonday = $this->thisWeekMondayDate($base);
 
-        if ($base->isSaturday() || $base->isSunday()) {
+        if ($base->isFriday() || $base->isSaturday() || $base->isSunday()) {
             return $thisMonday->addWeek();
         }
 
