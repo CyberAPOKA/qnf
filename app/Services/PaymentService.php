@@ -115,14 +115,14 @@ class PaymentService
     /**
      * Admin confirma pagamento de um jogador.
      */
-    public function confirmPayment(Payment $payment): void
+    public function confirmPayment(Payment $payment, string $method = Payment::METHOD_SYSTEM): void
     {
         if ($payment->isPaid()) {
             return;
         }
 
-        DB::transaction(function () use ($payment): void {
-            $payment->update(['paid_at' => now()]);
+        DB::transaction(function () use ($payment, $method): void {
+            $payment->update(['paid_at' => now(), 'method' => $method]);
 
             $user = $payment->user;
 

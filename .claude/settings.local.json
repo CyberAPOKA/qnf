@@ -41,7 +41,9 @@
       "Bash(php -r \"echo json_encode\\(getimagesize\\(''C:/Users/Usuario/Desktop/qnf/public/assets/captains/base_captains.png''\\)\\);\")",
       "Bash(grep -r \"nova rodada\\\\|new.*game\\\\|create.*game\" /c/Users/Usuario/Desktop/qnf --include=*.php --include=*.js --include=*.vue)",
       "Bash(find /c/Users/Usuario/Desktop/qnf/tests -name *Game* -type f)",
-      "Bash(grep -r \"forceOpenThisWeekGame\\\\|openGameIfNeeded\" /c/Users/Usuario/Desktop/qnf/tests --include=*.php)"
+      "Bash(grep -r \"forceOpenThisWeekGame\\\\|openGameIfNeeded\" /c/Users/Usuario/Desktop/qnf/tests --include=*.php)",
+      "Bash(grep -E \"\\\\.vue$\")",
+      "Bash(php -r \"echo implode\\('x', array_slice\\(getimagesize\\('public/assets/images/base_lineups.png'\\), 0, 2\\)\\);\")"
     ]
   }
 }

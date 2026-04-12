@@ -32,6 +32,7 @@ const confirmPayment = (paymentId) => {
 const columns = [
     { key: 'user_name', label: 'Jogador', class: 'font-medium text-gray-900' },
     { key: 'status', label: 'Status', align: 'center' },
+    { key: 'method', label: 'Método', align: 'center' },
     { key: 'actions', label: '', align: 'center' },
 ];
 
@@ -91,6 +92,19 @@ const totalCount = () => props.payments.length;
                                     ({{ row.penalty_rounds >= 3 ? 'Suspenso' : row.penalty_rounds + 'r' }})
                                 </template>
                             </span>
+                        </template>
+                        <template #cell-method="{ row }">
+                            <span v-if="row.method === 'system'"
+                                class="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-1 text-xs font-semibold text-blue-700">
+                                <i class="fa-solid fa-qrcode"></i>
+                                Sistema
+                            </span>
+                            <span v-else-if="row.method === 'manual'"
+                                class="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2.5 py-1 text-xs font-semibold text-purple-700">
+                                <i class="fa-solid fa-user-check"></i>
+                                Manual
+                            </span>
+                            <span v-else class="text-xs text-gray-400">—</span>
                         </template>
                         <template #cell-actions="{ row }">
                             <button v-if="!row.paid_at && row.payment_id" @click="confirmPayment(row.payment_id)"

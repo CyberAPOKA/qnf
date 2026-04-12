@@ -43,6 +43,13 @@ const columns = [
 
 const guests = computed(() => props.players.filter(p => p.guest));
 
+const search = ref('');
+const filteredPlayers = computed(() => {
+    const term = search.value.trim().toLowerCase();
+    if (!term) return props.players;
+    return props.players.filter(p => p.name?.toLowerCase().includes(term));
+});
+
 const rowClass = (row) => (row.active ? '' : 'opacity-50');
 
 // --- Modal state ---
@@ -214,9 +221,11 @@ const unsuspend = () => {
         <div class="p-1 lg:p-4">
             <div class="mx-auto max-w-4xl space-y-4">
                 <div class="rounded-xl bg-white p-4 shadow">
-                    <div class="mb-4 flex items-center justify-between">
+                    <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
                         <h3 class="text-base font-semibold text-gray-900">Jogadores</h3>
-                        <div class="flex items-center gap-2">
+                        <div class="flex flex-1 items-center justify-end gap-2">
+                            <TextInput v-model="search" type="search" placeholder="Buscar por nome..."
+                                class="w-full max-w-xs text-sm" />
                             <select v-if="guests.length" @change="onSelectGuest"
                                 class="rounded-lg border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
                                 <option value="">Converter convidado...</option>
@@ -231,11 +240,11 @@ const unsuspend = () => {
                         </div>
                     </div>
 
-                    <DataTable :columns="columns" :rows="players" numbered :row-class="rowClass"
-                        empty-message="Nenhum jogador cadastrado.">
+                    <DataTable :columns="columns" :rows="filteredPlayers" numbered :row-class="rowClass"
+                        empty-message="Nenhum jogador encontrado.">
                         <template #cell-name="{ row }">
                             <div class="flex items-center gap-3">
-                                <PlayerPhoto :src="row.photo_front" :initial="row.name.charAt(0)" :alt="row.name" size="sm" />
+                                <PlayerPhoto :src="row.photo_front" :initial="row.name.charAt(0)" :alt="row.name" size="md" />
                                 <span class="font-medium text-gray-900">{{ row.name }}</span>
                                 <span v-if="row.guest" class="rounded bg-yellow-100 px-1.5 py-0.5 text-xs text-yellow-700">Convidado</span>
                             </div>

@@ -20,7 +20,7 @@ class PaymentController extends Controller
     {
         abort_unless($request->user()->role === 'admin', 403);
 
-        $this->paymentService->confirmPayment($payment);
+        $this->paymentService->confirmPayment($payment, Payment::METHOD_MANUAL);
 
         return back();
     }

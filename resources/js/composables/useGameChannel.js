@@ -11,10 +11,11 @@ const ALL_EVENTS = [
     '.DraftFinished',
 ];
 
+// Eventos que ainda precisam de reload para refetch de listas/rankings.
 const RELOAD_EVENTS = new Set([
-    '.DraftPickMade',
-    '.DraftTurnChanged',
-    '.DraftFinished',
+    '.GamePlayerJoined',
+    '.GameBecameFull',
+    '.CaptainsDrawn',
 ]);
 
 export function useGameChannel(props) {

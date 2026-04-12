@@ -67,6 +67,7 @@ class AdminPaymentController extends Controller
                 'user_name' => $player->name,
                 'payment_id' => $payment?->id,
                 'paid_at' => $payment?->paid_at?->timezone('America/Sao_Paulo')->format('d/m/Y H:i'),
+                'method' => $payment?->method,
                 'penalty_rounds' => $payment?->penalty_rounds ?? 0,
             ];
         })->all();

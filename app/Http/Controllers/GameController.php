@@ -17,6 +17,7 @@ use App\Services\RoundWinsRankingService;
 use App\Services\ScoringService;
 use App\Services\WaitlistService;
 use App\Services\CaptainsImageService;
+use App\Services\LineupsImageService;
 use App\Services\WeekTeamImageService;
 use Illuminate\Http\JsonResponse;
 use App\Support\GamePayload;
@@ -46,39 +47,21 @@ class GameController extends Controller
         $game = $this->gameService->getOrCreateThisWeekGame();
         $payload = GamePayload::fromGame($game, $this->draftService, $this->scoringService);
 
-        $isAdmin = $request->user()->role === 'admin';
+        $user = $request->user();
+        $isAdmin = $user->role === 'admin';
 
         $ranking = $this->scoringService->getRanking(includeGuests: true);
         $prediction = $this->predictionService->predict($game);
         $weekTeamImages = $this->getWeekTeamImages();
 
-        if ($isAdmin) {
-            return Inertia::render('AdminDashboard', [
-                'game' => $payload,
-                'current_user_id' => $request->user()->id,
-                'all_users' => User::select('id', 'name', 'position', 'guest')
-                    ->where('role', '!=', 'admin')
-                    ->where('active', true)
-                    ->orderBy('name')
-                    ->get()
-                    ->map(fn ($user) => [
-                        'id' => $user->id,
-                        'name' => $user->name,
-                        'position' => $user->position->value,
-                        'position_label' => $user->position->label(),
-                        'guest' => $user->guest,
-                    ]),
-                'can_enter_scores' => $this->scoringService->canEnterScores($game),
-                'ranking' => $ranking,
-                'wins_ranking' => $this->roundWinsRankingService->getRanking(includeGuests: true),
-                'payments' => $this->paymentService->getGamePayments($game->id),
-                'prediction' => $prediction,
-                'week_team_images' => $weekTeamImages,
-            ]);
-        }
+        $rounds = Game::orderByDesc('round')
+            ->pluck('round')
+            ->unique()
+            ->values()
+            ->all();
 
         $playerRecord = GamePlayer::where('game_id', $game->id)
-            ->where('user_id', $request->user()->id)
+            ->where('user_id', $user->id)
             ->first();
 
         $droppedOut = $playerRecord?->dropped_out ?? false;
@@ -92,21 +75,20 @@ class GameController extends Controller
                 ->count();
         }
 
-        $user = $request->user();
-
         $payment = $this->paymentService->getPlayerPayment($user->id, $game->id);
 
-        return Inertia::render('PlayerDashboard', [
+        $props = [
             'game' => $payload,
             'current_user_id' => $user->id,
+            'is_admin' => $isAdmin,
             'is_goalkeeper' => $user->position === Position::GOALKEEPER,
             'dropped_out' => $droppedOut,
             'waitlist_position' => $waitlistPosition,
             'ranking' => $ranking,
             'wins_ranking' => $this->roundWinsRankingService->getRanking(includeGuests: true),
-            'suspended_until_round' => $user->suspended_until_round,
             'prediction' => $prediction,
             'week_team_images' => $weekTeamImages,
+            'rounds' => $rounds,
             'payment' => $payment ? [
                 'id' => $payment->id,
                 'amount' => $payment->amount,
@@ -115,7 +97,26 @@ class GameController extends Controller
                 'paid_at' => $payment->paid_at?->toIso8601String(),
                 'penalty_rounds' => $payment->penalty_rounds,
             ] : null,
-        ]);
+        ];
+
+        if ($isAdmin) {
+            $props['all_users'] = User::select('id', 'name', 'position', 'guest')
+                ->where('role', '!=', 'admin')
+                ->where('active', true)
+                ->orderBy('name')
+                ->get()
+                ->map(fn ($user) => [
+                    'id' => $user->id,
+                    'name' => $user->name,
+                    'position' => $user->position->value,
+                    'position_label' => $user->position->label(),
+                    'guest' => $user->guest,
+                ]);
+            $props['can_enter_scores'] = $this->scoringService->canEnterScores($game);
+            $props['payments'] = $this->paymentService->getGamePayments($game->id);
+        }
+
+        return Inertia::render('Dashboard', $props);
     }
 
     public function join(Request $request, Game $game): RedirectResponse
@@ -295,6 +296,27 @@ class GameController extends Controller
         return response()->json(['image' => '/storage/' . $path]);
     }
 
+    public function generateLineupsImage(Request $request, LineupsImageService $imageService): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $game = $this->gameService->getOrCreateThisWeekGame();
+
+        $teamPlayerIds = $request->input('teams');
+
+        if ($teamPlayerIds) {
+            $path = $imageService->generate($game, $teamPlayerIds);
+        } else {
+            $path = $imageService->generateRandom($game);
+        }
+
+        if (! $path) {
+            return response()->json(['error' => 'Jogadores insuficientes para gerar escalações.'], 422);
+        }
+
+        return response()->json(['image' => '/storage/' . $path]);
+    }
+
     public function createPayments(Request $request): JsonResponse
     {
         abort_unless($request->user()->role === 'admin', 403);
@@ -310,6 +332,78 @@ class GameController extends Controller
         $count = $this->paymentService->createPaymentsForGame($game);
 
         return response()->json(['message' => "{$count} pagamentos criados.", 'count' => $count]);
+    }
+
+    public function getRoundData(Request $request): JsonResponse
+    {
+        $round = (int) $request->input('round');
+
+        $game = Game::where('round', $round)->first();
+
+        $payload = null;
+        if ($game) {
+            $payload = GamePayload::fromGame($game, $this->draftService, $this->scoringService);
+        }
+
+        $ranking = $this->scoringService->getRanking(includeGuests: true, upToRound: $round);
+        $winsRanking = $this->roundWinsRankingService->getRanking(includeGuests: true, upToRound: $round);
+        $prediction = $game ? $this->predictionService->predict($game) : null;
+
+        $weekTeamImages = [];
+        if ($game && ! empty($game->week_team_images)) {
+            $weekTeamImages = array_map(fn ($p) => '/storage/' . $p, $game->week_team_images);
+        }
+
+        $isAdmin = $request->user()->role === 'admin';
+
+        $data = [
+            'game' => $payload,
+            'ranking' => $ranking,
+            'wins_ranking' => $winsRanking,
+            'prediction' => $prediction,
+            'week_team_images' => $weekTeamImages,
+        ];
+
+        if ($isAdmin && $game) {
+            $data['payments'] = $this->paymentService->getGamePayments($game->id);
+            $data['can_enter_scores'] = $this->scoringService->canEnterScores($game);
+        }
+
+        return response()->json($data);
+    }
+
+    public function regenerateWeekTeam(Request $request, Game $game, WeekTeamImageService $imageService): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        if ($game->status !== GameStatus::DONE) {
+            return response()->json(['error' => 'O jogo precisa estar finalizado.'], 422);
+        }
+
+        $paths = $imageService->generate($game);
+
+        if (empty($paths)) {
+            return response()->json(['error' => 'Não foi possível gerar o time da semana.'], 422);
+        }
+
+        $game->update(['week_team_images' => $paths]);
+
+        $images = array_map(fn ($p) => '/storage/' . $p, $paths);
+
+        return response()->json(['images' => $images]);
+    }
+
+    public function regenerateAllWeekTeams(Request $request): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $total = Game::where('status', GameStatus::DONE)->count();
+
+        \App\Jobs\RegenerateAllWeekTeams::dispatch();
+
+        return response()->json([
+            'message' => "Geração enfileirada para {$total} rodadas. Processando em segundo plano.",
+        ]);
     }
 
     private function getWeekTeamImages(): array

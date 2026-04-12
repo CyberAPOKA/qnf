@@ -8,8 +8,7 @@ defineProps({
 </script>
 
 <template>
-    <div
-        class="relative w-full rounded-2xl bg-[#0b0908] p-1 shadow-[0_0_20px_rgba(255,120,30,0.18)]">
+    <div class="relative w-full rounded-2xl bg-[#0b0908] p-1 shadow-[0_0_20px_rgba(255,120,30,0.18)]">
         <div
             class="electric-frame relative h-full w-full overflow-hidden rounded-xl bg-[linear-gradient(180deg,#1a130f_0%,#0c0a09_100%)]">
             <div class="electric-scan absolute inset-0 pointer-events-none"></div>
@@ -41,11 +40,11 @@ defineProps({
     border-radius: 0.8rem;
     padding: 4px;
     background: linear-gradient(120deg,
-            #ffb973,
-            #ff6a00,
-            #ffd8a8,
-            #ff6a00,
-            #ffb973);
+            #e8d3a3,
+            #D2B06A,
+            #f5e6c8,
+            #D2B06A,
+            #e8d3a3);
     background-size: 300% 300%;
     -webkit-mask:
         linear-gradient(#000 0 0) content-box,
@@ -57,7 +56,7 @@ defineProps({
 
 .electric-scan {
     background: linear-gradient(transparent,
-            rgba(255, 140, 50, 0.14),
+            rgba(210, 176, 106, 0.18),
             transparent);
     mix-blend-mode: screen;
     animation: scanMove 2.5s linear infinite;
@@ -75,11 +74,11 @@ defineProps({
 
 @keyframes glowPulse {
     0% {
-        filter: drop-shadow(0 0 5px #ff7a2f);
+        filter: drop-shadow(0 0 5px #D2B06A);
     }
 
     100% {
-        filter: drop-shadow(0 0 18px #ff7a2f) drop-shadow(0 0 36px #ff5a1f);
+        filter: drop-shadow(0 0 18px #D2B06A) drop-shadow(0 0 36px #b8964f);
     }
 }
 

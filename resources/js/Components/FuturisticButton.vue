@@ -26,8 +26,8 @@ const emit = defineEmits(['click']);
 
 .futuristic-button {
   position: relative;
-  background-color: #ffffff; /* Cor da borda padrão */
-  padding: 1px; /* Espessura da borda */
+  background-color: #D2B06A;
+  padding: 1px;
   cursor: pointer;
   min-width: 320px;
   height: 50px;
@@ -37,57 +37,47 @@ const emit = defineEmits(['click']);
   transition: all 0.3s ease;
   border: none;
   outline: none;
-  /* Forma chanfrada externa */
-  clip-path: polygon(
-    12px 0, 
-    100% 0, 
-    100% calc(100% - 12px), 
-    calc(100% - 12px) 100%, 
-    0 100%, 
-    0 12px
-  );
+  clip-path: polygon(12px 0,
+      100% 0,
+      100% calc(100% - 12px),
+      calc(100% - 12px) 100%,
+      0 100%,
+      0 12px);
 }
 
 .button-inner {
   position: relative;
   width: 100%;
   height: 100%;
-  background-color: #000000; /* Fundo preto interno */
+  background-color: #000000;
   display: flex;
   align-items: center;
   justify-content: center;
   transition: all 0.3s ease;
   z-index: 2;
   overflow: hidden;
-    border-top-right-radius: 4px;
-  border-bottom-left-radius: 4px;  
-  /* Forma chanfrada interna */
-  clip-path: polygon(
-    11px 0, 
-    100% 0, 
-    100% calc(100% - 11px), 
-    calc(100% - 11px) 100%, 
-    0 100%, 
-    0 11px
-  );
+  border-top-right-radius: 4px;
+  border-bottom-left-radius: 4px;
+  clip-path: polygon(11px 0,
+      100% 0,
+      100% calc(100% - 11px),
+      calc(100% - 11px) 100%,
+      0 100%,
+      0 11px);
 }
 
 .inner-glow {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  inset: 0;
   pointer-events: none;
   transition: all 0.3s ease;
   opacity: 0;
   z-index: 1;
-  /* Brilho interno (inset) usando box-shadow */
-  box-shadow: inset 0 0 20px 5px #ccff00;
+  box-shadow: inset 0 0 20px 5px #D2B06A;
 }
 
 .label {
-  color: #ccff00; /* Amarelo neon/esverdeado */
+  color: #D2B06A;
   font-family: 'Inter', sans-serif;
   font-weight: 700;
   font-size: 16px;
@@ -103,28 +93,25 @@ const emit = defineEmits(['click']);
   left: 0;
   width: 24px;
   height: 24px;
-  background-color: #ccff00;
+  background-color: #D2B06A;
   z-index: 4;
-  /* Triângulo no canto superior esquerdo */
   clip-path: polygon(0 0, 100% 0, 0 100%);
   transition: all 0.3s ease;
 }
 
-/* Efeitos de HOVER conforme solicitado */
 .futuristic-button:hover {
-  background-color: #ccff00; /* Borda muda para amarelo no hover */
+  background-color: #f0d9a0;
 }
 
 .futuristic-button:hover .inner-glow {
-  opacity: 1; /* Ativa o brilho interno forte */
-  box-shadow: inset 0 0 8px 2px #ccff00; /* Sombra interna mais forte */
+  opacity: 1;
+  box-shadow: inset 0 0 10px 3px #D2B06A;
 }
 
 .futuristic-button:hover .label {
-  text-shadow: 0 0 12px rgba(204, 255, 0, 0.9);
+  text-shadow: 0 0 12px rgba(210, 176, 106, 0.9);
 }
 
-/* Efeito de clique */
 .futuristic-button:active {
   transform: scale(0.98);
   transition: all 0.1s ease;

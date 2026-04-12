@@ -17,12 +17,10 @@ class RoundWinsRankingService
      * Ex: Christian Steffens jogou 7 rodadas nos times que fizeram
      *     2, 3, 3, 3, 2, 3, 0 → total_score = 16, média = 2.3
      */
-    public function getRanking(bool $includeGuests = false): array
+    public function getRanking(bool $includeGuests = false, ?int $upToRound = null): array
     {
-        // Subquery: para cada jogador em cada jogo, retorna o score do time dele
-        // Um jogador pode ser capitão (teams.captain_user_id) ou draftado (draft_picks.picked_user_id)
         $playerTeamScores = DB::query()
-            ->fromSub(function ($query) {
+            ->fromSub(function ($query) use ($upToRound) {
                 // Capitães
                 $captains = DB::table('teams')
                     ->join('games', 'teams.game_id', '=', 'games.id')
@@ -34,6 +32,10 @@ class RoundWinsRankingService
                         'teams.game_id',
                         'teams.score',
                     );
+
+                if ($upToRound !== null) {
+                    $captains->where('games.round', '<=', $upToRound);
+                }
 
                 // Draftados
                 $query->from('draft_picks')
@@ -48,8 +50,13 @@ class RoundWinsRankingService
                         'draft_picks.picked_user_id as user_id',
                         'draft_picks.game_id',
                         'teams.score',
-                    )
-                    ->unionAll($captains);
+                    );
+
+                if ($upToRound !== null) {
+                    $query->where('games.round', '<=', $upToRound);
+                }
+
+                $query->unionAll($captains);
             }, 'player_scores')
             ->join('users', 'player_scores.user_id', '=', 'users.id')
             ->where('users.position', '!=', 'goalkeeper')

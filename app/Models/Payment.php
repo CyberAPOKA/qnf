@@ -15,8 +15,12 @@ class Payment extends Model
         'external_id',
         'qr_code_base64',
         'paid_at',
+        'method',
         'penalty_rounds',
     ];
+
+    public const METHOD_SYSTEM = 'system';
+    public const METHOD_MANUAL = 'manual';
 
     protected function casts(): array
     {

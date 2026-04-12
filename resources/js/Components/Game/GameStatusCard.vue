@@ -1,5 +1,7 @@
 <script setup>
-defineProps({
+import { ref } from 'vue';
+
+const props = defineProps({
     statusLabel: String,
     status: String,
     playersCount: Number,
@@ -7,16 +9,66 @@ defineProps({
         type: Number,
         default: null,
     },
+    rounds: {
+        type: Array,
+        default: () => [],
+    },
 });
+
+const emit = defineEmits(['update:round']);
+
+const showRoundMenu = ref(false);
+
+const toggleMenu = () => {
+    if (!props.rounds || props.rounds.length <= 1) return;
+    showRoundMenu.value = !showRoundMenu.value;
+};
+
+const pickRound = (r) => {
+    showRoundMenu.value = false;
+    if (r !== props.round) {
+        emit('update:round', r);
+    }
+};
+
+const closeMenu = () => {
+    showRoundMenu.value = false;
+};
 </script>
 
 <template>
-    <div class="rounded-xl bg-white p-2 lg:p-4 shadow text-center">
-        <p v-if="round" class="text-3xl font-bold uppercase tracking-wide text-gray-900 round-title">
-            <i class="fa-solid fa-gem text-2xl round-ice"></i>
-            Rodada {{ round }}
-            <i class="fa-regular fa-gem text-2xl round-ice"></i>
-        </p>
+    <div class="rounded-xl bg-white p-2 lg:p-4 shadow text-center relative">
+        <div v-if="round" class="relative inline-block">
+            <button
+                type="button"
+                @click="toggleMenu"
+                :disabled="!rounds || rounds.length <= 1"
+                class="text-3xl font-bold uppercase tracking-wide text-gray-900 round-title cursor-pointer disabled:cursor-default">
+                <i class="fa-solid fa-gem text-2xl round-ice"></i>
+                Rodada {{ round }}
+                <i v-if="rounds && rounds.length > 1" class="fa-solid fa-caret-down text-base text-gray-500 ml-1"></i>
+                <i class="fa-regular fa-gem text-2xl round-ice"></i>
+            </button>
+
+            <div
+                v-if="showRoundMenu"
+                class="fixed inset-0 z-40"
+                @click="closeMenu"></div>
+
+            <div
+                v-if="showRoundMenu"
+                class="absolute left-1/2 top-full mt-2 z-50 w-40 -translate-x-1/2 rounded-lg border border-gray-200 bg-white shadow-lg overflow-hidden">
+                <button
+                    v-for="r in rounds"
+                    :key="r"
+                    type="button"
+                    @click="pickRound(r)"
+                    class="w-full px-3 py-2 text-sm font-semibold text-left hover:bg-indigo-50"
+                    :class="r === round ? 'bg-indigo-600 text-white hover:bg-indigo-600' : 'text-gray-800'">
+                    Rodada {{ r }}
+                </button>
+            </div>
+        </div>
         <p v-if="!['scheduled', 'drafted', 'done'].includes(status)" class="mt-2 text-sm text-gray-700">
             Inscritos: <span class="font-semibold">{{ playersCount }}/15</span>
         </p>

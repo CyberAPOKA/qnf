@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\Position;
+use App\Enums\TeamColor;
 use App\Models\Game;
 use App\Models\User;
 use Illuminate\Support\Facades\File;
@@ -14,9 +15,9 @@ class CaptainsImageService
     private const HEIGHT = 1280;
 
     private const POSITIONS = [
-        'left'   => ['x' => 30,  'y' => 330, 'w' => 600, 'h' => 950, 'photo' => 'side', 'flip' => false],
-        'center' => ['x' => 685,  'y' => 330, 'w' => 600, 'h' => 950, 'photo' => 'front', 'flip' => false],
-        'right'  => ['x' => 1300, 'y' => 330, 'w' => 600, 'h' => 950, 'photo' => 'side', 'flip' => true],
+        'left'   => ['x' => 30,  'y' => 500, 'w' => 600, 'h' => 800, 'photo' => 'side', 'flip' => false, 'color' => TeamColor::GREEN],
+        'center' => ['x' => 685,  'y' => 500, 'w' => 600, 'h' => 800, 'photo' => 'front', 'flip' => false, 'color' => TeamColor::YELLOW],
+        'right'  => ['x' => 1300, 'y' => 500, 'w' => 600, 'h' => 800, 'photo' => 'side', 'flip' => true, 'color' => TeamColor::BLUE],
     ];
 
     /**
@@ -64,7 +65,7 @@ class CaptainsImageService
 
     private function generateImage(array $captains, string $outputDir, string $relativePath): string
     {
-        $basePath = public_path('assets/captains/base_captains.png');
+        $basePath = public_path('assets/images/base_captains.png');
 
         $canvas = imagecreatetruecolor(self::WIDTH, self::HEIGHT);
         imagealphablending($canvas, false);
@@ -107,8 +108,10 @@ class CaptainsImageService
                 $canvas,
                 $this->firstName($player->name),
                 $pos['x'],
-                $pos['y'] + $pos['h'] + 10,
-                $pos['w']
+                $pos['y'],
+                $pos['w'],
+                $pos['h'],
+                $pos['color']
             );
         }
 
@@ -190,7 +193,7 @@ class CaptainsImageService
         imagedestroy($cropped);
     }
 
-    private function drawNameCard(\GdImage $canvas, string $name, int $x, int $y, int $playerWidth): void
+    private function drawNameCard(\GdImage $canvas, string $name, int $x, int $y, int $playerWidth, int $playerHeight, TeamColor $teamColor): void
     {
         $fontPath = public_path('fonts/Anton-Regular.ttf');
 
@@ -199,10 +202,13 @@ class CaptainsImageService
         }
 
         $displayName = mb_strtoupper($name);
-        $fontSize = 32;
-        $paddingX = 14;
-        $paddingY = 14;
-        $radius = 14;
+        $fontSize = 36;
+        $paddingX = 20;
+        $paddingY = 12;
+        $radius = 10;
+        $bottomMargin = 30;
+
+        [$bgR, $bgG, $bgB, $txtR, $txtG, $txtB] = [0xD2, 0xB0, 0x6A, 0, 0, 0];
 
         $bbox = imagettfbbox($fontSize, 0, $fontPath, $displayName);
         $textWidth = (int) abs($bbox[2] - $bbox[0]);
@@ -212,17 +218,17 @@ class CaptainsImageService
         $cardH = $textHeight + ($paddingY * 2);
 
         $cardX = $x + (int) (($playerWidth - $cardW) / 2);
-        $cardY = $y;
+        $cardY = $y + $playerHeight - $cardH - $bottomMargin;
 
-        $yellow = imagecolorallocate($canvas, 255, 230, 0);
-        $black = imagecolorallocate($canvas, 0, 0, 0);
+        $bgColor = imagecolorallocate($canvas, $bgR, $bgG, $bgB);
+        $textColor = imagecolorallocate($canvas, $txtR, $txtG, $txtB);
 
-        $this->drawRoundedRect($canvas, $cardX, $cardY, $cardX + $cardW, $cardY + $cardH, $radius, $yellow);
+        $this->drawRoundedRect($canvas, $cardX, $cardY, $cardX + $cardW, $cardY + $cardH, $radius, $bgColor);
 
         $textX = $cardX + $paddingX;
         $textY = $cardY + $paddingY + $textHeight;
 
-        imagettftext($canvas, $fontSize, 0, $textX, $textY, $black, $fontPath, $displayName);
+        imagettftext($canvas, $fontSize, 0, $textX, $textY, $textColor, $fontPath, $displayName);
     }
 
     private function drawRoundedRect(\GdImage $canvas, int $x1, int $y1, int $x2, int $y2, int $radius, int $color): void

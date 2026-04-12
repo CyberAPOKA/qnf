@@ -8,6 +8,8 @@ use App\Enums\TeamColor;
 use App\Events\DraftFinished;
 use App\Events\DraftPickMade;
 use App\Events\DraftTurnChanged;
+use App\Jobs\SendDraftFinishedWhatsApp;
+use App\Jobs\SendWhatsAppMessage;
 use App\Models\DraftPick;
 use App\Models\Game;
 use App\Models\Team;
@@ -284,18 +286,29 @@ class DraftService
         });
 
         // Side effects AFTER transaction commit — DB changes are now visible to all connections
-        $freshGame = Game::with(['teams.captain', 'draftPicks.pickedUser', 'players'])->findOrFail($game->id);
+        $freshGame = Game::with(['teams.captain', 'teams.firstPick', 'draftPicks.pickedUser', 'players'])->findOrFail($game->id);
 
-        $slimPickPayload = [
-            '_slim' => true,
+        $turnColor = $this->currentTurnColor($freshGame);
+        $totalPicks = $freshGame->draftPicks->count();
+        $isDoublePick = $totalPicks < 11
+            && isset(self::SNAKE_SEQUENCE[$totalPicks + 1])
+            && $turnColor === self::SNAKE_SEQUENCE[$totalPicks + 1];
+
+        $pickPayload = [
             'id' => $freshGame->id,
             'status' => $freshGame->status->value,
+            'picked_user_id' => $pick->picked_user_id,
+            'team_color' => $pick->team_color->value,
+            'teams' => $this->teamsWithPlayers($freshGame),
+            'turn_color' => $turnColor?->value,
+            'is_double_pick' => $isDoublePick,
+            'picks_count' => $totalPicks,
         ];
 
-        rescue(fn () => broadcast(new DraftPickMade($slimPickPayload))->toOthers(), report: false);
-        rescue(fn () => broadcast(new DraftTurnChanged($slimPickPayload))->toOthers(), report: false);
+        rescue(fn () => broadcast(new DraftPickMade($pickPayload))->toOthers(), report: false);
+        rescue(fn () => broadcast(new DraftTurnChanged($pickPayload))->toOthers(), report: false);
 
-        rescue(fn () => $this->notifyPick($freshGame, $pick), report: false);
+        $this->notifyPick($freshGame, $pick);
 
         if ($freshGame->status === GameStatus::DRAFTED) {
             $slimPayload = [
@@ -309,7 +322,7 @@ class DraftService
                 report: false
             );
 
-            rescue(fn () => $this->whatsAppService->sendToGroup($this->buildWhatsAppMessage($freshGame)), report: false);
+            SendDraftFinishedWhatsApp::dispatch($freshGame->id);
         }
 
         return $pick;
@@ -386,7 +399,7 @@ class DraftService
             }
         }
 
-        $this->whatsAppService->sendToGroup($message);
+        SendWhatsAppMessage::dispatch('group', 'text', $message);
     }
 
     public function buildWhatsAppMessage(Game $game): string
@@ -438,6 +451,47 @@ class DraftService
         $lines[] = sprintf('*⚽️ Rodada: %02d*', $game->round ?? 0);
 
         return implode("\n", $lines);
+    }
+
+    /**
+     * Monta os IDs dos 3 times no layout esperado pelo LineupsImageService:
+     * [goleiro, ala, capitão, ala, ala] — 5 jogadores por time.
+     */
+    public function buildTeamPlayerIdsForLineups(Game $game): array
+    {
+        $game->loadMissing(['teams.captain', 'draftPicks.pickedUser']);
+
+        $teamsByColor = $game->teams->keyBy(fn ($team) => $team->color->value);
+        $result = [];
+
+        foreach (TeamColor::cases() as $color) {
+            $team = $teamsByColor->get($color->value);
+            $captainId = $team?->captain_user_id;
+
+            $picks = $game->draftPicks->where('team_color', $color);
+
+            $goalkeeperId = $picks
+                ->first(fn ($p) => $p->pickedUser?->position === Position::GOALKEEPER)
+                ?->picked_user_id;
+
+            $lineIds = $picks
+                ->filter(fn ($p) => $p->pickedUser?->position !== Position::GOALKEEPER)
+                ->pluck('picked_user_id')
+                ->values()
+                ->all();
+
+            $line = array_pad($lineIds, 3, null);
+
+            $result[] = [
+                $goalkeeperId,
+                $line[0],
+                $captainId,
+                $line[1],
+                $line[2],
+            ];
+        }
+
+        return $result;
     }
 
     public function teamsWithPlayers(Game $game): array

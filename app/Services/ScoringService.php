@@ -136,7 +136,7 @@ class ScoringService
      * @return Collection<int, object{id: int, name: string, position: string, games_played: int, total_points: int}>
      *         Keyed por user_id
      */
-    public function getPlayerStats(?array $userIds = null, bool $includeGuests = false, ?int $excludeGameId = null): Collection
+    public function getPlayerStats(?array $userIds = null, bool $includeGuests = false, ?int $excludeGameId = null, ?int $upToRound = null): Collection
     {
         $query = DB::table('game_players')
             ->join('users', 'game_players.user_id', '=', 'users.id')
@@ -156,6 +156,10 @@ class ScoringService
             $query->where('game_players.game_id', '!=', $excludeGameId);
         }
 
+        if ($upToRound !== null) {
+            $query->where('games.round', '<=', $upToRound);
+        }
+
         if (! $includeGuests) {
             $query->where('users.guest', false);
         }
@@ -173,14 +177,19 @@ class ScoringService
      *
      * @return array<int, int> Keyed por user_id => streak count
      */
-    public function getWinStreaks(): array
+    public function getWinStreaks(?int $upToRound = null): array
     {
-        $rows = DB::table('game_players')
+        $query = DB::table('game_players')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
             ->orderBy('games.date', 'desc')
-            ->select('game_players.user_id', 'game_players.points')
-            ->get();
+            ->select('game_players.user_id', 'game_players.points');
+
+        if ($upToRound !== null) {
+            $query->where('games.round', '<=', $upToRound);
+        }
+
+        $rows = $query->get();
 
         $streaks = [];
 
@@ -203,14 +212,19 @@ class ScoringService
      * Últimos N resultados de cada jogador (1 = vitória, 0 = derrota).
      * Retorna array keyed por user_id => [1, 0, 1, 1, 0] (mais recente primeiro).
      */
-    public function getLastResults(int $count = 5): array
+    public function getLastResults(int $count = 5, ?int $upToRound = null): array
     {
-        $rows = DB::table('game_players')
+        $query = DB::table('game_players')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
             ->orderBy('games.date', 'desc')
-            ->select('game_players.user_id', 'game_players.points')
-            ->get();
+            ->select('game_players.user_id', 'game_players.points');
+
+        if ($upToRound !== null) {
+            $query->where('games.round', '<=', $upToRound);
+        }
+
+        $rows = $query->get();
 
         $results = [];
         foreach ($rows->groupBy('user_id') as $userId => $games) {
@@ -270,9 +284,9 @@ class ScoringService
         return $ranks;
     }
 
-    public function getRanking(int $limit = 50, bool $includeGuests = false): array
+    public function getRanking(int $limit = 50, bool $includeGuests = false, ?int $upToRound = null): array
     {
-        $currentStats = $this->getPlayerStats(userIds: null, includeGuests: $includeGuests);
+        $currentStats = $this->getPlayerStats(userIds: null, includeGuests: $includeGuests, upToRound: $upToRound);
 
         $sorted = $currentStats
             ->sortBy([
@@ -283,15 +297,20 @@ class ScoringService
             ->take($limit)
             ->values();
 
-        $streaks = $this->getWinStreaks();
-        $lastResults = $this->getLastResults();
+        $streaks = $this->getWinStreaks($upToRound);
+        $lastResults = $this->getLastResults(5, $upToRound);
         $currentRanks = $this->assignRanks($currentStats);
 
-        // Compute previous ranking (excluding last completed game)
-        $latestGameId = DB::table('games')
+        // Compute previous ranking (excluding last completed game up to the given round)
+        $latestGameQuery = DB::table('games')
             ->where('status', GameStatus::DONE->value)
-            ->orderByDesc('date')
-            ->value('id');
+            ->orderByDesc('date');
+
+        if ($upToRound !== null) {
+            $latestGameQuery->where('round', '<=', $upToRound);
+        }
+
+        $latestGameId = $latestGameQuery->value('id');
 
         $previousRanks = [];
         if ($latestGameId) {
