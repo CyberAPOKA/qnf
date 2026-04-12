@@ -76,7 +76,13 @@ class WhatsAppService
                 return true;
             }
 
-            Log::error('WhatsApp send image failed', ['to' => $to, 'error' => $response->json('error')]);
+            Log::error('WhatsApp send image failed', [
+                'to' => $to,
+                'status' => $response->status(),
+                'body' => $response->body(),
+                'imagePath' => $imagePath,
+                'imageExists' => file_exists($imagePath),
+            ]);
             return false;
         } catch (\Exception $e) {
             Log::error('WhatsApp image service error', ['to' => $to, 'error' => $e->getMessage()]);
