@@ -342,17 +342,19 @@ class GameController extends Controller
 
     public function getRoundData(Request $request): JsonResponse
     {
-        $round = (int) $request->input('round');
+        $validated = $request->validate([
+            'round' => ['required', 'integer', 'min:1'],
+        ]);
+
+        $round = (int) $validated['round'];
 
         $game = Game::with('weekTeamMusics')->where('round', $round)->first();
 
-        $payload = null;
-        if ($game) {
-            $payload = GamePayload::fromGame($game, $this->draftService, $this->scoringService);
-        }
+        $payload = $game
+            ? GamePayload::fromGame($game, $this->draftService, $this->scoringService)
+            : null;
 
         $ranking = $this->scoringService->getRanking(includeGuests: true, upToRound: $round);
-        dd($ranking);
         $winsRanking = $this->roundWinsRankingService->getRanking(includeGuests: true, upToRound: $round);
         $prediction = $game ? $this->predictionService->predict($game) : null;
 
