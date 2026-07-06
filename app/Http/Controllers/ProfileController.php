@@ -56,7 +56,7 @@ class ProfileController extends Controller
             $rules['music_thumbnail_url'] = ['nullable', 'string', 'max:1000'];
             $rules['music_watch_url'] = ['nullable', 'string', 'max:1000'];
         } else {
-            $rules['music_file'] = ['nullable', 'file', 'mimes:mp3,mpeg', 'max:10240'];
+            $rules['music_file'] = ['nullable', 'file', 'mimes:mp3,mpeg', 'max:15360'];
         }
 
         $validated = $request->validate($rules);
