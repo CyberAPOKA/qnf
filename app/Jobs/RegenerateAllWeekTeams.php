@@ -5,6 +5,7 @@ namespace App\Jobs;
 use App\Enums\GameStatus;
 use App\Models\Game;
 use App\Services\WeekTeamImageService;
+use App\Services\WeekTeamMusicService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -19,7 +20,7 @@ class RegenerateAllWeekTeams implements ShouldQueue
     public int $tries = 1;
     public int $timeout = 1800;
 
-    public function handle(WeekTeamImageService $imageService): void
+    public function handle(WeekTeamImageService $imageService, WeekTeamMusicService $musicService): void
     {
         $games = Game::where('status', GameStatus::DONE)->orderBy('round')->get();
 
@@ -34,6 +35,7 @@ class RegenerateAllWeekTeams implements ShouldQueue
                     continue;
                 }
 
+                $winnerColors = $imageService->getWinnerColors($game);
                 $paths = $imageService->generate($game);
 
                 if (empty($paths)) {
@@ -41,6 +43,7 @@ class RegenerateAllWeekTeams implements ShouldQueue
                     continue;
                 }
 
+                $musicService->snapshotForGame($game, $winnerColors);
                 $game->update(['week_team_images' => $paths]);
                 $generated++;
             } catch (\Throwable $e) {

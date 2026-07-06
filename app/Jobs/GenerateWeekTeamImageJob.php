@@ -4,6 +4,7 @@ namespace App\Jobs;
 
 use App\Models\Game;
 use App\Services\WeekTeamImageService;
+use App\Services\WeekTeamMusicService;
 use App\Services\WhatsAppService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -20,20 +21,28 @@ class GenerateWeekTeamImageJob implements ShouldQueue
         public int $gameId
     ) {}
 
-    public function handle(WeekTeamImageService $imageService, WhatsAppService $whatsAppService): void
-    {
+    public function handle(
+        WeekTeamImageService $imageService,
+        WeekTeamMusicService $musicService,
+        WhatsAppService $whatsAppService,
+    ): void {
         $game = Game::with([
             'teams.captain',
             'draftPicks.pickedUser',
         ])->findOrFail($this->gameId);
 
+        $winnerColors = $imageService->getWinnerColors($game);
         $paths = $imageService->generate($game);
 
         if (empty($paths)) {
             $game->update(['week_team_images' => null]);
+            $musicService->clearSnapshots($game);
             Log::info('Week team image: no winners (all tied)', ['game_id' => $this->gameId]);
+
             return;
         }
+
+        $musicService->snapshotForGame($game, $winnerColors);
 
         $updated = $game->update(['week_team_images' => $paths]);
         Log::info('Week team images generated', [

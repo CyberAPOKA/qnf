@@ -52,4 +52,10 @@ return [
         'webhook_url' => env('MERCADOPAGO_WEBHOOK_URL'),
     ],
 
+    'youtube' => [
+        'api_key' => env('YOUTUBE_API_KEY'),
+        'region' => env('YOUTUBE_REGION', 'BR'),
+        'language' => env('YOUTUBE_LANGUAGE', 'pt'),
+    ],
+
 ];

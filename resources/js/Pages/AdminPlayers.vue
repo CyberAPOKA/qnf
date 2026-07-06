@@ -4,11 +4,11 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
 import DataTable from '@/Components/DataTable.vue';
 import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
+import PlayerFormModal from '@/Components/Game/PlayerFormModal.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
 import DialogModal from '@/Components/DialogModal.vue';
 import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
-import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
 import { useForm } from '@inertiajs/vue3';
@@ -17,13 +17,6 @@ const props = defineProps({
     players: Array,
     done_games: Array,
 });
-
-const positions = [
-    { value: 'goalkeeper', label: 'Goleiro' },
-    { value: 'fixed', label: 'Fixo' },
-    { value: 'winger', label: 'Ala' },
-    { value: 'pivot', label: 'Pivô' },
-];
 
 const positionLabels = {
     goalkeeper: 'Goleiro',
@@ -52,118 +45,29 @@ const filteredPlayers = computed(() => {
 
 const rowClass = (row) => (row.active ? '' : 'opacity-50');
 
-// --- Modal state ---
-const showModal = ref(false);
-const editingPlayer = ref(null);
-const convertingGuest = ref(null);
-const isEditing = computed(() => editingPlayer.value !== null);
-const isConverting = computed(() => convertingGuest.value !== null);
-
-const form = useForm({
-    name: '',
-    phone: '',
-    position: 'winger',
-    ability: 5,
-    password: '',
-    active: true,
-    photo_front: null,
-    photo_side: null,
-});
-
-const photoFrontPreview = ref(null);
-const photoSidePreview = ref(null);
+const playerFormModal = ref(null);
 
 const openCreate = () => {
-    editingPlayer.value = null;
-    convertingGuest.value = null;
-    form.reset();
-    form.clearErrors();
-    photoFrontPreview.value = null;
-    photoSidePreview.value = null;
-    showModal.value = true;
+    playerFormModal.value?.openCreate();
 };
 
 const onSelectGuest = (event) => {
     const guestId = Number(event.target.value);
     event.target.value = '';
-    if (!guestId) return;
-    const guest = guests.value.find(g => g.id === guestId);
-    if (!guest) return;
 
-    editingPlayer.value = null;
-    convertingGuest.value = guest;
-    form.reset();
-    form.clearErrors();
-    form.name = guest.name;
-    form.position = guest.position;
-    form.phone = '';
-    form.password = '';
-    form.active = true;
-    photoFrontPreview.value = guest.photo_front;
-    photoSidePreview.value = guest.photo_side;
-    showModal.value = true;
+    if (! guestId) {
+        return;
+    }
+
+    const guest = guests.value.find((g) => g.id === guestId);
+
+    if (guest) {
+        playerFormModal.value?.openConvert(guest);
+    }
 };
 
 const openEdit = (player) => {
-    editingPlayer.value = player;
-    form.clearErrors();
-    form.name = player.name;
-    form.phone = player.phone;
-    form.position = player.position;
-    form.ability = player.ability ?? 5;
-    form.password = '';
-    form.active = player.active;
-    form.photo_front = null;
-    form.photo_side = null;
-    photoFrontPreview.value = player.photo_front;
-    photoSidePreview.value = player.photo_side;
-    showModal.value = true;
-};
-
-const close = () => {
-    showModal.value = false;
-    editingPlayer.value = null;
-    convertingGuest.value = null;
-    form.reset();
-    form.clearErrors();
-    photoFrontPreview.value = null;
-    photoSidePreview.value = null;
-};
-
-const onFileChange = (field, event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    form[field] = file;
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-        if (field === 'photo_front') photoFrontPreview.value = e.target.result;
-        else photoSidePreview.value = e.target.result;
-    };
-    reader.readAsDataURL(file);
-};
-
-const submit = () => {
-    if (isConverting.value) {
-        form.post(route('admin.players.convert-guest', convertingGuest.value.id), {
-            preserveScroll: true,
-            preserveState: false,
-            onSuccess: () => close(),
-        });
-    } else if (isEditing.value) {
-        form.post(route('admin.players.update', editingPlayer.value.id), {
-            _method: 'PUT',
-            preserveScroll: true,
-            preserveState: false,
-            onSuccess: () => close(),
-        });
-    } else {
-        form.post(route('admin.players.store'), {
-            preserveScroll: true,
-            preserveState: false,
-            onSuccess: () => close(),
-        });
-    }
+    playerFormModal.value?.openEdit(player);
 };
 
 // --- Suspension modal ---
@@ -285,92 +189,7 @@ const unsuspend = () => {
             </div>
         </div>
 
-        <!-- Modal Criar/Editar -->
-        <DialogModal :show="showModal" @close="close">
-            <template #title>{{ isConverting ? 'Converter convidado' : isEditing ? 'Editar jogador' : 'Criar jogador' }}</template>
-
-            <template #content>
-                <div class="space-y-4">
-                    <div>
-                        <InputLabel for="pl-name" value="Nome" />
-                        <TextInput id="pl-name" v-model="form.name" type="text" class="mt-1 block w-full" autofocus />
-                        <InputError :message="form.errors.name" class="mt-2" />
-                    </div>
-
-                    <div>
-                        <InputLabel for="pl-phone" value="Telefone" />
-                        <TextInput id="pl-phone" v-model="form.phone" type="text" class="mt-1 block w-full" placeholder="5511999999999" />
-                        <InputError :message="form.errors.phone" class="mt-2" />
-                    </div>
-
-                    <div>
-                        <InputLabel for="pl-position" value="Posição" />
-                        <select id="pl-position" v-model="form.position"
-                            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
-                            <option v-for="pos in positions" :key="pos.value" :value="pos.value">
-                                {{ pos.label }}
-                            </option>
-                        </select>
-                        <InputError :message="form.errors.position" class="mt-2" />
-                    </div>
-
-                    <div v-if="isEditing">
-                        <InputLabel for="pl-ability" value="Habilidade (1-10)" />
-                        <div class="mt-1 flex items-center gap-3">
-                            <input id="pl-ability" type="range" min="1" max="10" v-model.number="form.ability"
-                                class="h-2 w-full cursor-pointer appearance-none rounded-lg bg-gray-200 accent-indigo-600" />
-                            <span class="w-8 text-center text-lg font-bold text-indigo-600">{{ form.ability }}</span>
-                        </div>
-                        <InputError :message="form.errors.ability" class="mt-2" />
-                    </div>
-
-                    <div v-if="!isEditing && !isConverting">
-                        <InputLabel for="pl-password" value="Senha" />
-                        <TextInput id="pl-password" v-model="form.password" type="password" class="mt-1 block w-full" />
-                        <InputError :message="form.errors.password" class="mt-2" />
-                    </div>
-
-                    <div class="flex items-center gap-3">
-                        <button type="button" @click="form.active = !form.active"
-                            :class="[
-                                'relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2',
-                                form.active ? 'bg-indigo-600' : 'bg-gray-200',
-                            ]">
-                            <span :class="[
-                                'pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
-                                form.active ? 'translate-x-5' : 'translate-x-0',
-                            ]" />
-                        </button>
-                        <InputLabel value="Ativo" class="cursor-pointer" @click="form.active = !form.active" />
-                    </div>
-
-                    <!-- Photo Front -->
-                    <div>
-                        <InputLabel value="Foto Frente" />
-                        <input type="file" accept="image/jpeg,image/png" @change="onFileChange('photo_front', $event)"
-                            class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:rounded-md file:border-0 file:bg-indigo-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-indigo-700 hover:file:bg-indigo-100" />
-                        <InputError :message="form.errors.photo_front" class="mt-2" />
-                        <img v-if="photoFrontPreview" :src="photoFrontPreview" class="mt-2 h-32 w-auto rounded-lg object-cover" />
-                    </div>
-
-                    <!-- Photo Side -->
-                    <div>
-                        <InputLabel value="Foto Lado" />
-                        <input type="file" accept="image/jpeg,image/png" @change="onFileChange('photo_side', $event)"
-                            class="mt-1 block w-full text-sm text-gray-500 file:mr-4 file:rounded-md file:border-0 file:bg-indigo-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-indigo-700 hover:file:bg-indigo-100" />
-                        <InputError :message="form.errors.photo_side" class="mt-2" />
-                        <img v-if="photoSidePreview" :src="photoSidePreview" class="mt-2 h-32 w-auto rounded-lg object-cover" />
-                    </div>
-                </div>
-            </template>
-
-            <template #footer>
-                <SecondaryButton @click="close">Cancelar</SecondaryButton>
-                <PrimaryButton class="ms-3" :disabled="form.processing" @click="submit">
-                    {{ isConverting ? 'Converter' : isEditing ? 'Atualizar' : 'Salvar' }}
-                </PrimaryButton>
-            </template>
-        </DialogModal>
+        <PlayerFormModal ref="playerFormModal" />
 
         <!-- Modal Suspensão -->
         <DialogModal :show="showSuspendModal" @close="closeSuspend">

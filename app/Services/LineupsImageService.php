@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\Position;
 use App\Models\Game;
 use App\Models\User;
+use App\Support\PublicStorage;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 
@@ -235,9 +236,9 @@ class LineupsImageService
             return $fallback;
         }
 
-        $path = storage_path('app/public/' . ltrim($player->$column, '/'));
+        $path = PublicStorage::localPath($player->$column);
 
-        return file_exists($path) ? $path : $fallback;
+        return $path ?? $fallback;
     }
 
     private function placePlayer(\GdImage $canvas, string $photoPath, int $x, int $y, int $targetW, int $targetH, bool $flip): void

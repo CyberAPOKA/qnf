@@ -75,7 +75,7 @@ class AdminGameController extends Controller
             if ($totalAfter >= 15 && in_array($lockedGame->status, [GameStatus::SCHEDULED, GameStatus::OPEN])) {
                 $goalkeeperCount = GamePlayer::where('game_id', $lockedGame->id)
                     ->where('dropped_out', false)
-                    ->whereHas('user', fn ($q) => $q->where('position', Position::GOALKEEPER))
+                    ->whereHas('user', fn($q) => $q->where('position', Position::GOALKEEPER))
                     ->count();
 
                 if ($goalkeeperCount < 3) {
@@ -91,39 +91,15 @@ class AdminGameController extends Controller
         $freshGame = Game::findOrFail($game->id);
 
         foreach ($addedUserIds as $userId) {
-            rescue(fn () => CreatePlayerPaymentJob::dispatchSync($freshGame->id, $userId), report: false);
+            rescue(fn() => CreatePlayerPaymentJob::dispatchSync($freshGame->id, $userId), report: false);
         }
 
         if ($freshGame->status === GameStatus::FULL) {
             $this->gameService->handleGameBecameFull($freshGame, $this->draftService);
         } else {
             $payload = GamePayload::fromGame($freshGame, $this->draftService);
-            rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
+            rescue(fn() => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
         }
-
-        return back();
-    }
-
-    public function storePlayer(Request $request): RedirectResponse
-    {
-        abort_unless($request->user()->role === 'admin', 403);
-
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'phone' => ['required', 'string', 'max:20', 'unique:users,phone'],
-            'position' => ['required', Rule::in(Position::values())],
-            'password' => ['required', 'string', 'min:4'],
-        ]);
-
-        User::create([
-            'name' => $validated['name'],
-            'phone' => $validated['phone'],
-            'email' => $validated['phone'] . '@player.local',
-            'role' => 'player',
-            'position' => $validated['position'],
-            'guest' => false,
-            'password' => Hash::make($validated['password']),
-        ]);
 
         return back();
     }
@@ -209,7 +185,7 @@ class AdminGameController extends Controller
                 $this->gameService->handleGameBecameFull($freshGame, $this->draftService);
             } else {
                 $payload = GamePayload::fromGame($freshGame, $this->draftService);
-                rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
+                rescue(fn() => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
             }
         }
 
@@ -266,7 +242,7 @@ class AdminGameController extends Controller
             }
         });
 
-        rescue(fn () => $this->paymentService->cancelPaymentForPlayer($game->id, $userId), report: false);
+        rescue(fn() => $this->paymentService->cancelPaymentForPlayer($game->id, $userId), report: false);
 
         $hasScores = Team::where('game_id', $game->id)->whereNotNull('score')->exists();
         if ($hasScores) {
@@ -308,12 +284,12 @@ class AdminGameController extends Controller
 
             $draftedGoalkeepers = DraftPick::where('game_id', $game->id)
                 ->where('team_color', $color)
-                ->whereHas('pickedUser', fn ($q) => $q->where('position', Position::GOALKEEPER))
+                ->whereHas('pickedUser', fn($q) => $q->where('position', Position::GOALKEEPER))
                 ->count();
 
             $draftedLinePlayers = DraftPick::where('game_id', $game->id)
                 ->where('team_color', $color)
-                ->whereHas('pickedUser', fn ($q) => $q->where('position', '!=', Position::GOALKEEPER))
+                ->whereHas('pickedUser', fn($q) => $q->where('position', '!=', Position::GOALKEEPER))
                 ->count();
 
             $goalkeeperCount = $draftedGoalkeepers + ($captainIsGoalkeeper ? 1 : 0);
@@ -397,10 +373,10 @@ class AdminGameController extends Controller
 
         $freshGame = Game::findOrFail($game->id);
 
-        rescue(fn () => $this->paymentService->cancelPaymentForPlayer($freshGame->id, (int) $validated['user_id']), report: false);
+        rescue(fn() => $this->paymentService->cancelPaymentForPlayer($freshGame->id, (int) $validated['user_id']), report: false);
 
         $payload = GamePayload::fromGame($freshGame, $this->draftService);
-        rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
+        rescue(fn() => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
 
         return back();
     }

@@ -42,6 +42,7 @@ return [
             'driver' => 'local',
             'root' => storage_path('app/public'),
             'url' => rtrim(env('APP_URL', 'http://localhost'), '/').'/storage',
+            'fallback_url' => env('STORAGE_FALLBACK_URL'),
             'visibility' => 'public',
             'throw' => false,
             'report' => false,

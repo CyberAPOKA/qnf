@@ -16,7 +16,7 @@ import ScoreEntryCard from '@/Components/Game/ScoreEntryCard.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
 import WeekTeamCard from '@/Components/Game/WeekTeamCard.vue';
 import AddGuestModal from '@/Components/Game/AddGuestModal.vue';
-import AddPlayerModal from '@/Components/Game/AddPlayerModal.vue';
+import PlayerFormModal from '@/Components/Game/PlayerFormModal.vue';
 import FuturisticButton from '@/Components/FuturisticButton.vue';
 import { Link, useForm } from '@inertiajs/vue3';
 import { useGameChannel } from '@/composables/useGameChannel';
@@ -35,7 +35,7 @@ const props = defineProps({
     waitlist_position: Number,
     ranking: Array,
     wins_ranking: Array,
-    week_team_images: Array,
+    week_teams: Array,
     payment: Object,
     prediction: Object,
     rounds: Array,
@@ -67,7 +67,7 @@ const roundGame = ref(null);
 const roundRanking = ref(null);
 const roundWinsRanking = ref(null);
 const roundPrediction = ref(null);
-const roundWeekTeamImages = ref(null);
+const roundWeekTeams = ref(null);
 const roundPayments = ref(null);
 const roundCanEnterScores = ref(null);
 
@@ -76,7 +76,7 @@ const effectiveGame = computed(() => isCurrentRound.value ? store.game : roundGa
 const effectiveRanking = computed(() => isCurrentRound.value ? props.ranking : roundRanking.value);
 const effectiveWinsRanking = computed(() => isCurrentRound.value ? props.wins_ranking : roundWinsRanking.value);
 const effectivePrediction = computed(() => isCurrentRound.value ? props.prediction : roundPrediction.value);
-const effectiveWeekTeamImages = computed(() => isCurrentRound.value ? props.week_team_images : roundWeekTeamImages.value);
+const effectiveWeekTeams = computed(() => isCurrentRound.value ? props.week_teams : roundWeekTeams.value);
 const effectivePayments = computed(() => isCurrentRound.value ? props.payments : roundPayments.value);
 const effectiveCanEnterScores = computed(() => isCurrentRound.value ? props.can_enter_scores : roundCanEnterScores.value);
 
@@ -90,7 +90,7 @@ watch(currentRound, async (newRound) => {
         roundRanking.value = data.ranking;
         roundWinsRanking.value = data.wins_ranking;
         roundPrediction.value = data.prediction;
-        roundWeekTeamImages.value = data.week_team_images;
+        roundWeekTeams.value = data.week_teams;
         roundPayments.value = data.payments ?? null;
         roundCanEnterScores.value = data.can_enter_scores ?? false;
     } catch (e) {
@@ -339,7 +339,7 @@ const regenerateWeekTeam = async () => {
     weekTeamResult.value = null;
     try {
         const { data } = await axios.post(route('api.games.regenerate-week-team', game.id));
-        regeneratedImages.value = data.images || [];
+        regeneratedImages.value = (data.teams || []).map((team) => team.image);
         weekTeamResult.value = 'Time da semana gerado!';
     } catch (e) {
         weekTeamResult.value = e.response?.data?.error || 'Erro ao gerar time da semana';
@@ -450,7 +450,7 @@ const regenerateWeekTeam = async () => {
 
                 <!-- Tab: Jogo -->
                 <template v-if="activeTab === 'game' && !loadingRound">
-                    <WeekTeamCard :images="effectiveWeekTeamImages || []" />
+                    <WeekTeamCard :teams="effectiveWeekTeams || []" />
 
                     <!-- Admin: Regenerate week team button -->
                     <div v-if="is_admin && effectiveGame?.status === 'done'" class="flex flex-col items-center gap-2">
@@ -471,7 +471,7 @@ const regenerateWeekTeam = async () => {
                         <div class="rounded-xl bg-white p-2 lg:p-4 shadow">
                             <div class="flex items-center justify-between">
                                 <h3 class="text-base font-semibold text-gray-900">Adicionar jogadores</h3>
-                                <SecondaryButton class="text-xs" @click="playerModal?.open()">
+                                <SecondaryButton class="text-xs" @click="playerModal?.openCreate()">
                                     Criar jogador
                                 </SecondaryButton>
                             </div>
@@ -635,7 +635,7 @@ const regenerateWeekTeam = async () => {
 
         <!-- Admin modals -->
         <template v-if="is_admin">
-            <AddPlayerModal ref="playerModal" />
+            <PlayerFormModal ref="playerModal" />
             <AddGuestModal ref="guestModal" :game-id="store.game?.id" />
         </template>
     </AppLayout>

@@ -47,4 +47,19 @@ php artisan futsal:open-week-game {--force}
 
 Relativo: "php artisan game:test-open 1" — abre em 1 minuto
 Horário fixo: "php artisan game:test-open --s --h=18 --m=0" — abre hoje às 18:00
+
+# Todos os jogadores com música
+php artisan futsal:backfill-captain-music
+
+# Um jogador específico
+php artisan futsal:backfill-captain-music --user=5
+
+# Recriar snapshots existentes
+php artisan futsal:backfill-captain-music --force
+
+# Regenerar todos os jogos finalizados (status done)
+php artisan futsal:regenerate-week-team-images
+
+# Regenerar apenas um jogo específico
+php artisan futsal:regenerate-week-team-images 10
 ```

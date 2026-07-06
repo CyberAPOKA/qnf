@@ -4,6 +4,7 @@ import SectionBorder from '@/Components/SectionBorder.vue';
 import UpdatePasswordForm from '@/Pages/Profile/Partials/UpdatePasswordForm.vue';
 import UpdatePositionForm from '@/Pages/Profile/Partials/UpdatePositionForm.vue';
 import UpdateWhatsAppNotificationsForm from '@/Pages/Profile/Partials/UpdateWhatsAppNotificationsForm.vue';
+import UpdateMusicForm from '@/Pages/Profile/Partials/UpdateMusicForm.vue';
 
 defineProps({
     confirmsTwoFactorAuthentication: Boolean,
@@ -21,6 +22,10 @@ defineProps({
 
         <div>
             <div class="max-w-7xl mx-auto py-10 sm:px-6 lg:px-8 space-y-10 sm:space-y-0">
+                <UpdateMusicForm />
+
+                <SectionBorder />
+                
                 <UpdatePositionForm />
 
                 <SectionBorder />

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Enums\GameStatus;
+use App\Support\PublicStorage;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -62,5 +63,55 @@ class Game extends Model
     public function draftPicks(): HasMany
     {
         return $this->hasMany(DraftPick::class);
+    }
+
+    public function weekTeamMusics(): HasMany
+    {
+        return $this->hasMany(GameWeekTeamMusic::class)->orderBy('sort_order');
+    }
+
+    public function getWeekTeamImageUrlsAttribute(): array
+    {
+        if (empty($this->week_team_images)) {
+            return [];
+        }
+
+        return PublicStorage::urls($this->week_team_images);
+    }
+
+    public function getWeekTeamsAttribute(): array
+    {
+        if (empty($this->week_team_images)) {
+            return [];
+        }
+
+        $musicsByColor = $this->relationLoaded('weekTeamMusics')
+            ? $this->weekTeamMusics->keyBy(fn (GameWeekTeamMusic $music) => $music->team_color->value)
+            : $this->weekTeamMusics()->get()->keyBy(fn (GameWeekTeamMusic $music) => $music->team_color->value);
+
+        $teams = [];
+
+        foreach ($this->week_team_images as $imagePath) {
+            $color = null;
+
+            if (preg_match('/team-(\w+)\.png$/', $imagePath, $matches)) {
+                $color = $matches[1];
+            }
+
+            $music = $color ? $musicsByColor->get($color) : null;
+
+            $teams[] = [
+                'image' => PublicStorage::url($imagePath),
+                'color' => $color,
+                'music' => $music?->toPlaybackArray() ?? ['source' => 'default'],
+            ];
+        }
+
+        return $teams;
+    }
+
+    public function getCaptainsImageUrlAttribute(): ?string
+    {
+        return PublicStorage::url($this->captains_image);
     }
 }

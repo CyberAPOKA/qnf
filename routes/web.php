@@ -10,6 +10,8 @@ use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\StatisticsController;
 use App\Http\Controllers\WhatsAppController;
+use App\Http\Controllers\YouTubeController;
+use Illuminate\Foundation\Http\Middleware\HandlePrecognitiveRequests;
 use Illuminate\Support\Facades\Route;
 
 // Mercado Pago webhook (public, no auth, no CSRF)
@@ -20,6 +22,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
 
     Route::put('/profile/position', [ProfileController::class, 'updatePosition'])->name('profile.update-position');
     Route::put('/profile/whatsapp-notifications', [ProfileController::class, 'updateWhatsAppNotifications'])->name('profile.update-whatsapp-notifications');
+    Route::put('/profile/music', [ProfileController::class, 'updateMusic'])->name('profile.update-music');
 
     Route::get('/', [GameController::class, 'index'])->name('dashboard');
     Route::get('/statistics', [StatisticsController::class, 'index'])->name('statistics');
@@ -41,17 +44,22 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
     Route::post('/payments/{payment}/confirm', [PaymentController::class, 'confirm'])->name('payments.confirm');
 
     Route::prefix('admin')->group(function () {
-        Route::post('/store-player', [AdminGameController::class, 'storePlayer'])->name('admin.store-player');
         Route::get('/players', [AdminPlayerController::class, 'index'])->name('admin.players');
         Route::get('/payments', [AdminPaymentController::class, 'index'])->name('admin.payments');
-        Route::post('/players', [AdminPlayerController::class, 'store'])->name('admin.players.store');
-        Route::post('/players/{user}', [AdminPlayerController::class, 'update'])->name('admin.players.update');
-        Route::post('/players/{user}/convert-guest', [AdminPlayerController::class, 'convertGuest'])->name('admin.players.convert-guest');
+
+        Route::middleware(HandlePrecognitiveRequests::class)->group(function () {
+            Route::post('/players', [AdminPlayerController::class, 'store'])->name('admin.players.store');
+            Route::post('/players/{user}', [AdminPlayerController::class, 'update'])->name('admin.players.update');
+            Route::post('/players/{user}/convert-guest', [AdminPlayerController::class, 'convertGuest'])->name('admin.players.convert-guest');
+        });
+
         Route::post('/players/{user}/suspend', [AdminPlayerController::class, 'suspend'])->name('admin.players.suspend');
         Route::post('/players/{user}/unsuspend', [AdminPlayerController::class, 'unsuspend'])->name('admin.players.unsuspend');
     });
 
     Route::prefix('api')->group(function () {
+        Route::get('/youtube/search', [YouTubeController::class, 'search'])->name('api.youtube.search');
+        Route::get('/youtube/videos/{videoId}', [YouTubeController::class, 'show'])->name('api.youtube.show');
         Route::post('/whatsapp/send-test', [WhatsAppController::class, 'sendTest'])->name('api.whatsapp.send-test');
         Route::post('/week-team/random', [GameController::class, 'generateRandomWeekTeam'])->name('api.week-team.random');
         Route::post('/captains/generate', [GameController::class, 'generateCaptainsImage'])->name('api.captains.generate');

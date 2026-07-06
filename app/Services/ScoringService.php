@@ -7,8 +7,8 @@ use App\Models\Game;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
+use App\Support\PublicStorage;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 
 class ScoringService
@@ -348,9 +348,7 @@ class ScoringService
                 $player['rank'] = $lineRank;
             }
 
-            $player['photo_front'] = $player['photo_front']
-                ? Storage::disk('public')->url($player['photo_front'])
-                : null;
+            $player['photo_front'] = PublicStorage::url($player['photo_front']);
             $player['initial'] = mb_strtoupper(mb_substr($player['name'], 0, 1));
             $player['win_streak'] = $streaks[$player['id']] ?? 0;
             $player['last_results'] = $lastResults[$player['id']] ?? [];

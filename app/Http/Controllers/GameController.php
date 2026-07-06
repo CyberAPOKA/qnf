@@ -19,8 +19,10 @@ use App\Services\WaitlistService;
 use App\Services\CaptainsImageService;
 use App\Services\LineupsImageService;
 use App\Services\WeekTeamImageService;
+use App\Services\WeekTeamMusicService;
 use Illuminate\Http\JsonResponse;
 use App\Support\GamePayload;
+use App\Support\PublicStorage;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -52,7 +54,7 @@ class GameController extends Controller
 
         $ranking = $this->scoringService->getRanking(includeGuests: true);
         $prediction = $this->predictionService->predict($game);
-        $weekTeamImages = $this->getWeekTeamImages();
+        $weekTeams = $this->getWeekTeams();
 
         $rounds = Game::orderByDesc('round')
             ->pluck('round')
@@ -87,7 +89,7 @@ class GameController extends Controller
             'ranking' => $ranking,
             'wins_ranking' => $this->roundWinsRankingService->getRanking(includeGuests: true),
             'prediction' => $prediction,
-            'week_team_images' => $weekTeamImages,
+            'week_teams' => $weekTeams,
             'rounds' => $rounds,
             'payment' => $payment ? [
                 'id' => $payment->id,
@@ -277,9 +279,13 @@ class GameController extends Controller
 
         $paths = $imageService->generateRandom();
 
-        $images = array_map(fn ($p) => '/storage/'.$p, $paths);
+        $teams = array_map(fn (string $path) => [
+            'image' => PublicStorage::url($path),
+            'color' => null,
+            'music' => ['source' => 'default'],
+        ], $paths);
 
-        return response()->json(['images' => $images]);
+        return response()->json(['teams' => $teams]);
     }
 
     public function generateCaptainsImage(Request $request, CaptainsImageService $imageService): JsonResponse
@@ -293,7 +299,7 @@ class GameController extends Controller
             return response()->json(['error' => 'Jogadores insuficientes para gerar capitães.'], 422);
         }
 
-        return response()->json(['image' => '/storage/' . $path]);
+        return response()->json(['image' => PublicStorage::url($path)]);
     }
 
     public function generateLineupsImage(Request $request, LineupsImageService $imageService): JsonResponse
@@ -314,7 +320,7 @@ class GameController extends Controller
             return response()->json(['error' => 'Jogadores insuficientes para gerar escalações.'], 422);
         }
 
-        return response()->json(['image' => '/storage/' . $path]);
+        return response()->json(['image' => PublicStorage::url($path)]);
     }
 
     public function createPayments(Request $request): JsonResponse
@@ -338,7 +344,7 @@ class GameController extends Controller
     {
         $round = (int) $request->input('round');
 
-        $game = Game::where('round', $round)->first();
+        $game = Game::with('weekTeamMusics')->where('round', $round)->first();
 
         $payload = null;
         if ($game) {
@@ -346,13 +352,11 @@ class GameController extends Controller
         }
 
         $ranking = $this->scoringService->getRanking(includeGuests: true, upToRound: $round);
+        dd($ranking);
         $winsRanking = $this->roundWinsRankingService->getRanking(includeGuests: true, upToRound: $round);
         $prediction = $game ? $this->predictionService->predict($game) : null;
 
-        $weekTeamImages = [];
-        if ($game && ! empty($game->week_team_images)) {
-            $weekTeamImages = array_map(fn ($p) => '/storage/' . $p, $game->week_team_images);
-        }
+        $weekTeams = $game?->week_teams ?? [];
 
         $isAdmin = $request->user()->role === 'admin';
 
@@ -361,7 +365,7 @@ class GameController extends Controller
             'ranking' => $ranking,
             'wins_ranking' => $winsRanking,
             'prediction' => $prediction,
-            'week_team_images' => $weekTeamImages,
+            'week_teams' => $weekTeams,
         ];
 
         if ($isAdmin && $game) {
@@ -372,7 +376,7 @@ class GameController extends Controller
         return response()->json($data);
     }
 
-    public function regenerateWeekTeam(Request $request, Game $game, WeekTeamImageService $imageService): JsonResponse
+    public function regenerateWeekTeam(Request $request, Game $game, WeekTeamImageService $imageService, WeekTeamMusicService $musicService): JsonResponse
     {
         abort_unless($request->user()->role === 'admin', 403);
 
@@ -380,17 +384,19 @@ class GameController extends Controller
             return response()->json(['error' => 'O jogo precisa estar finalizado.'], 422);
         }
 
+        $winnerColors = $imageService->getWinnerColors($game);
         $paths = $imageService->generate($game);
 
         if (empty($paths)) {
             return response()->json(['error' => 'Não foi possível gerar o time da semana.'], 422);
         }
 
+        $musicService->snapshotForGame($game, $winnerColors);
         $game->update(['week_team_images' => $paths]);
 
-        $images = array_map(fn ($p) => '/storage/' . $p, $paths);
-
-        return response()->json(['images' => $images]);
+        return response()->json([
+            'teams' => $game->fresh(['weekTeamMusics'])->week_teams,
+        ]);
     }
 
     public function regenerateAllWeekTeams(Request $request): JsonResponse
@@ -406,9 +412,10 @@ class GameController extends Controller
         ]);
     }
 
-    private function getWeekTeamImages(): array
+    private function getWeekTeams(): array
     {
-        $lastDoneGame = Game::where('status', GameStatus::DONE)
+        $lastDoneGame = Game::with('weekTeamMusics')
+            ->where('status', GameStatus::DONE)
             ->orderByDesc('id')
             ->first();
 
@@ -423,6 +430,6 @@ class GameController extends Controller
             return [];
         }
 
-        return array_map(fn ($p) => '/storage/'.$p, $lastDoneGame->week_team_images);
+        return $lastDoneGame->week_teams;
     }
 }

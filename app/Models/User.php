@@ -11,7 +11,7 @@ use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
 use Laravel\Jetstream\HasProfilePhoto;
-use Illuminate\Support\Facades\Storage;
+use App\Support\PublicStorage;
 use Laravel\Sanctum\HasApiTokens;
 
 class User extends Authenticatable
@@ -40,6 +40,16 @@ class User extends Authenticatable
         'photo_front',
         'photo_side',
         'whatsapp_notifications',
+        'music_youtube_id',
+        'music_title',
+        'music_channel',
+        'music_thumbnail_url',
+        'music_start_seconds',
+        'music_end_seconds',
+        'music_duration_seconds',
+        'music_watch_url',
+        'music_source',
+        'music_file_path',
         'suspended_until_round',
         'ability',
         'active',
@@ -65,6 +75,7 @@ class User extends Authenticatable
      */
     protected $appends = [
         'profile_photo_url',
+        'music_file_url',
     ];
 
     /**
@@ -79,6 +90,9 @@ class User extends Authenticatable
             'position' => Position::class,
             'guest' => 'boolean',
             'whatsapp_notifications' => 'boolean',
+            'music_start_seconds' => 'integer',
+            'music_end_seconds' => 'integer',
+            'music_duration_seconds' => 'integer',
             'suspended_until_round' => 'integer',
             'ability' => 'integer',
             'active' => 'boolean',
@@ -105,12 +119,17 @@ class User extends Authenticatable
 
     public function getPhotoFrontUrlAttribute(): ?string
     {
-        return $this->photo_front ? Storage::disk('public')->url($this->photo_front) : null;
+        return PublicStorage::url($this->photo_front);
     }
 
     public function getPhotoSideUrlAttribute(): ?string
     {
-        return $this->photo_side ? Storage::disk('public')->url($this->photo_side) : null;
+        return PublicStorage::url($this->photo_side);
+    }
+
+    public function getMusicFileUrlAttribute(): ?string
+    {
+        return PublicStorage::browserUrl($this->music_file_path);
     }
 
     public function getInitialAttribute(): string

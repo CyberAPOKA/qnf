@@ -3,14 +3,16 @@
 namespace App\Http\Controllers;
 
 use App\Enums\GameStatus;
-use App\Enums\Position;
+use App\Http\Requests\ConvertGuestRequest;
+use App\Http\Requests\StorePlayerRequest;
+use App\Http\Requests\UpdatePlayerRequest;
 use App\Models\Game;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -47,19 +49,9 @@ class AdminPlayerController extends Controller
         ]);
     }
 
-    public function store(Request $request): RedirectResponse
+    public function store(StorePlayerRequest $request): RedirectResponse
     {
-        abort_unless($request->user()->role === 'admin', 403);
-
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'phone' => ['required', 'string', 'max:20', 'unique:users,phone'],
-            'position' => ['required', Rule::in(Position::values())],
-            'password' => ['required', 'string', 'min:4'],
-            'active' => ['boolean'],
-            'photo_front' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
-            'photo_side' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
-        ]);
+        $validated = $request->validated();
 
         $data = [
             'name' => $validated['name'],
@@ -72,18 +64,12 @@ class AdminPlayerController extends Controller
             'password' => Hash::make($validated['password']),
         ];
 
-        if ($request->hasFile('photo_front')) {
-            $path = $request->file('photo_front')->store('players', 'public');
-            if ($path) {
-                $data['photo_front'] = $path;
-            }
+        if ($path = $this->storePhoto($request->file('photo_front'))) {
+            $data['photo_front'] = $path;
         }
 
-        if ($request->hasFile('photo_side')) {
-            $path = $request->file('photo_side')->store('players', 'public');
-            if ($path) {
-                $data['photo_side'] = $path;
-            }
+        if ($path = $this->storePhoto($request->file('photo_side'))) {
+            $data['photo_side'] = $path;
         }
 
         User::create($data);
@@ -91,19 +77,9 @@ class AdminPlayerController extends Controller
         return back();
     }
 
-    public function update(Request $request, User $user): RedirectResponse
+    public function update(UpdatePlayerRequest $request, User $user): RedirectResponse
     {
-        abort_unless($request->user()->role === 'admin', 403);
-
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'phone' => ['required', 'string', 'max:20', Rule::unique('users', 'phone')->ignore($user->id)],
-            'position' => ['required', Rule::in(Position::values())],
-            'active' => ['boolean'],
-            'ability' => ['nullable', 'integer', 'min:1', 'max:10'],
-            'photo_front' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
-            'photo_side' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
-        ]);
+        $validated = $request->validated();
 
         $user->fill([
             'name' => $validated['name'],
@@ -114,33 +90,20 @@ class AdminPlayerController extends Controller
             'active' => $validated['active'] ?? true,
         ]);
 
-        if ($request->hasFile('photo_front')) {
-            $file = $request->file('photo_front');
-            \Log::info('photo_front upload attempt', [
-                'original_name' => $file->getClientOriginalName(),
-                'size' => $file->getSize(),
-                'mime' => $file->getMimeType(),
-                'error' => $file->getError(),
-                'is_valid' => $file->isValid(),
-            ]);
-            $path = $file->store('players', 'public');
-            \Log::info('photo_front store result', ['path' => $path]);
-            if ($path) {
-                if ($user->photo_front) {
-                    Storage::disk('public')->delete($user->photo_front);
-                }
-                $user->photo_front = $path;
+        if ($path = $this->storePhoto($request->file('photo_front'))) {
+            if ($user->photo_front) {
+                Storage::disk('public')->delete($user->photo_front);
             }
+
+            $user->photo_front = $path;
         }
 
-        if ($request->hasFile('photo_side')) {
-            $path = $request->file('photo_side')->store('players', 'public');
-            if ($path) {
-                if ($user->photo_side) {
-                    Storage::disk('public')->delete($user->photo_side);
-                }
-                $user->photo_side = $path;
+        if ($path = $this->storePhoto($request->file('photo_side'))) {
+            if ($user->photo_side) {
+                Storage::disk('public')->delete($user->photo_side);
             }
+
+            $user->photo_side = $path;
         }
 
         $user->save();
@@ -148,18 +111,11 @@ class AdminPlayerController extends Controller
         return back();
     }
 
-    public function convertGuest(Request $request, User $user): RedirectResponse
+    public function convertGuest(ConvertGuestRequest $request, User $user): RedirectResponse
     {
-        abort_unless($request->user()->role === 'admin', 403);
         abort_unless($user->guest, 404);
 
-        $validated = $request->validate([
-            'name' => ['required', 'string', 'max:255'],
-            'phone' => ['required', 'string', 'max:20', Rule::unique('users', 'phone')->ignore($user->id)],
-            'position' => ['required', Rule::in(Position::values())],
-            'photo_front' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
-            'photo_side' => ['nullable', 'image', 'mimes:jpg,jpeg,png', 'max:2048'],
-        ]);
+        $validated = $request->validated();
 
         $user->fill([
             'name' => $validated['name'],
@@ -170,24 +126,20 @@ class AdminPlayerController extends Controller
             'password' => Hash::make('qnf'),
         ]);
 
-        if ($request->hasFile('photo_front')) {
-            $path = $request->file('photo_front')->store('players', 'public');
-            if ($path) {
-                if ($user->photo_front) {
-                    Storage::disk('public')->delete($user->photo_front);
-                }
-                $user->photo_front = $path;
+        if ($path = $this->storePhoto($request->file('photo_front'))) {
+            if ($user->photo_front) {
+                Storage::disk('public')->delete($user->photo_front);
             }
+
+            $user->photo_front = $path;
         }
 
-        if ($request->hasFile('photo_side')) {
-            $path = $request->file('photo_side')->store('players', 'public');
-            if ($path) {
-                if ($user->photo_side) {
-                    Storage::disk('public')->delete($user->photo_side);
-                }
-                $user->photo_side = $path;
+        if ($path = $this->storePhoto($request->file('photo_side'))) {
+            if ($user->photo_side) {
+                Storage::disk('public')->delete($user->photo_side);
             }
+
+            $user->photo_side = $path;
         }
 
         $user->save();
@@ -221,5 +173,14 @@ class AdminPlayerController extends Controller
         $user->update(['suspended_until_round' => null]);
 
         return back();
+    }
+
+    private function storePhoto(?UploadedFile $file): ?string
+    {
+        if (! $file) {
+            return null;
+        }
+
+        return $file->store('players', 'public') ?: null;
     }
 }
