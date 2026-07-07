@@ -188,10 +188,19 @@ watch([linePlayers, showPhotos], refreshFire);
                 </div>
             </template>
             <template #cell-last_results="{ row }">
-                <div class="flex items-center justify-center">
-                    <span v-for="(result, i) in row.last_results" :key="i">
-                        <i v-if="result === 1" class="fa-regular fa-circle-check text-green-600 text-xs"></i>
-                        <i v-else class="fa-regular fa-circle-xmark text-red-500 text-xs"></i>
+                <div class="flex items-center justify-center gap-0.25">
+                    <span
+                        v-for="(result, i) in row.last_results"
+                        :key="i"
+                        class="inline-flex items-center justify-center rounded-full"
+                        :class="i === row.last_results.length - 1
+                            ? (result === 1
+                                ? 'text-lg underline underline-offset-2 decoration-green-600'
+                                : 'text-lg underline underline-offset-2 decoration-red-500')
+                            : ''"
+                    >
+                        <i v-if="result === 1" class="fa-solid fa-circle-check text-green-600"></i>
+                        <i v-else class="fa-solid fa-circle-xmark text-red-500"></i>
                     </span>
                 </div>
             </template>

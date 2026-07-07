@@ -282,7 +282,14 @@ watch(() => store.game?.status, (status) => {
                                         </div>
                                     </div>
                                     <div v-if="player.last_results?.length" class="flex items-center gap-1">
-                                        <span v-for="(result, i) in player.last_results" :key="i">
+                                        <span
+                                            v-for="(result, i) in player.last_results"
+                                            :key="i"
+                                            class="inline-flex items-center justify-center rounded-full"
+                                            :class="i === player.last_results.length - 1
+                                                ? 'ring-2 ring-indigo-400/70 ring-offset-1 bg-indigo-50/50 px-0.5'
+                                                : ''"
+                                        >
                                             <i v-if="result === 1"
                                                 class="fa-regular fa-circle-check text-green-600 text-xs"></i>
                                             <i v-else class="fa-regular fa-circle-xmark text-red-500 text-xs"></i>

@@ -9,6 +9,7 @@ use App\Http\Controllers\MercadoPagoWebhookController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\StatisticsController;
+use App\Http\Controllers\TimelineController;
 use App\Http\Controllers\WhatsAppController;
 use App\Http\Controllers\YouTubeController;
 use Illuminate\Foundation\Http\Middleware\HandlePrecognitiveRequests;
@@ -26,6 +27,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
 
     Route::get('/', [GameController::class, 'index'])->name('dashboard');
     Route::get('/statistics', [StatisticsController::class, 'index'])->name('statistics');
+    Route::get('/timeline', [TimelineController::class, 'index'])->name('timeline');
 
     Route::prefix('games/{game}')->group(function () {
         Route::post('/join', [GameController::class, 'join'])->name('games.join');

@@ -182,7 +182,7 @@ class ScoringService
         $query = DB::table('game_players')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
-            ->orderBy('games.date', 'desc')
+            ->orderByDesc('games.round')
             ->select('game_players.user_id', 'game_players.points');
 
         if ($upToRound !== null) {
@@ -210,14 +210,14 @@ class ScoringService
 
     /**
      * Últimos N resultados de cada jogador (1 = vitória, 0 = derrota).
-     * Retorna array keyed por user_id => [1, 0, 1, 1, 0] (mais recente primeiro).
+     * Retorna array keyed por user_id => [0, 1, 1, 0, 1] (mais antiga primeiro, mais recente por último).
      */
     public function getLastResults(int $count = 5, ?int $upToRound = null): array
     {
         $query = DB::table('game_players')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
-            ->orderBy('games.date', 'desc')
+            ->orderByDesc('games.round')
             ->select('game_players.user_id', 'game_players.points');
 
         if ($upToRound !== null) {
@@ -304,7 +304,7 @@ class ScoringService
         // Compute previous ranking (excluding last completed game up to the given round)
         $latestGameQuery = DB::table('games')
             ->where('status', GameStatus::DONE->value)
-            ->orderByDesc('date');
+            ->orderByDesc('round');
 
         if ($upToRound !== null) {
             $latestGameQuery->where('round', '<=', $upToRound);
