@@ -64,7 +64,11 @@ const suspensionMessage = computed(() => {
                                 <NavLink :href="route('dashboard')" :active="route().current('dashboard')">
                                     Dashboard
                                 </NavLink>
-                                <NavLink :href="route('statistics')" :active="route().current('statistics')">
+                                <NavLink
+                                    v-if="$page.props.auth.user.role !== 'admin'"
+                                    :href="route('statistics')"
+                                    :active="route().current('statistics')"
+                                >
                                     Estatísticas
                                 </NavLink>
                                 <NavLink :href="route('timeline')" :active="route().current('timeline')">
@@ -219,7 +223,11 @@ const suspensionMessage = computed(() => {
                         <ResponsiveNavLink :href="route('dashboard')" :active="route().current('dashboard')">
                             Dashboard
                         </ResponsiveNavLink>
-                        <ResponsiveNavLink :href="route('statistics')" :active="route().current('statistics')">
+                        <ResponsiveNavLink
+                            v-if="$page.props.auth.user.role !== 'admin'"
+                            :href="route('statistics')"
+                            :active="route().current('statistics')"
+                        >
                             Estatísticas
                         </ResponsiveNavLink>
                         <ResponsiveNavLink :href="route('timeline')" :active="route().current('timeline')">

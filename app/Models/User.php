@@ -7,6 +7,7 @@ use App\Enums\Position;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Fortify\TwoFactorAuthenticatable;
@@ -20,6 +21,7 @@ class User extends Authenticatable
 
     /** @use HasFactory<\Database\Factories\UserFactory> */
     use HasFactory;
+    use SoftDeletes;
 
     use HasProfilePhoto;
     use Notifiable;
@@ -115,6 +117,16 @@ class User extends Authenticatable
     public function captainedTeams(): HasMany
     {
         return $this->hasMany(Team::class, 'captain_user_id');
+    }
+
+    public function playerCards(): HasMany
+    {
+        return $this->hasMany(PlayerCard::class);
+    }
+
+    public function playerCardCycles(): HasMany
+    {
+        return $this->hasMany(PlayerCardCycle::class);
     }
 
     public function getPhotoFrontUrlAttribute(): ?string

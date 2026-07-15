@@ -11,8 +11,8 @@ const props = defineProps({
     },
 });
 
-const ROW_HEIGHT = 64;
-const ROUND_INTERVAL_MS = 1200;
+const ROW_HEIGHT = 65;
+const ROUND_INTERVAL_MS = 1500;
 
 const currentIndex = ref(0);
 const isPlaying = ref(false);
@@ -77,6 +77,17 @@ function rowClass(player) {
     if (player.zeroPoints) return rowBgColors.zero;
     if (player.medal) return rowBgColors[player.medal];
     return 'bg-white';
+}
+
+function roundResult(player) {
+    const results = player.last_results ?? [];
+    if (!results.length) return null;
+
+    const last = results[results.length - 1];
+    if (last === 1) return 'win';
+    if (last === 0) return 'loss';
+
+    return null;
 }
 
 function stopPlayback() {
@@ -201,15 +212,15 @@ onUnmounted(stopPlayback);
                             <div
                                 v-for="(player, rowIndex) in displayPlayers"
                                 :key="player.id"
-                                class="timeline-row absolute inset-x-0 flex w-full items-center border-b border-gray-100 transition-transform duration-700 ease-in-out"
+                                class="timeline-row absolute inset-x-0 flex w-full items-center border-b border-gray-100"
                                 :class="rowClass(player)"
                                 :style="{
                                     height: `${ROW_HEIGHT}px`,
                                     top: 0,
-                                    transform: `translateY(${rowIndex * ROW_HEIGHT}px)`,
+                                    transform: `translate3d(0, ${rowIndex * ROW_HEIGHT}px, 0)`,
                                 }"
                             >
-                                <div class="flex w-14 shrink-0 justify-center">
+                                <div class="flex w-14 shrink-0 flex-col items-center justify-center">
                                     <span v-if="player.medal" class="text-lg">
                                         <i
                                             class="fa-solid fa-medal !text-xl drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]"
@@ -217,6 +228,18 @@ onUnmounted(stopPlayback);
                                         ></i>
                                     </span>
                                     <span v-else class="text-sm font-bold text-gray-900">{{ player.rank }}º</span>
+                                    <span v-if="player.rank_change === null" class="text-[10px] font-semibold text-blue-500">NOVO</span>
+                                    <span v-else-if="player.rank_change > 0" class="flex items-center gap-0.5 text-green-600">
+                                        <i class="fa-solid fa-circle-up text-[10px]"></i>
+                                        <span class="text-[10px] font-bold">{{ player.rank_change }}</span>
+                                    </span>
+                                    <span v-else-if="player.rank_change < 0" class="flex items-center gap-0.5 text-red-500">
+                                        <i class="fa-solid fa-circle-down text-[10px]"></i>
+                                        <span class="text-[10px] font-bold">{{ Math.abs(player.rank_change) }}</span>
+                                    </span>
+                                    <span v-else class="text-gray-400">
+                                        <i class="fa-solid fa-circle-minus text-[10px]"></i>
+                                    </span>
                                 </div>
 
                                 <div class="flex w-16 shrink-0 justify-center overflow-hidden">
@@ -224,12 +247,28 @@ onUnmounted(stopPlayback);
                                         :src="player.photo_front"
                                         :initial="player.initial"
                                         :alt="player.name"
-                                        size="sm"
+                                        size="lg"
                                     />
                                 </div>
 
-                                <div class="min-w-0 flex-1 truncate px-2 text-sm font-medium text-gray-900">
-                                    {{ player.name }}
+                                <div class="flex min-w-0 flex-1 items-center gap-2 px-2">
+                                    <span class="truncate text-sm font-medium text-gray-900">
+                                        {{ player.name }}
+                                    </span>
+                                    <span
+                                        v-if="roundResult(player) === 'win'"
+                                        class="ml-auto shrink-0 text-green-600"
+                                        title="Vitória na rodada"
+                                    >
+                                        <i class="fa-solid fa-circle-check"></i>
+                                    </span>
+                                    <span
+                                        v-else-if="roundResult(player) === 'loss'"
+                                        class="ml-auto shrink-0 text-red-500"
+                                        title="Derrota na rodada"
+                                    >
+                                        <i class="fa-solid fa-circle-xmark"></i>
+                                    </span>
                                 </div>
 
                                 <div class="w-20 shrink-0 text-center text-sm font-bold text-gray-900">
@@ -249,8 +288,13 @@ onUnmounted(stopPlayback);
 </template>
 
 <style scoped>
+.timeline-row {
+    will-change: transform;
+    transition: transform 1s cubic-bezier(0.25, 0.8, 0.25, 1);
+}
+
 .timeline-row :deep(img) {
-    max-height: 2.5rem;
+    max-height: 3rem;
     padding-top: 0;
 }
 </style>
