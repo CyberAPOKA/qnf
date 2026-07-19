@@ -20,7 +20,7 @@ class RecSessionService
         return self::BUFFER_SECONDS;
     }
 
-    public function registerRecorder(Game $game, User $user, string $recorderId): array
+    public function registerRecorder(Game $game, User $user, string $recorderId, string $cameraTag): array
     {
         $recorders = $this->getRecorders($game->id);
 
@@ -28,6 +28,7 @@ class RecSessionService
             'recorder_id' => $recorderId,
             'user_id' => $user->id,
             'user_name' => $user->name,
+            'camera_tag' => $cameraTag,
             'joined_at' => now()->toIso8601String(),
             'last_heartbeat' => now()->toIso8601String(),
         ];
@@ -105,12 +106,14 @@ class RecSessionService
         string $recorderId,
         string $filePath,
         int $durationSeconds = self::BUFFER_SECONDS,
+        ?string $cameraTag = null,
     ): RecClip {
         return RecClip::create([
             'rec_save_request_id' => $saveRequest->id,
             'game_id' => $saveRequest->game_id,
             'user_id' => $user->id,
             'recorder_id' => $recorderId,
+            'camera_tag' => $cameraTag,
             'file_path' => $filePath,
             'duration_seconds' => $durationSeconds,
         ]);
@@ -144,6 +147,7 @@ class RecSessionService
         return [
             'id' => $clip->id,
             'recorder_id' => $clip->recorder_id,
+            'camera_tag' => $clip->camera_tag,
             'user_name' => $clip->user?->name,
             'url' => $clip->url,
             'duration_seconds' => $clip->duration_seconds,

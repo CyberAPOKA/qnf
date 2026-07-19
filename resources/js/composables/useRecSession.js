@@ -174,17 +174,22 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         }
     }
 
-    async function registerRecorder() {
+    async function registerRecorder(cameraTag) {
         isRegistering.value = true;
 
         try {
             const { data } = await axios.post(routeName('games.rec.start'), {
                 recorder_id: recorderId,
+                camera_tag: cameraTag,
             });
 
             recorders.value = data.recorders;
             startHeartbeat();
-            recLog('info', 'recorder registered', { recorderId, count: data.recorders.length });
+            recLog('info', 'recorder registered', {
+                recorderId,
+                cameraTag,
+                count: data.recorders.length,
+            });
 
             return true;
         } catch (err) {
@@ -262,7 +267,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         }
     }
 
-    function enqueueUpload(saveRequestUuid, blob, durationSeconds) {
+    function enqueueUpload(saveRequestUuid, blob, durationSeconds, cameraTag = null) {
         const key = uploadKey(saveRequestUuid);
 
         if (uploadedKeys.has(key) || uploadingKeys.has(key)) {
@@ -287,6 +292,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
             saveRequestUuid,
             blob,
             durationSeconds,
+            cameraTag,
             retries: 0,
             key,
         });
@@ -294,6 +300,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         recLog('info', 'upload queued', {
             saveRequestUuid,
             bytes: blob.size,
+            cameraTag,
             queue: uploadQueue.length,
         });
 
@@ -315,6 +322,9 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
                 formData.append('save_request_uuid', job.saveRequestUuid);
                 formData.append('recorder_id', recorderId);
                 formData.append('duration_seconds', String(job.durationSeconds));
+                if (job.cameraTag) {
+                    formData.append('camera_tag', job.cameraTag);
+                }
                 formData.append('video', job.blob, `clip-${Date.now()}.webm`);
 
                 const { data } = await axios.post(routeName('games.rec.upload'), formData);

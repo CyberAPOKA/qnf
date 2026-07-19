@@ -13,6 +13,7 @@ class RecClip extends Model
         'game_id',
         'user_id',
         'recorder_id',
+        'camera_tag',
         'file_path',
         'duration_seconds',
     ];

@@ -42,18 +42,21 @@ class RecController extends Controller
     {
         $validated = $request->validate([
             'recorder_id' => ['required', 'string', 'max:64'],
+            'camera_tag' => ['required', 'string', 'in:A1,A2,B1,B2'],
         ]);
 
         $recorders = $this->recSession->registerRecorder(
             $game,
             $request->user(),
             $validated['recorder_id'],
+            $validated['camera_tag'],
         );
 
         Log::info('REC start', [
             'game_id' => $game->id,
             'user_id' => $request->user()->id,
             'recorder_id' => $validated['recorder_id'],
+            'camera_tag' => $validated['camera_tag'],
             'recorders' => count($recorders),
         ]);
 
@@ -166,6 +169,7 @@ class RecController extends Controller
         $validated = $request->validate([
             'save_request_uuid' => ['required', 'string', 'uuid'],
             'recorder_id' => ['required', 'string', 'max:64'],
+            'camera_tag' => ['nullable', 'string', 'in:A1,A2,B1,B2'],
             // Mobile browsers sometimes omit a precise video mime — keep this light.
             'video' => ['required', 'file', 'max:51200'],
             'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:60'],
@@ -216,6 +220,7 @@ class RecController extends Controller
             $validated['recorder_id'],
             $path,
             (int) ($validated['duration_seconds'] ?? $this->recSession->bufferSeconds()),
+            $validated['camera_tag'] ?? null,
         );
 
         $clip->load('user');
@@ -226,6 +231,7 @@ class RecController extends Controller
             'uuid' => $saveRequest->uuid,
             'clip_id' => $clip->id,
             'user_id' => $request->user()->id,
+            'camera_tag' => $validated['camera_tag'] ?? null,
             'bytes' => $file->getSize(),
             'mime' => $file->getMimeType(),
         ]);

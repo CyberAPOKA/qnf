@@ -2,7 +2,13 @@ import { ref, onBeforeUnmount, nextTick } from 'vue';
 
 const BUFFER_SECONDS = 30;
 const TIMESLICE_MS = 1000;
-const MAX_CHUNKS = BUFFER_SECONDS + 2;
+/** Keep ~30s of media chunks AFTER the init header. */
+const MAX_MEDIA_CHUNKS = BUFFER_SECONDS + 2;
+/**
+ * Soft-restart MediaRecorder periodically so the init segment stays healthy
+ * on long sessions. Previous complete blob is kept as fallback.
+ */
+const ROTATE_MS = 25_000;
 
 function pickMimeType() {
     const candidates = [
@@ -28,7 +34,16 @@ export function useRecBuffer() {
     let mediaStream = null;
     let mediaRecorder = null;
     let mimeType = '';
-    const chunks = [];
+    let headerChunk = null;
+    const mediaChunks = [];
+    let fallbackSegment = null;
+    let rotateTimer = null;
+    let rotating = false;
+    let shouldKeepRecording = false;
+
+    function blobType() {
+        return (mimeType || headerChunk?.type || 'video/webm').split(';')[0];
+    }
 
     function attachPreview(stream) {
         if (previewEl.value) {
@@ -39,9 +54,9 @@ export function useRecBuffer() {
         }
     }
 
-    function trimChunks() {
-        while (chunks.length > MAX_CHUNKS) {
-            chunks.shift();
+    function trimMediaChunks() {
+        while (mediaChunks.length > MAX_MEDIA_CHUNKS) {
+            mediaChunks.shift();
         }
     }
 
@@ -50,8 +65,107 @@ export function useRecBuffer() {
             return;
         }
 
-        chunks.push(event.data);
-        trimChunks();
+        // First chunk of each recorder session = WebM/MP4 init header. NEVER discard it
+        // via circular trim — that was breaking saves after ~30s.
+        if (!headerChunk) {
+            headerChunk = event.data;
+            return;
+        }
+
+        mediaChunks.push(event.data);
+        trimMediaChunks();
+    }
+
+    function recorderOptions() {
+        const options = {
+            videoBitsPerSecond: 1_200_000,
+            audioBitsPerSecond: 96_000,
+        };
+
+        if (mimeType) {
+            options.mimeType = mimeType;
+        }
+
+        return options;
+    }
+
+    function clearCurrentBuffer() {
+        headerChunk = null;
+        mediaChunks.length = 0;
+    }
+
+    function startRecorder() {
+        if (!mediaStream || !shouldKeepRecording) {
+            return;
+        }
+
+        clearCurrentBuffer();
+
+        mediaRecorder = new MediaRecorder(mediaStream, recorderOptions());
+        mediaRecorder.ondataavailable = handleDataAvailable;
+        mediaRecorder.onerror = () => {
+            error.value = 'Erro na gravação.';
+        };
+        mediaRecorder.onstop = () => {
+            if (shouldKeepRecording && !rotating) {
+                // Unexpected stop — try to resume.
+                startRecorder();
+            }
+        };
+
+        mediaRecorder.start(TIMESLICE_MS);
+    }
+
+    function buildBlobFromCurrent() {
+        if (!headerChunk) {
+            return null;
+        }
+
+        const parts = [headerChunk, ...mediaChunks];
+
+        return new Blob(parts, { type: blobType() });
+    }
+
+    function stopRotateTimer() {
+        if (rotateTimer) {
+            clearInterval(rotateTimer);
+            rotateTimer = null;
+        }
+    }
+
+    function rotateRecorder() {
+        if (!shouldKeepRecording || !mediaRecorder || mediaRecorder.state !== 'recording' || rotating) {
+            return;
+        }
+
+        rotating = true;
+
+        const current = buildBlobFromCurrent();
+        if (current && current.size > 0) {
+            fallbackSegment = current;
+        }
+
+        const recorder = mediaRecorder;
+
+        recorder.onstop = () => {
+            rotating = false;
+            if (shouldKeepRecording) {
+                startRecorder();
+            }
+        };
+
+        try {
+            recorder.requestData();
+        } catch {
+            // ignore
+        }
+
+        recorder.stop();
+    }
+
+    function startRotateTimer() {
+        stopRotateTimer();
+        rotateTimer = setInterval(rotateRecorder, ROTATE_MS);
     }
 
     async function start() {
@@ -73,30 +187,19 @@ export function useRecBuffer() {
                     facingMode: { ideal: 'environment' },
                     width: { ideal: 1280 },
                     height: { ideal: 720 },
+                    aspectRatio: { ideal: 16 / 9 },
                     frameRate: { ideal: 24, max: 30 },
                 },
             });
 
-            attachPreview(mediaStream);
-
             mimeType = pickMimeType();
-            const options = {
-                videoBitsPerSecond: 1_200_000,
-                audioBitsPerSecond: 96_000,
-            };
+            fallbackSegment = null;
+            shouldKeepRecording = true;
+            rotating = false;
 
-            if (mimeType) {
-                options.mimeType = mimeType;
-            }
-
-            mediaRecorder = new MediaRecorder(mediaStream, options);
-            mediaRecorder.ondataavailable = handleDataAvailable;
-            mediaRecorder.onerror = () => {
-                error.value = 'Erro na gravação.';
-            };
-
-            chunks.length = 0;
-            mediaRecorder.start(TIMESLICE_MS);
+            attachPreview(mediaStream);
+            startRecorder();
+            startRotateTimer();
             isRecording.value = true;
 
             await nextTick();
@@ -118,30 +221,51 @@ export function useRecBuffer() {
             try {
                 mediaRecorder.requestData();
             } catch {
-                // ignore — some browsers throw if called too early
+                // ignore
             }
         }
 
-        if (!chunks.length) {
-            return null;
+        const current = buildBlobFromCurrent();
+
+        // Prefer live buffer when we already have some media after the header.
+        if (current && mediaChunks.length > 0 && current.size > 0) {
+            return current;
         }
 
-        const type = (mimeType || chunks[0]?.type || 'video/webm').split(';')[0];
+        // Right after a rotate, header/chunks may still be empty for ~1s.
+        if (fallbackSegment && fallbackSegment.size > 0) {
+            return fallbackSegment;
+        }
 
-        return new Blob(chunks.slice(), { type });
+        if (current && current.size > 0) {
+            return current;
+        }
+
+        return null;
     }
 
     function hasBuffer() {
-        return chunks.length > 0;
+        return (headerChunk && mediaChunks.length > 0)
+            || (fallbackSegment && fallbackSegment.size > 0);
     }
 
     function stop() {
+        shouldKeepRecording = false;
+        rotating = false;
+        stopRotateTimer();
+
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-            mediaRecorder.stop();
+            mediaRecorder.onstop = null;
+            try {
+                mediaRecorder.stop();
+            } catch {
+                // ignore
+            }
         }
 
         mediaRecorder = null;
-        chunks.length = 0;
+        clearCurrentBuffer();
+        fallbackSegment = null;
 
         if (mediaStream) {
             mediaStream.getTracks().forEach((track) => track.stop());
