@@ -36,6 +36,7 @@ const {
     snapshot,
     hasBuffer,
     bufferSeconds,
+    minClipSeconds,
 } = useRecBuffer();
 
 const isTogglingRec = ref(false);
@@ -151,13 +152,13 @@ function uploadFromBuffer(saveRequestUuid) {
     }
 
     if (!hasBuffer()) {
-        localError.value = 'Aguarde alguns segundos gravando antes de salvar.';
+        localError.value = `Aguarde pelo menos ${minClipSeconds}s gravando antes de salvar.`;
         return false;
     }
 
     const blob = snapshot();
     if (!blob || blob.size === 0) {
-        localError.value = 'Buffer vazio. Aguarde alguns segundos e tente de novo.';
+        localError.value = `Buffer insuficiente. Aguarde pelo menos ${minClipSeconds}s e tente de novo.`;
         return false;
     }
 

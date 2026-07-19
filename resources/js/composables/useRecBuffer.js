@@ -1,14 +1,15 @@
 import { ref, onBeforeUnmount, nextTick } from 'vue';
 
 const BUFFER_SECONDS = 30;
+const MIN_CLIP_SECONDS = 25;
 const TIMESLICE_MS = 1000;
 /** Keep ~30s of media chunks AFTER the init header. */
 const MAX_MEDIA_CHUNKS = BUFFER_SECONDS + 2;
 /**
- * Soft-restart MediaRecorder periodically so the init segment stays healthy
- * on long sessions. Previous complete blob is kept as fallback.
+ * Soft-restart after a full ~30s cycle so each fallback segment is long enough.
+ * Snapshot prefers a segment with at least MIN_CLIP_SECONDS.
  */
-const ROTATE_MS = 25_000;
+const ROTATE_MS = 30_000;
 
 function pickMimeType() {
     const candidates = [
@@ -37,12 +38,22 @@ export function useRecBuffer() {
     let headerChunk = null;
     const mediaChunks = [];
     let fallbackSegment = null;
+    let fallbackDurationMs = 0;
+    let cycleStartedAt = 0;
     let rotateTimer = null;
     let rotating = false;
     let shouldKeepRecording = false;
 
     function blobType() {
         return (mimeType || headerChunk?.type || 'video/webm').split(';')[0];
+    }
+
+    function currentDurationMs() {
+        if (!cycleStartedAt) {
+            return 0;
+        }
+
+        return Math.max(0, Date.now() - cycleStartedAt);
     }
 
     function attachPreview(stream) {
@@ -65,8 +76,7 @@ export function useRecBuffer() {
             return;
         }
 
-        // First chunk of each recorder session = WebM/MP4 init header. NEVER discard it
-        // via circular trim — that was breaking saves after ~30s.
+        // First chunk of each recorder session = WebM/MP4 init header. NEVER discard it.
         if (!headerChunk) {
             headerChunk = event.data;
             return;
@@ -100,6 +110,7 @@ export function useRecBuffer() {
         }
 
         clearCurrentBuffer();
+        cycleStartedAt = Date.now();
 
         mediaRecorder = new MediaRecorder(mediaStream, recorderOptions());
         mediaRecorder.ondataavailable = handleDataAvailable;
@@ -108,7 +119,6 @@ export function useRecBuffer() {
         };
         mediaRecorder.onstop = () => {
             if (shouldKeepRecording && !rotating) {
-                // Unexpected stop — try to resume.
                 startRecorder();
             }
         };
@@ -117,13 +127,11 @@ export function useRecBuffer() {
     }
 
     function buildBlobFromCurrent() {
-        if (!headerChunk) {
+        if (!headerChunk || mediaChunks.length === 0) {
             return null;
         }
 
-        const parts = [headerChunk, ...mediaChunks];
-
-        return new Blob(parts, { type: blobType() });
+        return new Blob([headerChunk, ...mediaChunks], { type: blobType() });
     }
 
     function stopRotateTimer() {
@@ -140,9 +148,13 @@ export function useRecBuffer() {
 
         rotating = true;
 
+        const duration = currentDurationMs();
         const current = buildBlobFromCurrent();
-        if (current && current.size > 0) {
+
+        // Only replace fallback when this cycle is long enough to satisfy MIN_CLIP.
+        if (current && current.size > 0 && duration >= MIN_CLIP_SECONDS * 1000) {
             fallbackSegment = current;
+            fallbackDurationMs = duration;
         }
 
         const recorder = mediaRecorder;
@@ -194,6 +206,7 @@ export function useRecBuffer() {
 
             mimeType = pickMimeType();
             fallbackSegment = null;
+            fallbackDurationMs = 0;
             shouldKeepRecording = true;
             rotating = false;
 
@@ -226,27 +239,31 @@ export function useRecBuffer() {
         }
 
         const current = buildBlobFromCurrent();
+        const currentMs = currentDurationMs();
+        const minMs = MIN_CLIP_SECONDS * 1000;
 
-        // Prefer live buffer when we already have some media after the header.
-        if (current && mediaChunks.length > 0 && current.size > 0) {
+        // Prefer live buffer once it has enough duration.
+        if (current && current.size > 0 && currentMs >= minMs) {
             return current;
         }
 
-        // Right after a rotate, header/chunks may still be empty for ~1s.
-        if (fallbackSegment && fallbackSegment.size > 0) {
+        // Right after rotate (or early in a new cycle), use the previous full segment.
+        if (fallbackSegment && fallbackSegment.size > 0 && fallbackDurationMs >= minMs) {
             return fallbackSegment;
         }
 
-        if (current && current.size > 0) {
-            return current;
-        }
-
+        // Still warming up: do not return a short clip.
         return null;
     }
 
     function hasBuffer() {
-        return (headerChunk && mediaChunks.length > 0)
-            || (fallbackSegment && fallbackSegment.size > 0);
+        const minMs = MIN_CLIP_SECONDS * 1000;
+
+        if (fallbackSegment && fallbackSegment.size > 0 && fallbackDurationMs >= minMs) {
+            return true;
+        }
+
+        return !!buildBlobFromCurrent() && currentDurationMs() >= minMs;
     }
 
     function stop() {
@@ -266,6 +283,8 @@ export function useRecBuffer() {
         mediaRecorder = null;
         clearCurrentBuffer();
         fallbackSegment = null;
+        fallbackDurationMs = 0;
+        cycleStartedAt = 0;
 
         if (mediaStream) {
             mediaStream.getTracks().forEach((track) => track.stop());
@@ -293,5 +312,6 @@ export function useRecBuffer() {
         snapshot,
         hasBuffer,
         bufferSeconds: BUFFER_SECONDS,
+        minClipSeconds: MIN_CLIP_SECONDS,
     };
 }
