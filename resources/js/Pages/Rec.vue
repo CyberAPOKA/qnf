@@ -146,7 +146,7 @@ function selectAngle(tag) {
     selectedAngle.value = tag;
 }
 
-function uploadFromBuffer(saveRequestUuid) {
+async function uploadFromBuffer(saveRequestUuid) {
     if (!isRecording.value) {
         return false;
     }
@@ -156,7 +156,7 @@ function uploadFromBuffer(saveRequestUuid) {
         return false;
     }
 
-    const blob = snapshot();
+    const blob = await snapshot();
     if (!blob || blob.size === 0) {
         localError.value = `Buffer insuficiente. Aguarde pelo menos ${minClipSeconds}s e tente de novo.`;
         return false;
@@ -280,12 +280,12 @@ async function handleSave() {
     }
 
     if (isRecording.value) {
-        uploadFromBuffer(saveRequest.uuid);
+        await uploadFromBuffer(saveRequest.uuid);
     }
 }
 
-function handleSaveRequested(payload) {
-    uploadFromBuffer(payload.saveRequestUuid);
+async function handleSaveRequested(payload) {
+    await uploadFromBuffer(payload.saveRequestUuid);
 }
 
 onMounted(() => {
