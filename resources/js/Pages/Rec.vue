@@ -156,13 +156,19 @@ async function uploadFromBuffer(saveRequestUuid) {
         return false;
     }
 
-    const blob = await snapshot();
-    if (!blob || blob.size === 0) {
+    const capture = await snapshot();
+    if (!capture?.blob || capture.blob.size === 0) {
         localError.value = `Buffer insuficiente. Aguarde pelo menos ${minClipSeconds}s e tente de novo.`;
         return false;
     }
 
-    enqueueUpload(saveRequestUuid, blob, bufferSeconds, selectedAngle.value);
+    enqueueUpload(
+        saveRequestUuid,
+        capture.blob,
+        capture.durationSeconds || bufferSeconds,
+        selectedAngle.value,
+        capture.prefixBlob || null,
+    );
     return true;
 }
 

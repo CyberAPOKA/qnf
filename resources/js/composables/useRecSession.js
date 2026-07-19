@@ -267,7 +267,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         }
     }
 
-    function enqueueUpload(saveRequestUuid, blob, durationSeconds, cameraTag = null) {
+    function enqueueUpload(saveRequestUuid, blob, durationSeconds, cameraTag = null, prefixBlob = null) {
         const key = uploadKey(saveRequestUuid);
 
         if (uploadedKeys.has(key) || uploadingKeys.has(key)) {
@@ -291,6 +291,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         uploadQueue.push({
             saveRequestUuid,
             blob,
+            prefixBlob,
             durationSeconds,
             cameraTag,
             retries: 0,
@@ -300,6 +301,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         recLog('info', 'upload queued', {
             saveRequestUuid,
             bytes: blob.size,
+            prefixBytes: prefixBlob?.size || 0,
             cameraTag,
             queue: uploadQueue.length,
         });
@@ -326,6 +328,9 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
                     formData.append('camera_tag', job.cameraTag);
                 }
                 formData.append('video', job.blob, `clip-${Date.now()}.webm`);
+                if (job.prefixBlob && job.prefixBlob.size > 0) {
+                    formData.append('video_prefix', job.prefixBlob, `prefix-${Date.now()}.webm`);
+                }
 
                 const { data } = await axios.post(routeName('games.rec.upload'), formData);
 

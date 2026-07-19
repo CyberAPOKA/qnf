@@ -8,10 +8,12 @@ use App\Events\RecorderLeft;
 use App\Events\SaveClipRequested;
 use App\Models\Game;
 use App\Models\RecSaveRequest;
+use App\Services\RecClipNormalizeService;
 use App\Services\RecSessionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -19,6 +21,7 @@ class RecController extends Controller
 {
     public function __construct(
         private readonly RecSessionService $recSession,
+        private readonly RecClipNormalizeService $clipNormalize,
     ) {}
 
     public function show(Request $request, Game $game): Response
@@ -170,8 +173,8 @@ class RecController extends Controller
             'save_request_uuid' => ['required', 'string', 'uuid'],
             'recorder_id' => ['required', 'string', 'max:64'],
             'camera_tag' => ['nullable', 'string', 'in:A1,A2,B1,B2'],
-            // Mobile browsers sometimes omit a precise video mime — keep this light.
             'video' => ['required', 'file', 'max:51200'],
+            'video_prefix' => ['nullable', 'file', 'max:51200'],
             'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:60'],
         ]);
 
@@ -209,17 +212,48 @@ class RecController extends Controller
             ]);
         }
 
-        $path = $file->store(
-            "rec/{$game->id}/{$saveRequest->uuid}",
-            'public',
-        );
+        $directory = "rec/{$game->id}/{$saveRequest->uuid}";
+        $path = $file->store($directory, 'public');
+        $keepSeconds = $this->recSession->bufferSeconds();
+
+        $prefix = $request->file('video_prefix');
+        if ($prefix && $prefix->getSize() > 0) {
+            $prefixPath = $prefix->store($directory, 'public');
+            $currentAbsolute = Storage::disk('public')->path($path);
+            $prefixAbsolute = Storage::disk('public')->path($prefixPath);
+            $mergedRelative = $directory.'/merged_'.uniqid('', true).'.webm';
+            $mergedAbsolute = Storage::disk('public')->path($mergedRelative);
+
+            $merged = $this->clipNormalize->mergeAndTrim(
+                $prefixAbsolute,
+                $currentAbsolute,
+                $mergedAbsolute,
+                $keepSeconds,
+            );
+
+            Storage::disk('public')->delete($prefixPath);
+
+            if ($merged && is_file($mergedAbsolute)) {
+                Storage::disk('public')->delete($path);
+                $path = $mergedRelative;
+            } else {
+                Log::warning('REC prefix merge failed, normalizing current only', [
+                    'uuid' => $saveRequest->uuid,
+                ]);
+            }
+        }
+
+        $normalized = $this->clipNormalize->normalize($path, $keepSeconds);
+        $durationSeconds = (int) ($normalized['duration_seconds']
+            ?? $validated['duration_seconds']
+            ?? $keepSeconds);
 
         $clip = $this->recSession->storeClip(
             $saveRequest,
             $request->user(),
             $validated['recorder_id'],
             $path,
-            (int) ($validated['duration_seconds'] ?? $this->recSession->bufferSeconds()),
+            $durationSeconds,
             $validated['camera_tag'] ?? null,
         );
 
@@ -232,7 +266,9 @@ class RecController extends Controller
             'clip_id' => $clip->id,
             'user_id' => $request->user()->id,
             'camera_tag' => $validated['camera_tag'] ?? null,
-            'bytes' => $file->getSize(),
+            'bytes' => $normalized['bytes'] ?? $file->getSize(),
+            'duration' => $durationSeconds,
+            'normalized' => (bool) $normalized,
             'mime' => $file->getMimeType(),
         ]);
 
