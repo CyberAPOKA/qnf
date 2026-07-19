@@ -22,6 +22,7 @@ const {
     start: startBuffer,
     stop: stopBuffer,
     snapshot,
+    hasBuffer,
     bufferSeconds,
 } = useRecBuffer();
 
@@ -66,7 +67,48 @@ function formatTime(iso) {
 function pendingLabel(uuid) {
     const pending = pendingSaves.value[uuid];
     if (!pending) return null;
+
+    if (pending.status === 'failed') {
+        return 'Falhou';
+    }
+
+    if (pending.status === 'uploading') {
+        return 'Enviando...';
+    }
+
     return `${pending.received}/${pending.expected} câmeras`;
+}
+
+function pendingBadgeClass(uuid) {
+    const pending = pendingSaves.value[uuid];
+    if (!pending) return 'bg-amber-100 text-amber-700';
+
+    if (pending.status === 'failed') return 'bg-red-100 text-red-700';
+    if (pending.status === 'done' || pending.received >= pending.expected) {
+        return 'bg-emerald-100 text-emerald-700';
+    }
+
+    return 'bg-amber-100 text-amber-700';
+}
+
+function uploadFromBuffer(saveRequestUuid) {
+    if (!isRecording.value) {
+        return false;
+    }
+
+    if (!hasBuffer()) {
+        localError.value = 'Aguarde alguns segundos gravando antes de salvar.';
+        return false;
+    }
+
+    const blob = snapshot();
+    if (!blob || blob.size === 0) {
+        localError.value = 'Buffer vazio. Aguarde alguns segundos e tente de novo.';
+        return false;
+    }
+
+    enqueueUpload(saveRequestUuid, blob, bufferSeconds);
+    return true;
 }
 
 async function toggleRecMode() {
@@ -102,25 +144,19 @@ async function handleSave() {
     localError.value = null;
     const saveRequest = await triggerSave();
 
-    if (saveRequest && isRecording.value) {
-        const blob = snapshot();
-        if (blob && blob.size > 0) {
-            enqueueUpload(saveRequest.uuid, blob, bufferSeconds);
-        }
+    if (!saveRequest) {
+        return;
+    }
+
+    // Triggering device that is also recording uploads immediately (does not wait for Echo).
+    if (isRecording.value) {
+        uploadFromBuffer(saveRequest.uuid);
     }
 }
 
 function handleSaveRequested(payload) {
-    if (!isRecording.value) {
-        return;
-    }
-
-    const blob = snapshot();
-    if (!blob || blob.size === 0) {
-        return;
-    }
-
-    enqueueUpload(payload.saveRequestUuid, blob, bufferSeconds);
+    // Remote SAVE (or broadcast echo of own SAVE). Dedupe in useRecSession.
+    uploadFromBuffer(payload.saveRequestUuid);
 }
 </script>
 
@@ -249,9 +285,7 @@ function handleSaveRequested(payload) {
                             <span
                                 v-if="pendingLabel(save.uuid)"
                                 class="text-xs font-medium px-2 py-1 rounded-full"
-                                :class="pendingSaves[save.uuid]?.received >= pendingSaves[save.uuid]?.expected
-                                    ? 'bg-emerald-100 text-emerald-700'
-                                    : 'bg-amber-100 text-amber-700'"
+                                :class="pendingBadgeClass(save.uuid)"
                             >
                                 {{ pendingLabel(save.uuid) }}
                             </span>
@@ -274,9 +308,16 @@ function handleSaveRequested(payload) {
                             </div>
                         </div>
 
+                        <div
+                            v-else-if="pendingSaves[save.uuid]?.status === 'failed'"
+                            class="px-4 py-6 text-center text-sm text-red-600"
+                        >
+                            {{ pendingSaves[save.uuid]?.error || 'Falha ao salvar o clip.' }}
+                        </div>
+
                         <div v-else class="px-4 py-6 text-center text-sm text-gray-500">
                             <i class="fa-solid fa-spinner fa-spin mr-1" />
-                            Aguardando câmeras...
+                            {{ pendingSaves[save.uuid]?.status === 'uploading' ? 'Enviando...' : 'Aguardando câmeras...' }}
                         </div>
                     </div>
                 </div>

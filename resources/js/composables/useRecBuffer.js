@@ -114,13 +114,25 @@ export function useRecBuffer() {
     }
 
     function snapshot() {
+        if (mediaRecorder && mediaRecorder.state === 'recording') {
+            try {
+                mediaRecorder.requestData();
+            } catch {
+                // ignore — some browsers throw if called too early
+            }
+        }
+
         if (!chunks.length) {
             return null;
         }
 
-        const type = mimeType || chunks[0]?.type || 'video/webm';
+        const type = (mimeType || chunks[0]?.type || 'video/webm').split(';')[0];
 
         return new Blob(chunks.slice(), { type });
+    }
+
+    function hasBuffer() {
+        return chunks.length > 0;
     }
 
     function stop() {
@@ -155,6 +167,7 @@ export function useRecBuffer() {
         start,
         stop,
         snapshot,
+        hasBuffer,
         bufferSeconds: BUFFER_SECONDS,
     };
 }

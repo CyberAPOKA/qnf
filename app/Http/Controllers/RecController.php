@@ -11,6 +11,7 @@ use App\Models\RecSaveRequest;
 use App\Services\RecSessionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -49,6 +50,13 @@ class RecController extends Controller
             $validated['recorder_id'],
         );
 
+        Log::info('REC start', [
+            'game_id' => $game->id,
+            'user_id' => $request->user()->id,
+            'recorder_id' => $validated['recorder_id'],
+            'recorders' => count($recorders),
+        ]);
+
         rescue(
             fn () => broadcast(new RecorderJoined($game->id, $recorders))->toOthers(),
             report: false,
@@ -83,6 +91,13 @@ class RecController extends Controller
 
         $recorders = $this->recSession->unregisterRecorder($game, $validated['recorder_id']);
 
+        Log::info('REC stop', [
+            'game_id' => $game->id,
+            'user_id' => $request->user()->id,
+            'recorder_id' => $validated['recorder_id'],
+            'recorders' => count($recorders),
+        ]);
+
         rescue(
             fn () => broadcast(new RecorderLeft($game->id, $validated['recorder_id'], $recorders))->toOthers(),
             report: false,
@@ -96,21 +111,47 @@ class RecController extends Controller
         $recorders = $this->recSession->listRecorders($game->id);
 
         if (count($recorders) === 0) {
+            Log::warning('REC save rejected: no recorders', [
+                'game_id' => $game->id,
+                'user_id' => $request->user()->id,
+            ]);
+
             return response()->json(['message' => 'Nenhuma câmera gravando no momento.'], 422);
         }
 
         $saveRequest = $this->recSession->createSaveRequest($game, $request->user());
 
-        rescue(
-            fn () => broadcast(new SaveClipRequested(
-                $game->id,
-                $saveRequest->uuid,
-                $saveRequest->id,
-                $request->user()->name,
-                count($recorders),
-            ))->toOthers(),
+        Log::info('REC save requested', [
+            'game_id' => $game->id,
+            'user_id' => $request->user()->id,
+            'uuid' => $saveRequest->uuid,
+            'expected_recorders' => count($recorders),
+        ]);
+
+        // Broadcast to ALL devices (including trigger). Recording clients
+        // dedupe uploads locally; trigger that is also recording uploads once.
+        $broadcastOk = rescue(
+            function () use ($game, $saveRequest, $request, $recorders) {
+                broadcast(new SaveClipRequested(
+                    $game->id,
+                    $saveRequest->uuid,
+                    $saveRequest->id,
+                    $request->user()->name,
+                    count($recorders),
+                ));
+
+                return true;
+            },
+            false,
             report: false,
         );
+
+        if (! $broadcastOk) {
+            Log::warning('REC SaveClipRequested broadcast failed', [
+                'game_id' => $game->id,
+                'uuid' => $saveRequest->uuid,
+            ]);
+        }
 
         return response()->json([
             'save_request' => $this->recSession->serializeSaveRequest(
@@ -125,16 +166,46 @@ class RecController extends Controller
         $validated = $request->validate([
             'save_request_uuid' => ['required', 'string', 'uuid'],
             'recorder_id' => ['required', 'string', 'max:64'],
-            'video' => ['required', 'file', 'mimetypes:video/webm,video/mp4,video/quicktime', 'max:51200'],
+            // Mobile browsers sometimes omit a precise video mime — keep this light.
+            'video' => ['required', 'file', 'max:51200'],
             'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:60'],
         ]);
+
+        $file = $request->file('video');
+
+        if ($file && $file->getSize() < 1) {
+            Log::warning('REC upload empty file', [
+                'game_id' => $game->id,
+                'uuid' => $validated['save_request_uuid'],
+            ]);
+
+            return response()->json(['message' => 'Arquivo de vídeo vazio.'], 422);
+        }
 
         $saveRequest = RecSaveRequest::query()
             ->where('game_id', $game->id)
             ->where('uuid', $validated['save_request_uuid'])
             ->firstOrFail();
 
-        $path = $request->file('video')->store(
+        $existing = $saveRequest->clips()
+            ->where('recorder_id', $validated['recorder_id'])
+            ->first();
+
+        if ($existing) {
+            $existing->load('user');
+
+            Log::info('REC upload ignored (duplicate)', [
+                'game_id' => $game->id,
+                'uuid' => $saveRequest->uuid,
+                'clip_id' => $existing->id,
+            ]);
+
+            return response()->json([
+                'clip' => $this->recSession->serializeClip($existing),
+            ]);
+        }
+
+        $path = $file->store(
             "rec/{$game->id}/{$saveRequest->uuid}",
             'public',
         );
@@ -150,10 +221,32 @@ class RecController extends Controller
         $clip->load('user');
         $clipPayload = $this->recSession->serializeClip($clip);
 
-        rescue(
-            fn () => broadcast(new ClipReady($game->id, $saveRequest->uuid, $clipPayload))->toOthers(),
+        Log::info('REC upload ok', [
+            'game_id' => $game->id,
+            'uuid' => $saveRequest->uuid,
+            'clip_id' => $clip->id,
+            'user_id' => $request->user()->id,
+            'bytes' => $file->getSize(),
+            'mime' => $file->getMimeType(),
+        ]);
+
+        $broadcastOk = rescue(
+            function () use ($game, $saveRequest, $clipPayload) {
+                broadcast(new ClipReady($game->id, $saveRequest->uuid, $clipPayload));
+
+                return true;
+            },
+            false,
             report: false,
         );
+
+        if (! $broadcastOk) {
+            Log::warning('REC ClipReady broadcast failed', [
+                'game_id' => $game->id,
+                'uuid' => $saveRequest->uuid,
+                'clip_id' => $clip->id,
+            ]);
+        }
 
         return response()->json(['clip' => $clipPayload]);
     }

@@ -2,6 +2,7 @@ import { ref, onMounted, onBeforeUnmount } from 'vue';
 import axios from 'axios';
 
 const HEARTBEAT_MS = 12_000;
+const MAX_UPLOAD_RETRIES = 2;
 const RECORDER_STORAGE_KEY = 'qnf_recorder_id';
 
 function getOrCreateRecorderId() {
@@ -13,6 +14,19 @@ function getOrCreateRecorderId() {
     }
 
     return id;
+}
+
+function recLog(level, message, context = {}) {
+    const payload = { ...context, at: new Date().toISOString() };
+    if (level === 'error') {
+        console.error(`[REC] ${message}`, payload);
+        return;
+    }
+    if (level === 'warn') {
+        console.warn(`[REC] ${message}`, payload);
+        return;
+    }
+    console.info(`[REC] ${message}`, payload);
 }
 
 export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
@@ -31,9 +45,58 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     let echoChannel = null;
     const uploadQueue = [];
     let isProcessingUpload = false;
+    const uploadedKeys = new Set();
+    const uploadingKeys = new Set();
+    const waitTimers = new Map();
+
+    function uploadKey(saveRequestUuid) {
+        return `${saveRequestUuid}:${recorderId}`;
+    }
+
+    function clearWaitTimer(uuid) {
+        const timer = waitTimers.get(uuid);
+        if (timer) {
+            clearTimeout(timer);
+            waitTimers.delete(uuid);
+        }
+    }
+
+    function armWaitTimeout(uuid) {
+        clearWaitTimer(uuid);
+
+        waitTimers.set(uuid, setTimeout(() => {
+            const pending = pendingSaves.value[uuid];
+            if (!pending) return;
+
+            if (pending.status === 'waiting' || pending.status === 'uploading' || pending.status === 'partial') {
+                if ((pending.received || 0) >= (pending.expected || 1)) {
+                    markPendingStatus(uuid, { status: 'done' });
+                    return;
+                }
+
+                markPendingStatus(uuid, {
+                    status: pending.received > 0 ? 'partial' : 'failed',
+                    error: pending.received > 0
+                        ? null
+                        : 'Nenhuma câmera enviou o clip a tempo. Tente novamente.',
+                });
+
+                if (!pending.received) {
+                    saveError.value = 'Nenhuma câmera enviou o clip a tempo. Tente novamente.';
+                }
+
+                recLog('warn', 'save wait timeout', { uuid, received: pending.received });
+            }
+        }, 45_000));
+    }
 
     function routeName(name, params = {}) {
         return window.route(name, { game: gameId, ...params });
+    }
+
+    function markPendingStatus(uuid, patch) {
+        const current = pendingSaves.value[uuid] || { expected: 1, received: 0 };
+        pendingSaves.value[uuid] = { ...current, ...patch };
     }
 
     function upsertSave(saveRequest, expectedRecorders = null) {
@@ -43,10 +106,12 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
             Object.assign(existing, saveRequest);
 
             if (expectedRecorders != null) {
-                pendingSaves.value[saveRequest.uuid] = {
+                markPendingStatus(saveRequest.uuid, {
                     expected: expectedRecorders,
                     received: existing.clips?.length || 0,
-                };
+                    status: existing.clips?.length ? 'partial' : 'waiting',
+                });
+                armWaitTimeout(saveRequest.uuid);
             }
 
             return existing;
@@ -58,10 +123,12 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         });
 
         if (expectedRecorders != null) {
-            pendingSaves.value[saveRequest.uuid] = {
+            markPendingStatus(saveRequest.uuid, {
                 expected: expectedRecorders,
                 received: 0,
-            };
+                status: 'waiting',
+            });
+            armWaitTimeout(saveRequest.uuid);
         }
 
         return recentSaves.value[0];
@@ -76,10 +143,12 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
                 clips: [clip],
             });
 
-            pendingSaves.value[saveRequestUuid] = {
+            markPendingStatus(saveRequestUuid, {
                 expected: pendingSaves.value[saveRequestUuid]?.expected ?? 1,
                 received: 1,
-            };
+                status: 'done',
+            });
+            clearWaitTimer(saveRequestUuid);
 
             return;
         }
@@ -90,8 +159,18 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
             save.clips.push(clip);
         }
 
-        if (pendingSaves.value[saveRequestUuid]) {
-            pendingSaves.value[saveRequestUuid].received = save.clips.length;
+        const expected = pendingSaves.value[saveRequestUuid]?.expected ?? 1;
+        const received = save.clips.length;
+
+        markPendingStatus(saveRequestUuid, {
+            expected,
+            received,
+            status: received >= expected ? 'done' : 'partial',
+            error: null,
+        });
+
+        if (received >= expected) {
+            clearWaitTimer(saveRequestUuid);
         }
     }
 
@@ -105,9 +184,11 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
 
             recorders.value = data.recorders;
             startHeartbeat();
+            recLog('info', 'recorder registered', { recorderId, count: data.recorders.length });
 
             return true;
-        } catch {
+        } catch (err) {
+            recLog('error', 'register failed', { status: err?.response?.status });
             return false;
         } finally {
             isRegistering.value = false;
@@ -123,8 +204,9 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
             });
 
             recorders.value = data.recorders;
-        } catch {
-            // ignore
+            recLog('info', 'recorder stopped', { recorderId });
+        } catch (err) {
+            recLog('warn', 'unregister failed', { status: err?.response?.status });
         }
     }
 
@@ -136,7 +218,8 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
                 await axios.post(routeName('games.rec.heartbeat'), {
                     recorder_id: recorderId,
                 });
-            } catch {
+            } catch (err) {
+                recLog('warn', 'heartbeat failed', { status: err?.response?.status });
                 stopHeartbeat();
             }
         }, HEARTBEAT_MS);
@@ -161,10 +244,18 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
             const { data } = await axios.post(routeName('games.rec.save'));
 
             upsertSave(data.save_request, data.expected_recorders);
+            recLog('info', 'save requested', {
+                uuid: data.save_request?.uuid,
+                expected: data.expected_recorders,
+            });
 
             return data.save_request;
         } catch (err) {
             saveError.value = err?.response?.data?.message || 'Não foi possível salvar.';
+            recLog('error', 'save failed', {
+                status: err?.response?.status,
+                message: saveError.value,
+            });
             return null;
         } finally {
             isSaving.value = false;
@@ -172,12 +263,45 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     }
 
     function enqueueUpload(saveRequestUuid, blob, durationSeconds) {
-        uploadQueue.push({ saveRequestUuid, blob, durationSeconds });
+        const key = uploadKey(saveRequestUuid);
+
+        if (uploadedKeys.has(key) || uploadingKeys.has(key)) {
+            recLog('info', 'upload skipped (already handled)', { saveRequestUuid });
+            return;
+        }
+
+        if (!blob || blob.size === 0) {
+            markPendingStatus(saveRequestUuid, {
+                status: 'failed',
+                error: 'Buffer vazio. Aguarde alguns segundos gravando e tente de novo.',
+            });
+            saveError.value = 'Buffer vazio. Aguarde alguns segundos gravando e tente de novo.';
+            recLog('warn', 'empty blob', { saveRequestUuid });
+            return;
+        }
+
+        uploadingKeys.add(key);
+        markPendingStatus(saveRequestUuid, { status: 'uploading' });
+
+        uploadQueue.push({
+            saveRequestUuid,
+            blob,
+            durationSeconds,
+            retries: 0,
+            key,
+        });
+
+        recLog('info', 'upload queued', {
+            saveRequestUuid,
+            bytes: blob.size,
+            queue: uploadQueue.length,
+        });
+
         processUploadQueue();
     }
 
     async function processUploadQueue() {
-        if (isProcessingUpload || uploadQueue.length === 0) {
+        if (isProcessingUpload) {
             return;
         }
 
@@ -193,16 +317,44 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
                 formData.append('duration_seconds', String(job.durationSeconds));
                 formData.append('video', job.blob, `clip-${Date.now()}.webm`);
 
-                const { data } = await axios.post(routeName('games.rec.upload'), formData, {
-                    headers: { 'Content-Type': 'multipart/form-data' },
-                });
+                const { data } = await axios.post(routeName('games.rec.upload'), formData);
 
+                uploadedKeys.add(job.key);
+                uploadingKeys.delete(job.key);
                 addClipToSave(job.saveRequestUuid, data.clip);
                 onClipReady?.(data.clip, job.saveRequestUuid);
-            } catch {
-                // retry once
-                uploadQueue.unshift(job);
-                break;
+                recLog('info', 'upload ok', {
+                    saveRequestUuid: job.saveRequestUuid,
+                    clipId: data.clip?.id,
+                });
+            } catch (err) {
+                const status = err?.response?.status;
+                const message = err?.response?.data?.message
+                    || err?.response?.data?.errors?.video?.[0]
+                    || 'Falha no upload do clip.';
+
+                if (job.retries < MAX_UPLOAD_RETRIES) {
+                    job.retries += 1;
+                    uploadQueue.push(job);
+                    recLog('warn', 'upload retry', {
+                        saveRequestUuid: job.saveRequestUuid,
+                        retries: job.retries,
+                        status,
+                    });
+                    continue;
+                }
+
+                uploadingKeys.delete(job.key);
+                markPendingStatus(job.saveRequestUuid, {
+                    status: 'failed',
+                    error: message,
+                });
+                saveError.value = message;
+                recLog('error', 'upload failed', {
+                    saveRequestUuid: job.saveRequestUuid,
+                    status,
+                    message,
+                });
             }
         }
 
@@ -217,16 +369,26 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
             clips: [],
         }, payload.expectedRecorders);
 
+        recLog('info', 'SaveClipRequested received', {
+            uuid: payload.saveRequestUuid,
+            expected: payload.expectedRecorders,
+        });
+
         onSaveRequested?.(payload);
     }
 
     function handleClipReady(payload) {
         addClipToSave(payload.saveRequestUuid, payload.clip);
         onClipReady?.(payload.clip, payload.saveRequestUuid);
+        recLog('info', 'ClipReady received', {
+            uuid: payload.saveRequestUuid,
+            clipId: payload.clip?.id,
+        });
     }
 
     function subscribe() {
         if (!window.Echo) {
+            recLog('warn', 'Echo unavailable');
             return;
         }
 
@@ -241,6 +403,8 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
             .listen('.RecorderLeft', (data) => {
                 recorders.value = data.recorders;
             });
+
+        recLog('info', 'subscribed', { channelName });
     }
 
     function unsubscribe() {
@@ -257,6 +421,8 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     onBeforeUnmount(() => {
         unsubscribe();
         stopHeartbeat();
+        waitTimers.forEach((timer) => clearTimeout(timer));
+        waitTimers.clear();
     });
 
     return {
