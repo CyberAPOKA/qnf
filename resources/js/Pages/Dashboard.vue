@@ -115,7 +115,7 @@ const linePlayerCount = computed(() => {
 });
 
 const canJoin = computed(() => {
-    if (!isCurrentRound.value || props.is_goalkeeper || props.dropped_out) return false;
+    if (!isCurrentRound.value || props.is_admin || props.is_goalkeeper || props.dropped_out) return false;
     return store.game?.status === 'open' && !joined.value && linePlayerCount.value < 12;
 });
 
@@ -420,6 +420,14 @@ const regenerateWeekTeam = async () => {
                             class="inline-flex w-full items-center justify-center rounded-md bg-indigo-600 px-4 py-3 text-base font-semibold text-white hover:bg-indigo-700"
                             :href="route('games.draft', effectiveGame.id)">
                             Ir para Draft
+                        </Link>
+
+                        <!-- REC link -->
+                        <Link v-if="['drafted', 'done'].includes(effectiveGame?.status) && isCurrentRound"
+                            class="inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-base font-semibold text-white hover:bg-red-700"
+                            :href="route('games.rec', effectiveGame.id)">
+                            <i class="fa-solid fa-video mr-2" />
+                            Modo REC
                         </Link>
                     </template>
 
