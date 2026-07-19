@@ -5,12 +5,17 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import { useRecBuffer } from '@/composables/useRecBuffer';
 import { useRecSession } from '@/composables/useRecSession';
 
-const CAMERA_ANGLES = [
-    { tag: 'B1', label: 'Lateral B · Esquerda', side: 'B' },
-    { tag: 'B2', label: 'Lateral B · Direita', side: 'B' },
-    { tag: 'A1', label: 'Lateral A · Esquerda', side: 'A' },
-    { tag: 'A2', label: 'Lateral A · Direita', side: 'A' },
+const CAMERA_ANGLES_B = [
+    { tag: 'B1', label: 'Lateral B · Esquerda' },
+    { tag: 'B2', label: 'Lateral B · Direita' },
 ];
+
+const CAMERA_ANGLES_A = [
+    { tag: 'A1', label: 'Lateral A · Esquerda' },
+    { tag: 'A2', label: 'Lateral A · Direita' },
+];
+
+const CAMERA_ANGLES = [...CAMERA_ANGLES_B, ...CAMERA_ANGLES_A];
 
 const props = defineProps({
     game: Object,
@@ -79,6 +84,17 @@ const takenAngles = computed(() =>
 
 function angleLabel(tag) {
     return CAMERA_ANGLES.find((a) => a.tag === tag)?.label || tag;
+}
+
+function angleButtonClass(tag) {
+    return [
+        selectedAngle.value === tag
+            ? 'border-red-600 bg-red-50'
+            : 'border-gray-200 bg-white hover:border-red-300',
+        takenAngles.value.has(tag) && selectedAngle.value !== tag
+            ? 'opacity-45'
+            : '',
+    ];
 }
 
 function formatTime(iso) {
@@ -287,13 +303,6 @@ onBeforeUnmount(() => {
     <AppLayout title="REC">
         <div class="py-4 pb-28">
             <div class="max-w-lg mx-auto px-4 space-y-5">
-                <div class="text-center">
-                    <p class="text-sm text-gray-500">Rodada {{ game.round }} · {{ game.date }}</p>
-                    <h1 class="text-2xl font-bold text-gray-900 mt-1">Modo REC</h1>
-                    <p class="text-sm text-gray-600 mt-1">
-                        Buffer de {{ buffer_seconds }}s · {{ activeRecorderCount }} câmera(s) ativa(s)
-                    </p>
-                </div>
 
                 <div
                     v-if="localError || bufferError || saveError"
@@ -315,52 +324,71 @@ onBeforeUnmount(() => {
                     class="rounded-2xl bg-white shadow overflow-hidden"
                 >
                     <div class="px-4 pt-4 pb-2">
-                        <h2 class="text-sm font-semibold text-gray-800 uppercase tracking-wide">
+                        <h2 class="text-lg text-center font-semibold text-gray-900 uppercase tracking-wide">
                             Ângulo da câmera
                         </h2>
-                        <p class="text-xs text-gray-500 mt-1">
-                            Selecione onde o celular será posicionado na quadra antes de gravar.
-                        </p>
                     </div>
 
-                    <div class="relative mx-3 mb-3 rounded-xl overflow-hidden bg-[#1e4fd6]">
-                        <img
-                            src="/assets/rec/court_positions.png"
-                            alt="Mapa de ângulos da quadra"
-                            class="w-full h-auto block opacity-95"
-                        />
-                    </div>
+                    <div class="px-3 pb-4 space-y-2">
+                        <!-- Lateral B (topo da quadra) -->
+                        <div class="grid grid-cols-2 gap-2">
+                            <button
+                                v-for="angle in CAMERA_ANGLES_B"
+                                :key="angle.tag"
+                                type="button"
+                                class="rounded-xl border-2 px-3 py-3 text-left transition active:scale-[0.98]"
+                                :class="angleButtonClass(angle.tag)"
+                                :disabled="isThisDeviceRecording"
+                                @click="selectAngle(angle.tag)"
+                            >
+                                <span class="inline-flex items-center gap-2">
+                                    <span class="rounded-md bg-red-600 text-white text-xs font-bold px-2 py-0.5">
+                                        {{ angle.tag }}
+                                    </span>
+                                    <span
+                                        v-if="takenAngles.has(angle.tag)"
+                                        class="text-[10px] uppercase font-semibold text-amber-600"
+                                    >
+                                        em uso
+                                    </span>
+                                </span>
+                                <span class="block text-xs text-gray-600 mt-1">{{ angle.label }}</span>
+                            </button>
+                        </div>
 
-                    <div class="grid grid-cols-2 gap-2 px-3 pb-4">
-                        <button
-                            v-for="angle in CAMERA_ANGLES"
-                            :key="angle.tag"
-                            type="button"
-                            class="rounded-xl border-2 px-3 py-3 text-left transition active:scale-[0.98]"
-                            :class="[
-                                selectedAngle === angle.tag
-                                    ? 'border-red-600 bg-red-50'
-                                    : 'border-gray-200 bg-white hover:border-red-300',
-                                takenAngles.has(angle.tag) && selectedAngle !== angle.tag
-                                    ? 'opacity-45'
-                                    : '',
-                            ]"
-                            :disabled="isThisDeviceRecording"
-                            @click="selectAngle(angle.tag)"
-                        >
-                            <span class="inline-flex items-center gap-2">
-                                <span class="rounded-md bg-red-600 text-white text-xs font-bold px-2 py-0.5">
-                                    {{ angle.tag }}
+                        <div class="relative rounded-xl overflow-hidden bg-[#1e4fd6]">
+                            <img
+                                src="/assets/rec/court_positions.png"
+                                alt="Mapa de ângulos da quadra"
+                                class="w-full h-auto block opacity-95"
+                            />
+                        </div>
+
+                        <!-- Lateral A (base da quadra / banco) -->
+                        <div class="grid grid-cols-2 gap-2">
+                            <button
+                                v-for="angle in CAMERA_ANGLES_A"
+                                :key="angle.tag"
+                                type="button"
+                                class="rounded-xl border-2 px-3 py-3 text-left transition active:scale-[0.98]"
+                                :class="angleButtonClass(angle.tag)"
+                                :disabled="isThisDeviceRecording"
+                                @click="selectAngle(angle.tag)"
+                            >
+                                <span class="inline-flex items-center gap-2">
+                                    <span class="rounded-md bg-red-600 text-white text-xs font-bold px-2 py-0.5">
+                                        {{ angle.tag }}
+                                    </span>
+                                    <span
+                                        v-if="takenAngles.has(angle.tag)"
+                                        class="text-[10px] uppercase font-semibold text-amber-600"
+                                    >
+                                        em uso
+                                    </span>
                                 </span>
-                                <span
-                                    v-if="takenAngles.has(angle.tag)"
-                                    class="text-[10px] uppercase font-semibold text-amber-600"
-                                >
-                                    em uso
-                                </span>
-                            </span>
-                            <span class="block text-xs text-gray-600 mt-1">{{ angle.label }}</span>
-                        </button>
+                                <span class="block text-xs text-gray-600 mt-1">{{ angle.label }}</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
