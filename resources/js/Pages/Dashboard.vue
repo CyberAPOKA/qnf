@@ -290,6 +290,22 @@ const generateLineups = async () => {
     }
 };
 
+const rankingLoading = ref(false);
+const rankingImage = ref(null);
+
+const generateRanking = async () => {
+    if (rankingLoading.value) return;
+    rankingLoading.value = true;
+    try {
+        const { data } = await axios.post(route('api.ranking.generate'));
+        rankingImage.value = data.image + '?t=' + Date.now();
+    } catch (e) {
+        console.error('Failed to generate ranking image', e);
+    } finally {
+        rankingLoading.value = false;
+    }
+};
+
 const paymentsLoading = ref(false);
 const paymentsResult = ref(null);
 
@@ -606,6 +622,11 @@ const regenerateWeekTeam = async () => {
                             @click="generateLineups" />
                         <img v-if="lineupsImage" :src="lineupsImage" alt="Escalações"
                             class="w-full rounded-lg shadow" />
+
+                        <FuturisticButton :label="rankingLoading ? 'Gerando...' : 'Gerar Ranking'"
+                            @click="generateRanking" />
+                        <img v-if="rankingImage" :src="rankingImage" alt="Ranking"
+                            class="w-fit rounded-lg shadow max-h-fit" />
                     </template>
                 </template>
 

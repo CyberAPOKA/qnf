@@ -76,6 +76,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
         Route::post('/week-team/random', [GameController::class, 'generateRandomWeekTeam'])->name('api.week-team.random');
         Route::post('/captains/generate', [GameController::class, 'generateCaptainsImage'])->name('api.captains.generate');
         Route::post('/lineups/generate', [GameController::class, 'generateLineupsImage'])->name('api.lineups.generate');
+        Route::post('/ranking/generate', [GameController::class, 'generateRankingImage'])->name('api.ranking.generate');
         Route::post('/payments/create-all', [GameController::class, 'createPayments'])->name('api.payments.create-all');
         Route::get('/round-data', [GameController::class, 'getRoundData'])->name('api.round-data');
         Route::post('/games/{game}/regenerate-week-team', [GameController::class, 'regenerateWeekTeam'])->name('api.games.regenerate-week-team');

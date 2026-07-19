@@ -18,6 +18,7 @@ use App\Services\ScoringService;
 use App\Services\WaitlistService;
 use App\Services\CaptainsImageService;
 use App\Services\LineupsImageService;
+use App\Services\RankingImageService;
 use App\Services\WeekTeamImageService;
 use App\Services\WeekTeamMusicService;
 use Illuminate\Http\JsonResponse;
@@ -318,6 +319,19 @@ class GameController extends Controller
 
         if (! $path) {
             return response()->json(['error' => 'Jogadores insuficientes para gerar escalações.'], 422);
+        }
+
+        return response()->json(['image' => PublicStorage::url($path)]);
+    }
+
+    public function generateRankingImage(Request $request, RankingImageService $imageService): JsonResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $path = $imageService->generate();
+
+        if (! $path) {
+            return response()->json(['error' => 'Não há jogadores no ranking para gerar a imagem.'], 422);
         }
 
         return response()->json(['image' => PublicStorage::url($path)]);

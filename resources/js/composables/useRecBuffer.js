@@ -3,7 +3,7 @@ import { ref, onBeforeUnmount, nextTick } from 'vue';
 const BUFFER_SECONDS = 30;
 const MIN_CLIP_SECONDS = 25;
 const TIMESLICE_MS = 1000;
-const FLUSH_MS = 120;
+const FLUSH_MS = 150;
 /** Restart MediaRecorder on this interval so each segment is a clean WebM (timestamps from 0). */
 const SEGMENT_MS = 30_000;
 
@@ -40,7 +40,8 @@ export function useRecBuffer() {
     let previousSegment = null; // { blob, durationMs, endedAt }
     let segmentTimer = null;
     let shouldKeepRecording = false;
-    let finalizing = false;
+    /** Single-flight lock shared by rotate + snapshot (SAVE). */
+    let operationChain = Promise.resolve();
 
     function blobType() {
         return (mimeType || chunks[0]?.type || 'video/webm').split(';')[0];
@@ -110,8 +111,18 @@ export function useRecBuffer() {
     }
 
     /**
+     * Run rotate/snapshot exclusively so they never interleave.
+     */
+    function runExclusive(task) {
+        const next = operationChain.then(task, task);
+        // Keep the chain alive even if a task fails.
+        operationChain = next.catch(() => {});
+        return next;
+    }
+
+    /**
      * Stop current MediaRecorder and return a complete WebM ending at "now".
-     * Timestamps start at 0 — no dead gap.
+     * Waits briefly after stop so late dataavailable chunks are included.
      */
     function finalizeCurrentSegment() {
         return new Promise((resolve) => {
@@ -125,8 +136,17 @@ export function useRecBuffer() {
 
             const recorder = mediaRecorder;
             const startedAt = segmentStartedAt;
+            let settled = false;
 
-            const finish = () => {
+            const finish = async () => {
+                if (settled) {
+                    return;
+                }
+                settled = true;
+
+                // Some browsers fire onstop before the last dataavailable.
+                await wait(FLUSH_MS);
+
                 const durationMs = Math.max(0, Date.now() - startedAt);
                 const blob = buildBlobFromChunks();
                 chunks.length = 0;
@@ -134,7 +154,9 @@ export function useRecBuffer() {
                 resolve({ blob, durationMs });
             };
 
-            recorder.onstop = finish;
+            recorder.onstop = () => {
+                finish();
+            };
 
             try {
                 recorder.requestData();
@@ -151,13 +173,11 @@ export function useRecBuffer() {
     }
 
     async function rotateSegment() {
-        if (!shouldKeepRecording || finalizing || !mediaRecorder || mediaRecorder.state !== 'recording') {
-            return;
-        }
+        return runExclusive(async () => {
+            if (!shouldKeepRecording || !mediaRecorder || mediaRecorder.state !== 'recording') {
+                return;
+            }
 
-        finalizing = true;
-
-        try {
             const { blob, durationMs } = await finalizeCurrentSegment();
 
             if (blob && blob.size > 0 && durationMs >= MIN_CLIP_SECONDS * 1000) {
@@ -171,9 +191,7 @@ export function useRecBuffer() {
             if (shouldKeepRecording) {
                 startRecorder();
             }
-        } finally {
-            finalizing = false;
-        }
+        });
     }
 
     function startSegmentTimer() {
@@ -217,7 +235,7 @@ export function useRecBuffer() {
             mimeType = pickMimeType();
             previousSegment = null;
             shouldKeepRecording = true;
-            finalizing = false;
+            operationChain = Promise.resolve();
 
             attachPreview(mediaStream);
             startRecorder();
@@ -242,53 +260,69 @@ export function useRecBuffer() {
      * Capture ending at the click:
      * - finalize current clean WebM (ends at now)
      * - if long enough, return it
-     * - if short, also return previous segment for server-side merge+trim
+     * - if short/empty, fall back to previous segment (+ current when useful)
      */
     async function snapshot() {
-        if (finalizing) {
-            await wait(FLUSH_MS);
-        }
+        return runExclusive(async () => {
+            stopSegmentTimer();
 
-        finalizing = true;
-        stopSegmentTimer();
+            try {
+                const { blob, durationMs } = await finalizeCurrentSegment();
 
-        try {
-            const { blob, durationMs } = await finalizeCurrentSegment();
+                if (shouldKeepRecording) {
+                    startRecorder();
+                    startSegmentTimer();
+                }
 
-            if (shouldKeepRecording) {
-                startRecorder();
-                startSegmentTimer();
-            }
+                const minMs = MIN_CLIP_SECONDS * 1000;
+                const currentOk = blob && blob.size > 0;
 
-            if (!blob || blob.size === 0) {
+                // Current segment alone already covers the window ending at the click.
+                if (currentOk && durationMs >= minMs) {
+                    return {
+                        blob,
+                        durationSeconds: Math.round(durationMs / 1000),
+                        prefixBlob: null,
+                    };
+                }
+
+                // Early in a segment, or current finalize came back empty:
+                // use previous complete segment (optionally + current as tail).
+                if (previousSegment?.blob && previousSegment.blob.size > 0) {
+                    if (currentOk) {
+                        return {
+                            blob,
+                            durationSeconds: BUFFER_SECONDS,
+                            prefixBlob: previousSegment.blob,
+                        };
+                    }
+
+                    // Current empty — still return previous so SAVE does not fail after 1+ min.
+                    return {
+                        blob: previousSegment.blob,
+                        durationSeconds: Math.round(previousSegment.durationMs / 1000) || BUFFER_SECONDS,
+                        prefixBlob: null,
+                    };
+                }
+
+                // First seconds of the whole REC session — not enough footage yet.
+                if (currentOk) {
+                    return null;
+                }
+
+                return null;
+            } catch {
+                if (previousSegment?.blob && previousSegment.blob.size > 0) {
+                    return {
+                        blob: previousSegment.blob,
+                        durationSeconds: Math.round(previousSegment.durationMs / 1000) || BUFFER_SECONDS,
+                        prefixBlob: null,
+                    };
+                }
+
                 return null;
             }
-
-            const minMs = MIN_CLIP_SECONDS * 1000;
-
-            // Current segment alone already covers the window ending at the click.
-            if (durationMs >= minMs) {
-                return {
-                    blob,
-                    durationSeconds: Math.round(durationMs / 1000),
-                    prefixBlob: null,
-                };
-            }
-
-            // Early in a segment: need previous complete segment + current (server trims to last 30s).
-            if (previousSegment?.blob) {
-                return {
-                    blob,
-                    durationSeconds: BUFFER_SECONDS,
-                    prefixBlob: previousSegment.blob,
-                };
-            }
-
-            // First seconds of the whole REC session — not enough footage yet.
-            return null;
-        } finally {
-            finalizing = false;
-        }
+        });
     }
 
     function hasBuffer() {
@@ -298,13 +332,13 @@ export function useRecBuffer() {
             return true;
         }
 
-        return !!(previousSegment?.blob && previousSegment.durationMs >= minMs);
+        return !!(previousSegment?.blob && previousSegment.blob.size > 0 && previousSegment.durationMs >= minMs);
     }
 
     function stop() {
         shouldKeepRecording = false;
-        finalizing = false;
         stopSegmentTimer();
+        operationChain = Promise.resolve();
 
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
             mediaRecorder.ondataavailable = null;
