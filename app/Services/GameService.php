@@ -31,14 +31,32 @@ class GameService
             return $activeGame;
         }
 
-        $existingGame = Game::whereDate('date', $gameDate->toDateString())->first();
+        $existingGame = Game::whereDate('date', $gameDate->toDateString())
+            ->where('status', '!=', GameStatus::DONE)
+            ->first();
 
         if ($existingGame) {
             return $existingGame;
         }
 
-        // Novo jogo só é criado a partir de sexta-feira
-        if ($clock->isFriday() || $clock->isSaturday() || $clock->isSunday()) {
+        if (Game::whereDate('date', $gameDate->toDateString())->where('status', GameStatus::DONE)->exists()) {
+            $gameDate = $gameDate->addWeek();
+            $opensAt = $gameDate->subDay()->setTime(17, 0);
+
+            $existingGame = Game::whereDate('date', $gameDate->toDateString())
+                ->where('status', '!=', GameStatus::DONE)
+                ->first();
+
+            if ($existingGame) {
+                return $existingGame;
+            }
+        }
+
+        $lastGame = Game::orderByDesc('date')->first();
+        $lastGameIsDone = $lastGame?->status === GameStatus::DONE;
+
+        // Novo jogo: sexta–domingo (início da semana) ou assim que a rodada anterior finalizar
+        if ($clock->isFriday() || $clock->isSaturday() || $clock->isSunday() || $lastGameIsDone) {
             $lastRound = Game::whereYear('date', $gameDate->year)->max('round') ?? 0;
 
             return Game::create([
@@ -50,7 +68,7 @@ class GameService
             ]);
         }
 
-        // Seg-Qui: retorna o último jogo finalizado (mantém resultados visíveis)
+        // Seg-Qui (rodada ainda em andamento): retorna o último jogo (mantém resultados visíveis)
         return Game::orderByDesc('date')->firstOrFail();
     }
 
