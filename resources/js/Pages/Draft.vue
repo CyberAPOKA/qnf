@@ -281,18 +281,19 @@ watch(() => store.game?.status, (status) => {
                                             <span class="font-bold">{{ player.total_points }}</span>
                                         </div>
                                     </div>
-                                    <div v-if="player.last_results?.length" class="flex items-center gap-1">
+                                    <div v-if="player.last_results?.length" class="flex items-center gap-0.25">
                                         <span
                                             v-for="(result, i) in player.last_results"
                                             :key="i"
                                             class="inline-flex items-center justify-center rounded-full"
                                             :class="i === player.last_results.length - 1
-                                                ? 'ring-2 ring-indigo-400/70 ring-offset-1 bg-indigo-50/50 px-0.5'
+                                                ? (result === 1
+                                                    ? 'text-lg underline underline-offset-2 decoration-green-600'
+                                                    : 'text-lg underline underline-offset-2 decoration-red-500')
                                                 : ''"
                                         >
-                                            <i v-if="result === 1"
-                                                class="fa-regular fa-circle-check text-green-600 text-xs"></i>
-                                            <i v-else class="fa-regular fa-circle-xmark text-red-500 text-xs"></i>
+                                            <i v-if="result === 1" class="fa-solid fa-circle-check text-green-600"></i>
+                                            <i v-else class="fa-solid fa-circle-xmark text-red-500"></i>
                                         </span>
                                     </div>
                                 </div>
