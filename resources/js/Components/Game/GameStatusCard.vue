@@ -74,7 +74,7 @@ const closeMenu = () => {
         </p>
         <slot name="details" v-if="!['drafted', 'done'].includes(status)" />
 
-        <div class="mt-2 space-y-2" v-if="!['drafted', 'done'].includes(status)">
+        <div class="mt-2 space-y-2" v-if="status !== 'done'">
             <slot name="actions" />
         </div>
 

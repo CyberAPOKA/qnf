@@ -439,11 +439,18 @@ const regenerateWeekTeam = async () => {
                         </Link>
 
                         <!-- REC link -->
-                        <Link v-if="['drafted', 'done'].includes(effectiveGame?.status) && isCurrentRound"
-                            class="inline-flex w-full items-center justify-center rounded-md bg-red-600 px-4 py-3 text-base font-semibold text-white hover:bg-red-700"
-                            :href="route('games.rec', effectiveGame.id)">
-                            <i class="fa-solid fa-video mr-2" />
-                            Modo REC
+                        <Link v-if="effectiveGame?.status === 'drafted' && isCurrentRound"
+                            :href="route('games.rec', effectiveGame.id)"
+                            class="block w-full overflow-hidden rounded-md shadow transition-opacity hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                            :style="{
+                                backgroundImage: 'url(/assets/rec/button.png)',
+                                backgroundSize: 'cover',
+                                backgroundPosition: 'center',
+                                aspectRatio: '401 / 137',
+                            }"
+                            aria-label="Modo REC"
+                        >
+                            <span class="sr-only">Modo REC</span>
                         </Link>
                     </template>
 
