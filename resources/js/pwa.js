@@ -1,14 +1,17 @@
 import { registerSW } from 'virtual:pwa-register';
 
-const updateSW = registerSW({
-    immediate: true,
-    onNeedRefresh() {
-        const shouldUpdate = window.confirm(
-            'Uma nova versão do QNF está disponível. Atualizar agora?'
-        );
+const CHECK_INTERVAL_MS = 60 * 1000;
 
-        if (shouldUpdate) {
-            updateSW(true);
+registerSW({
+    immediate: true,
+    onRegisteredSW(_swUrl, registration) {
+        if (!registration) {
+            return;
         }
+
+        // Procura nova versão periodicamente (usuário com app aberto)
+        setInterval(() => {
+            registration.update();
+        }, CHECK_INTERVAL_MS);
     },
 });

@@ -37,7 +37,7 @@ const suspensionMessage = computed(() => {
 </script>
 
 <template>
-    <div>
+    <div class="safe-top">
         <Head :title="title" />
 
         <Banner />

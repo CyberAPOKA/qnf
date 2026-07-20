@@ -22,7 +22,7 @@ export default defineConfig(({ isSsrBuild }) => ({
             buildBase: '/build/',
             base: '/',
             scope: '/',
-            registerType: 'prompt',
+            registerType: 'autoUpdate',
             injectRegister: null,
             devOptions: {
                 enabled: false,

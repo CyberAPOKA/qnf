@@ -5,3 +5,8 @@
 [x-cloak] {
     display: none;
 }
+
+/* PWA standalone: reserva espaço da status bar / notch (requer viewport-fit=cover) */
+.safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+}
