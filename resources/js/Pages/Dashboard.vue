@@ -120,7 +120,7 @@ const canJoin = computed(() => {
 });
 
 const canJoinWaitlist = computed(() => {
-    if (!isCurrentRound.value || props.is_goalkeeper || props.dropped_out || props.waitlist_position) return false;
+    if (!isCurrentRound.value || props.is_admin || props.is_goalkeeper || props.dropped_out || props.waitlist_position) return false;
     return ['full', 'drafting', 'drafted'].includes(store.game?.status) && !joined.value;
 });
 
