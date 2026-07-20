@@ -449,6 +449,7 @@ class DraftService
         $lines[] = '';
 
         $lines[] = sprintf('*⚽️ Rodada: %02d*', $game->round ?? 0);
+        $lines[] = '';
 
         if ($includeInitialMatchup) {
             [$initialTeamA, $initialTeamB] = $this->drawInitialMatchupTeams();
