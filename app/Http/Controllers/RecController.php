@@ -215,6 +215,7 @@ class RecController extends Controller
         $directory = "rec/{$game->id}/{$saveRequest->uuid}";
         $path = $file->store($directory, 'public');
         $keepSeconds = $this->recSession->bufferSeconds();
+        $alreadyMerged = false;
 
         $prefix = $request->file('video_prefix');
         if ($prefix && $prefix->getSize() > 0) {
@@ -236,6 +237,7 @@ class RecController extends Controller
             if ($merged && is_file($mergedAbsolute)) {
                 Storage::disk('public')->delete($path);
                 $path = $mergedRelative;
+                $alreadyMerged = true;
             } else {
                 Log::warning('REC prefix merge failed, normalizing current only', [
                     'uuid' => $saveRequest->uuid,
@@ -243,7 +245,18 @@ class RecController extends Controller
             }
         }
 
-        $normalized = $this->clipNormalize->normalize($path, $keepSeconds);
+        // mergeAndTrim already re-encodes + trims; skip a second encode pass.
+        if ($alreadyMerged) {
+            $absolute = Storage::disk('public')->path($path);
+            $duration = $this->clipNormalize->probeDurationSeconds($absolute) ?? $keepSeconds;
+            $normalized = [
+                'duration_seconds' => (int) max(1, round($duration)),
+                'bytes' => (int) (@filesize($absolute) ?: 0),
+            ];
+        } else {
+            $normalized = $this->clipNormalize->normalize($path, $keepSeconds);
+        }
+
         $durationSeconds = (int) ($normalized['duration_seconds']
             ?? $validated['duration_seconds']
             ?? $keepSeconds);

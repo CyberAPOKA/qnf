@@ -32,60 +32,27 @@ class RecClipNormalizeService
         }
 
         $dir = dirname($absolute);
-        $tmpConcat = $dir.DIRECTORY_SEPARATOR.'tmp_concat_'.uniqid('', true).'.webm';
         $tmpOut = $dir.DIRECTORY_SEPARATOR.'tmp_out_'.uniqid('', true).'.webm';
 
         try {
-            // Remux + take the last N seconds (where the real frames are).
-            $cut = Process::timeout(60)->run([
-                'ffmpeg',
-                '-y',
+            // Re-encode the last N seconds so timestamps/metadata are continuous.
+            // Stream-copy cuts on MediaRecorder WebM often leave players freezing mid-clip.
+            $cut = $this->runFfmpeg([
                 '-sseof', '-'.$keepSeconds,
                 '-i', $absolute,
-                '-c', 'copy',
+                ...$this->webmEncodeArgs(),
                 $tmpOut,
-            ]);
+            ], 90);
 
             if (! $cut->successful() || ! is_file($tmpOut) || filesize($tmpOut) < 1) {
-                // Fallback: remux whole file to fix metadata, then try again.
-                $remux = Process::timeout(60)->run([
-                    'ffmpeg',
-                    '-y',
-                    '-i', $absolute,
-                    '-c', 'copy',
-                    $tmpConcat,
+                Log::warning('REC normalize ffmpeg failed', [
+                    'path' => $relativePath,
+                    'error' => $cut->errorOutput(),
                 ]);
 
-                if (! $remux->successful() || ! is_file($tmpConcat)) {
-                    Log::warning('REC normalize ffmpeg failed', [
-                        'path' => $relativePath,
-                        'cut' => $cut->errorOutput(),
-                        'remux' => $remux->errorOutput(),
-                    ]);
-
-                    return null;
-                }
-
-                $cut = Process::timeout(60)->run([
-                    'ffmpeg',
-                    '-y',
-                    '-sseof', '-'.$keepSeconds,
-                    '-i', $tmpConcat,
-                    '-c', 'copy',
-                    $tmpOut,
-                ]);
-
-                if (! $cut->successful() || ! is_file($tmpOut) || filesize($tmpOut) < 1) {
-                    Log::warning('REC normalize cut failed after remux', [
-                        'path' => $relativePath,
-                        'error' => $cut->errorOutput(),
-                    ]);
-
-                    return null;
-                }
+                return null;
             }
 
-            // Replace original atomically.
             if (! @rename($tmpOut, $absolute)) {
                 @unlink($absolute);
                 @rename($tmpOut, $absolute);
@@ -104,9 +71,6 @@ class RecClipNormalizeService
                 'bytes' => (int) (@filesize($absolute) ?: 0),
             ];
         } finally {
-            if (is_file($tmpConcat)) {
-                @unlink($tmpConcat);
-            }
             if (is_file($tmpOut)) {
                 @unlink($tmpOut);
             }
@@ -116,6 +80,9 @@ class RecClipNormalizeService
     /**
      * Concatenate prefix + current, then keep the last N seconds.
      * Used when SAVE happens early in a fresh 30s segment.
+     *
+     * Never use concat demuxer + stream copy: MediaRecorder segments restart PTS at 0,
+     * which produces mid-clip jumps/freezes in browsers even when duration looks fine.
      */
     public function mergeAndTrim(string $prefixAbsolute, string $currentAbsolute, string $outputAbsolute, int $keepSeconds = 30): bool
     {
@@ -123,67 +90,144 @@ class RecClipNormalizeService
             return false;
         }
 
-        $listFile = dirname($outputAbsolute).DIRECTORY_SEPARATOR.'concat_'.uniqid('', true).'.txt';
-        $merged = dirname($outputAbsolute).DIRECTORY_SEPARATOR.'merged_'.uniqid('', true).'.webm';
+        $dir = dirname($outputAbsolute);
+        $merged = $dir.DIRECTORY_SEPARATOR.'merged_raw_'.uniqid('', true).'.webm';
 
         try {
-            $content = "file '".str_replace("'", "'\\''", $prefixAbsolute)."'\n"
-                ."file '".str_replace("'", "'\\''", $currentAbsolute)."'\n";
-            file_put_contents($listFile, $content);
+            $concat = $this->concatSegments($prefixAbsolute, $currentAbsolute, $merged);
 
-            $concat = Process::timeout(90)->run([
-                'ffmpeg',
-                '-y',
-                '-f', 'concat',
-                '-safe', '0',
-                '-i', $listFile,
-                '-c', 'copy',
-                $merged,
-            ]);
-
-            if (! $concat->successful() || ! is_file($merged)) {
-                // Re-encode concat fallback (more compatible across MediaRecorder segments).
-                $concat = Process::timeout(120)->run([
-                    'ffmpeg',
-                    '-y',
-                    '-i', $prefixAbsolute,
-                    '-i', $currentAbsolute,
-                    '-filter_complex', '[0:v][0:a][1:v][1:a]concat=n=2:v=1:a=1[v][a]',
-                    '-map', '[v]',
-                    '-map', '[a]',
-                    $merged,
+            if (! $concat || ! is_file($merged)) {
+                Log::warning('REC merge failed', [
+                    'prefix' => basename($prefixAbsolute),
+                    'current' => basename($currentAbsolute),
                 ]);
-            }
-
-            if (! $concat->successful() || ! is_file($merged)) {
-                Log::warning('REC merge failed', ['error' => $concat->errorOutput()]);
 
                 return false;
             }
 
-            $cut = Process::timeout(60)->run([
-                'ffmpeg',
-                '-y',
+            $cut = $this->runFfmpeg([
                 '-sseof', '-'.$keepSeconds,
                 '-i', $merged,
-                '-c', 'copy',
+                ...$this->webmEncodeArgs(),
                 $outputAbsolute,
-            ]);
+            ], 90);
 
-            if (! $cut->successful() || ! is_file($outputAbsolute)) {
-                // Last resort: copy merged as-is.
+            if (! $cut->successful() || ! is_file($outputAbsolute) || filesize($outputAbsolute) < 1) {
+                Log::warning('REC merge trim failed', ['error' => $cut->errorOutput()]);
+
+                // Prefer a continuous re-encoded merge over a broken trim.
                 return @rename($merged, $outputAbsolute);
             }
 
+            Log::info('REC merge ok', [
+                'bytes' => @filesize($outputAbsolute),
+                'duration' => $this->probeDurationSeconds($outputAbsolute),
+            ]);
+
             return true;
         } finally {
-            if (is_file($listFile)) {
-                @unlink($listFile);
-            }
             if (is_file($merged)) {
                 @unlink($merged);
             }
         }
+    }
+
+    /**
+     * Re-encode two WebM segments into one continuous file.
+     */
+    private function concatSegments(string $prefixAbsolute, string $currentAbsolute, string $merged): bool
+    {
+        // Prefer A/V concat with normalized timestamps.
+        $withAudio = $this->runFfmpeg([
+            '-i', $prefixAbsolute,
+            '-i', $currentAbsolute,
+            '-filter_complex',
+            '[0:v]setpts=PTS-STARTPTS[v0];'
+            .'[1:v]setpts=PTS-STARTPTS[v1];'
+            .'[0:a]asetpts=PTS-STARTPTS[a0];'
+            .'[1:a]asetpts=PTS-STARTPTS[a1];'
+            .'[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]',
+            '-map', '[v]',
+            '-map', '[a]',
+            ...$this->webmEncodeArgs(),
+            $merged,
+        ], 120);
+
+        if ($withAudio->successful() && is_file($merged) && filesize($merged) > 0) {
+            return true;
+        }
+
+        Log::warning('REC merge A/V concat failed, trying video-only', [
+            'error' => $withAudio->errorOutput(),
+        ]);
+
+        if (is_file($merged)) {
+            @unlink($merged);
+        }
+
+        // Some phone captures briefly lack an audio track on one segment.
+        $videoOnly = $this->runFfmpeg([
+            '-i', $prefixAbsolute,
+            '-i', $currentAbsolute,
+            '-filter_complex',
+            '[0:v]setpts=PTS-STARTPTS[v0];'
+            .'[1:v]setpts=PTS-STARTPTS[v1];'
+            .'[v0][v1]concat=n=2:v=1:a=0[v]',
+            '-map', '[v]',
+            '-an',
+            ...$this->webmVideoEncodeArgs(),
+            $merged,
+        ], 120);
+
+        if ($videoOnly->successful() && is_file($merged) && filesize($merged) > 0) {
+            return true;
+        }
+
+        Log::warning('REC merge video-only concat failed', [
+            'error' => $videoOnly->errorOutput(),
+        ]);
+
+        return false;
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function webmEncodeArgs(): array
+    {
+        return [
+            ...$this->webmVideoEncodeArgs(),
+            '-c:a', 'libopus',
+            '-b:a', '96k',
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function webmVideoEncodeArgs(): array
+    {
+        return [
+            '-c:v', 'libvpx',
+            '-b:v', '1200k',
+            '-deadline', 'realtime',
+            '-cpu-used', '8',
+            '-auto-alt-ref', '0',
+        ];
+    }
+
+    /**
+     * @param  list<string>  $args
+     */
+    private function runFfmpeg(array $args, int $timeoutSeconds)
+    {
+        return Process::timeout($timeoutSeconds)->run([
+            'ffmpeg',
+            '-y',
+            '-hide_banner',
+            '-loglevel', 'error',
+            ...$args,
+        ]);
     }
 
     public function ffmpegAvailable(): bool

@@ -402,7 +402,7 @@ class DraftService
         SendWhatsAppMessage::dispatch('group', 'text', $message);
     }
 
-    public function buildWhatsAppMessage(Game $game): string
+    public function buildWhatsAppMessage(Game $game, bool $includeInitialMatchup = false): string
     {
         $game->loadMissing(['teams.captain', 'teams.firstPick', 'draftPicks.pickedUser']);
 
@@ -450,7 +450,25 @@ class DraftService
 
         $lines[] = sprintf('*⚽️ Rodada: %02d*', $game->round ?? 0);
 
+        if ($includeInitialMatchup) {
+            [$initialTeamA, $initialTeamB] = $this->drawInitialMatchupTeams();
+            $emojiA = $colorEmojis[$initialTeamA->value];
+            $emojiB = $colorEmojis[$initialTeamB->value];
+            $lines[] = "Confronto inicial: {$emojiA} x {$emojiB}";
+        }
+
         return implode("\n", $lines);
+    }
+
+    /**
+     * @return array{0: TeamColor, 1: TeamColor}
+     */
+    private function drawInitialMatchupTeams(): array
+    {
+        $colors = TeamColor::cases();
+        shuffle($colors);
+
+        return [$colors[0], $colors[1]];
     }
 
     /**

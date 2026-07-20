@@ -3,64 +3,80 @@
 namespace App\Services;
 
 use App\Enums\GameStatus;
+use App\Enums\Position;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class StatisticsService
 {
     /**
-     * Retorna todos os pares de um usuário com count >= minCount,
-     * ordenados por times_together DESC.
+     * Estatísticas de duplas e confrontos para um jogador específico.
      *
-     * @return array<int, array{name: string, count: int}>
-     */
-    private function getPartnersForUser(int $userId, Collection $allPairs, Collection $userNames, int $minCount = 1): array
-    {
-        return $allPairs
-            ->filter(fn ($pair) => ((int) $pair->user_a === $userId || (int) $pair->user_b === $userId)
-                && (int) $pair->times_together >= $minCount)
-            ->map(function ($pair) use ($userId, $userNames) {
-                $partnerId = (int) $pair->user_a === $userId ? (int) $pair->user_b : (int) $pair->user_a;
-
-                return [
-                    'name' => $userNames->get($partnerId, '?'),
-                    'count' => (int) $pair->times_together,
-                ];
-            })
-            ->sortByDesc('count')
-            ->values()
-            ->all();
-    }
-
-    /**
-     * Estatísticas de duplas para um jogador específico (apenas linha).
-     *
-     * @return array{played_with: array, won_with: array}
+     * @return array{partners: array<int, array{
+     *     id: int,
+     *     name: string,
+     *     is_goalkeeper: bool,
+     *     games_together: int,
+     *     games_against: int,
+     *     wins_together: int,
+     *     draws_together: int,
+     *     tie2_together: int,
+     *     losses_together: int,
+     *     wins_against: int,
+     *     draws_against: int,
+     *     tie2_against: int,
+     *     losses_against: int
+     * }>}
      */
     public function getPlayerStatistics(int $userId): array
     {
-        $playedPairs = $this->getPairCounts('played');
-        $wonPairs = $this->getPairCounts('won');
+        $stats = $this->getPartnerStatsForUser($userId);
 
-        $userNames = DB::table('users')->pluck('name', 'id');
+        $users = DB::table('users')
+            ->select('id', 'name', 'position')
+            ->get()
+            ->keyBy('id');
+
+        $partners = $stats
+            ->map(function ($row) use ($users) {
+                $user = $users->get((int) $row->partner_id);
+                if (! $user) {
+                    return null;
+                }
+
+                return [
+                    'id' => (int) $row->partner_id,
+                    'name' => $user->name,
+                    'is_goalkeeper' => $user->position === Position::GOALKEEPER->value,
+                    'games_together' => (int) $row->games_together,
+                    'games_against' => (int) $row->games_against,
+                    'wins_together' => (int) $row->wins_together,
+                    'draws_together' => (int) $row->draws_together,
+                    'tie2_together' => (int) $row->tie2_together,
+                    'losses_together' => (int) $row->losses_together,
+                    'wins_against' => (int) $row->wins_against,
+                    'draws_against' => (int) $row->draws_against,
+                    'tie2_against' => (int) $row->tie2_against,
+                    'losses_against' => (int) $row->losses_against,
+                ];
+            })
+            ->filter()
+            ->filter(fn (array $partner) => $partner['games_together'] >= 2 || $partner['games_against'] >= 1)
+            ->sortByDesc('games_together')
+            ->values()
+            ->all();
 
         return [
-            'played_with' => $this->getPartnersForUser($userId, $playedPairs, $userNames, 2),
-            'won_with' => $this->getPartnersForUser($userId, $wonPairs, $userNames, 1),
+            'partners' => $partners,
         ];
     }
 
     /**
-     * Retorna os pares brutos (sem agrupar por usuário).
+     * @return Collection<int, object>
      */
-    private function getPairCounts(string $type): Collection
+    private function getPartnerStatsForUser(int $userId): Collection
     {
-        $wonJoin = $type === 'won'
-            ? "INNER JOIN game_players gp_a ON gp_a.game_id = a.game_id AND gp_a.user_id = a.user_id AND gp_a.points = 1
-               INNER JOIN game_players gp_b ON gp_b.game_id = b.game_id AND gp_b.user_id = b.user_id AND gp_b.points = 1"
-            : '';
-
-        $pairs = DB::select("
+        $rows = DB::select('
             WITH team_members AS (
                 SELECT t.game_id, t.color, t.captain_user_id AS user_id
                 FROM teams t
@@ -73,23 +89,96 @@ class StatisticsService
                 INNER JOIN games g ON g.id = dp.game_id
                 WHERE g.status = ?
             ),
-            pair_counts AS (
-                SELECT
-                    a.user_id AS user_a,
-                    b.user_id AS user_b,
-                    COUNT(*) AS times_together
-                FROM team_members a
-                INNER JOIN team_members b
-                    ON a.game_id = b.game_id
-                   AND a.color = b.color
-                   AND a.user_id < b.user_id
-                {$wonJoin}
-                GROUP BY a.user_id, b.user_id
+            winner_teams AS (
+                SELECT t.game_id, COUNT(*) AS winning_teams_count
+                FROM teams t
+                INNER JOIN (
+                    SELECT game_id, MAX(score) AS max_score
+                    FROM teams
+                    WHERE score IS NOT NULL
+                    GROUP BY game_id
+                ) mx ON mx.game_id = t.game_id AND t.score = mx.max_score
+                GROUP BY t.game_id
+            ),
+            winning_colors AS (
+                SELECT t.game_id, t.color
+                FROM teams t
+                INNER JOIN (
+                    SELECT game_id, MAX(score) AS max_score
+                    FROM teams
+                    WHERE score IS NOT NULL
+                    GROUP BY game_id
+                ) mx ON mx.game_id = t.game_id AND t.score = mx.max_score
             )
-            SELECT * FROM pair_counts
-            ORDER BY times_together DESC
-        ", [GameStatus::DONE->value, GameStatus::DONE->value]);
+            SELECT
+                partner.user_id AS partner_id,
+                SUM(CASE WHEN me.color = partner.color THEN 1 ELSE 0 END) AS games_together,
+                SUM(CASE WHEN me.color <> partner.color THEN 1 ELSE 0 END) AS games_against,
 
-        return collect($pairs);
+                SUM(CASE
+                    WHEN me.color = partner.color
+                     AND wme.color IS NOT NULL
+                     AND wt.winning_teams_count = 1
+                    THEN 1 ELSE 0
+                END) AS wins_together,
+                SUM(CASE
+                    WHEN me.color = partner.color
+                     AND wme.color IS NOT NULL
+                     AND wt.winning_teams_count >= 2
+                    THEN 1 ELSE 0
+                END) AS draws_together,
+                SUM(CASE
+                    WHEN me.color = partner.color
+                     AND wme.color IS NOT NULL
+                     AND wt.winning_teams_count = 2
+                    THEN 1 ELSE 0
+                END) AS tie2_together,
+                SUM(CASE
+                    WHEN me.color = partner.color
+                     AND wme.color IS NULL
+                    THEN 1 ELSE 0
+                END) AS losses_together,
+
+                SUM(CASE
+                    WHEN me.color <> partner.color
+                     AND wme.color IS NOT NULL
+                     AND wpartner.color IS NULL
+                    THEN 1 ELSE 0
+                END) AS wins_against,
+                SUM(CASE
+                    WHEN me.color <> partner.color
+                     AND wme.color IS NOT NULL
+                     AND wpartner.color IS NOT NULL
+                    THEN 1 ELSE 0
+                END) AS draws_against,
+                SUM(CASE
+                    WHEN me.color <> partner.color
+                     AND wme.color IS NOT NULL
+                     AND wpartner.color IS NOT NULL
+                    THEN 1 ELSE 0
+                END) AS tie2_against,
+                SUM(CASE
+                    WHEN me.color <> partner.color
+                     AND wme.color IS NULL
+                     AND wpartner.color IS NOT NULL
+                    THEN 1 ELSE 0
+                END) AS losses_against
+            FROM team_members me
+            INNER JOIN team_members partner
+                ON me.game_id = partner.game_id
+               AND me.user_id != partner.user_id
+            INNER JOIN winner_teams wt
+                ON wt.game_id = me.game_id
+            LEFT JOIN winning_colors wme
+                ON wme.game_id = me.game_id
+               AND wme.color = me.color
+            LEFT JOIN winning_colors wpartner
+                ON wpartner.game_id = partner.game_id
+               AND wpartner.color = partner.color
+            WHERE me.user_id = ?
+            GROUP BY partner.user_id
+        ', [GameStatus::DONE->value, GameStatus::DONE->value, $userId]);
+
+        return collect($rows);
     }
 }

@@ -71,6 +71,9 @@ const suspensionMessage = computed(() => {
                                 >
                                     Estatísticas
                                 </NavLink>
+                                <NavLink :href="route('rounds')" :active="route().current('rounds')">
+                                    Rodadas
+                                </NavLink>
                                 <NavLink :href="route('timeline')" :active="route().current('timeline')">
                                     Timeline
                                 </NavLink>
@@ -229,6 +232,9 @@ const suspensionMessage = computed(() => {
                             :active="route().current('statistics')"
                         >
                             Estatísticas
+                        </ResponsiveNavLink>
+                        <ResponsiveNavLink :href="route('rounds')" :active="route().current('rounds')">
+                            Rodadas
                         </ResponsiveNavLink>
                         <ResponsiveNavLink :href="route('timeline')" :active="route().current('timeline')">
                             Timeline

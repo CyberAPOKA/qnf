@@ -9,6 +9,7 @@ use App\Http\Controllers\MercadoPagoWebhookController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\RecController;
+use App\Http\Controllers\RoundsController;
 use App\Http\Controllers\StatisticsController;
 use App\Http\Controllers\TimelineController;
 use App\Http\Controllers\WhatsAppController;
@@ -28,6 +29,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
 
     Route::get('/', [GameController::class, 'index'])->name('dashboard');
     Route::get('/statistics', [StatisticsController::class, 'index'])->name('statistics');
+    Route::get('/rounds', [RoundsController::class, 'index'])->name('rounds');
     Route::get('/timeline', [TimelineController::class, 'index'])->name('timeline');
 
     Route::prefix('games/{game}')->group(function () {

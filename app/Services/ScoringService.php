@@ -142,6 +142,7 @@ class ScoringService
             ->join('users', 'game_players.user_id', '=', 'users.id')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
+            ->whereNull('game_players.waitlist_at')
             ->select(
                 'users.id',
                 'users.name',
@@ -182,6 +183,7 @@ class ScoringService
         $query = DB::table('game_players')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
+            ->whereNull('game_players.waitlist_at')
             ->orderByDesc('games.round')
             ->select('game_players.user_id', 'game_players.points');
 
@@ -217,6 +219,7 @@ class ScoringService
         $query = DB::table('game_players')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
+            ->whereNull('game_players.waitlist_at')
             ->orderByDesc('games.round')
             ->select('game_players.user_id', 'game_players.points');
 

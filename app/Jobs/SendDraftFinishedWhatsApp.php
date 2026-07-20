@@ -33,7 +33,7 @@ class SendDraftFinishedWhatsApp implements ShouldQueue
             return;
         }
 
-        $message = $draftService->buildWhatsAppMessage($game);
+        $message = $draftService->buildWhatsAppMessage($game, includeInitialMatchup: true);
 
         $lineupsPath = rescue(fn () => $lineupsImageService->generate(
             $game,
