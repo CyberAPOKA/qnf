@@ -15,10 +15,7 @@ class MergeDuplicatePlayersSeeder extends Seeder
      * Mapa de merges: [id_antigo => id_destino (último criado)]
      */
     protected array $merges = [
-        38 => 42,
-        39 => 49,
-        44 => 48,
-        45 => 48,
+        12 => 51,
     ];
 
     public function run(): void
