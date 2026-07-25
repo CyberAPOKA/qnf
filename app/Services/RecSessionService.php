@@ -13,11 +13,15 @@ class RecSessionService
 {
     private const RECORDER_TTL_SECONDS = 45;
 
-    private const BUFFER_SECONDS = 30;
+    private const SCOPE_CAMERA_TAGS = [
+        'all' => ['A1', 'A2', 'B1', 'B2'],
+        'left' => ['A1', 'B1'],
+        'right' => ['A2', 'B2'],
+    ];
 
     public function bufferSeconds(): int
     {
-        return self::BUFFER_SECONDS;
+        return (int) config('rec.buffer_seconds', 30);
     }
 
     public function registerRecorder(Game $game, User $user, string $recorderId, string $cameraTag): array
@@ -91,13 +95,75 @@ class RecSessionService
         return $active;
     }
 
-    public function createSaveRequest(Game $game, User $user): RecSaveRequest
+    public function createSaveRequest(Game $game, User $user, string $captureScope = 'all'): RecSaveRequest
     {
         return RecSaveRequest::create([
             'game_id' => $game->id,
             'triggered_by' => $user->id,
             'uuid' => (string) Str::uuid(),
+            'capture_scope' => $captureScope,
         ]);
+    }
+
+    public function cameraTagsForScope(string $captureScope): array
+    {
+        return self::SCOPE_CAMERA_TAGS[$captureScope] ?? self::SCOPE_CAMERA_TAGS['all'];
+    }
+
+    public function recordersForScope(array $recorders, string $captureScope): array
+    {
+        $cameraTags = $this->cameraTagsForScope($captureScope);
+
+        return array_values(array_filter(
+            $recorders,
+            fn (array $recorder) => in_array($recorder['camera_tag'] ?? null, $cameraTags, true),
+        ));
+    }
+
+    /**
+     * Short debounce against accidental double-clicks (not a global cooldown).
+     *
+     * @return int Milliseconds left when blocked, or 0 when acquired.
+     */
+    public function acquireSaveDebounce(int $gameId, ?string $idempotencyKey = null): int
+    {
+        $debounceMs = (int) config('rec.save_debounce_milliseconds', 800);
+
+        if ($debounceMs <= 0) {
+            return 0;
+        }
+
+        $key = $idempotencyKey
+            ? "rec:game:{$gameId}:save-debounce:{$idempotencyKey}"
+            : "rec:game:{$gameId}:save-debounce";
+
+        $expiresAt = now()->addMilliseconds($debounceMs);
+
+        if (Cache::add($key, (int) floor($expiresAt->valueOf()), $expiresAt)) {
+            return 0;
+        }
+
+        $storedExpiry = (int) Cache::get($key, (int) floor($expiresAt->valueOf()));
+
+        return max(1, $storedExpiry - (int) floor(microtime(true) * 1000));
+    }
+
+    /** @deprecated Use acquireSaveDebounce() */
+    public function acquireSaveCooldown(int $gameId): int
+    {
+        $remainingMs = $this->acquireSaveDebounce($gameId);
+
+        return $remainingMs > 0 ? max(1, (int) ceil($remainingMs / 1000)) : 0;
+    }
+
+    public function saveDebounceMilliseconds(): int
+    {
+        return (int) config('rec.save_debounce_milliseconds', 800);
+    }
+
+    public function saveCooldownSeconds(): int
+    {
+        return max(1, (int) ceil($this->saveDebounceMilliseconds() / 1000));
     }
 
     public function storeClip(
@@ -105,7 +171,7 @@ class RecSessionService
         User $user,
         string $recorderId,
         string $filePath,
-        int $durationSeconds = self::BUFFER_SECONDS,
+        int $durationSeconds = 30,
         ?string $cameraTag = null,
     ): RecClip {
         return RecClip::create([
@@ -136,6 +202,8 @@ class RecSessionService
         return [
             'id' => $request->id,
             'uuid' => $request->uuid,
+            'capture_scope' => $request->capture_scope ?? 'all',
+            'camera_tags' => $this->cameraTagsForScope($request->capture_scope ?? 'all'),
             'triggered_by' => $request->triggeredBy?->name,
             'triggered_at' => $request->created_at?->toIso8601String(),
             'clips' => $request->clips->map(fn (RecClip $clip) => $this->serializeClip($clip))->values()->all(),

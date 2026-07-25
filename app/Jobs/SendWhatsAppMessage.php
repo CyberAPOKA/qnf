@@ -8,6 +8,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
+use RuntimeException;
 
 class SendWhatsAppMessage implements ShouldQueue
 {
@@ -15,7 +16,7 @@ class SendWhatsAppMessage implements ShouldQueue
 
     public int $tries = 3;
     public int $backoff = 5;
-    public int $timeout = 60;
+    public int $timeout = 90;
 
     public function __construct(
         public string $target,           // 'group' | 'phone'
@@ -27,18 +28,18 @@ class SendWhatsAppMessage implements ShouldQueue
 
     public function handle(WhatsAppService $whatsAppService): void
     {
-        if ($this->target === 'group') {
-            if ($this->kind === 'image' && $this->imagePath) {
-                $whatsAppService->sendImageToGroup($this->imagePath, $this->message);
-                return;
-            }
+        $ok = false;
 
-            $whatsAppService->sendToGroup($this->message);
-            return;
+        if ($this->target === 'group') {
+            $ok = $this->kind === 'image' && $this->imagePath
+                ? $whatsAppService->sendImageToGroup($this->imagePath, $this->message)
+                : $whatsAppService->sendToGroup($this->message);
+        } elseif ($this->target === 'phone' && $this->phone) {
+            $ok = $whatsAppService->sendToPhone($this->phone, $this->message);
         }
 
-        if ($this->target === 'phone' && $this->phone) {
-            $whatsAppService->sendToPhone($this->phone, $this->message);
+        if (! $ok) {
+            throw new RuntimeException('WhatsApp send failed; will retry.');
         }
     }
 }

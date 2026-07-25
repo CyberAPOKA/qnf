@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -35,8 +36,6 @@ class RecClipNormalizeService
         $tmpOut = $dir.DIRECTORY_SEPARATOR.'tmp_out_'.uniqid('', true).'.webm';
 
         try {
-            // Re-encode the last N seconds so timestamps/metadata are continuous.
-            // Stream-copy cuts on MediaRecorder WebM often leave players freezing mid-clip.
             $cut = $this->runFfmpeg([
                 '-sseof', '-'.$keepSeconds,
                 '-i', $absolute,
@@ -53,12 +52,20 @@ class RecClipNormalizeService
                 return null;
             }
 
-            if (! @rename($tmpOut, $absolute)) {
-                @unlink($absolute);
-                @rename($tmpOut, $absolute);
+            $duration = $this->probeDurationSeconds($tmpOut);
+
+            if ($duration === null) {
+                Log::warning('REC normalize probe failed before replace', ['path' => $relativePath]);
+
+                return null;
             }
 
-            $duration = $this->probeDurationSeconds($absolute) ?? $keepSeconds;
+            if (! @rename($tmpOut, $absolute)) {
+                if (! @copy($tmpOut, $absolute)) {
+                    return null;
+                }
+                @unlink($tmpOut);
+            }
 
             Log::info('REC normalize ok', [
                 'path' => $relativePath,
@@ -78,6 +85,37 @@ class RecClipNormalizeService
     }
 
     /**
+     * @param  list<string>  $segmentAbsolutePaths
+     * @return array{duration_seconds: int, bytes: int}|null
+     */
+    public function buildPreview(array $segmentAbsolutePaths, string $outputAbsolute): ?array
+    {
+        return $this->buildFromSegments(
+            $segmentAbsolutePaths,
+            $outputAbsolute,
+            [
+                '-vf', 'scale=-2:'.(int) config('rec.preview_height', 480),
+                '-b:v', (string) config('rec.preview_video_bitrate', '700k'),
+            ],
+        );
+    }
+
+    /**
+     * @param  list<string>  $segmentAbsolutePaths
+     * @return array{duration_seconds: int, bytes: int}|null
+     */
+    public function buildFinal(array $segmentAbsolutePaths, string $outputAbsolute): ?array
+    {
+        return $this->buildFromSegments(
+            $segmentAbsolutePaths,
+            $outputAbsolute,
+            [
+                '-b:v', (string) config('rec.final_video_bitrate', '1600k'),
+            ],
+        );
+    }
+
+    /**
      * Concatenate prefix + current, then keep the last N seconds.
      * Used when SAVE happens early in a fresh 30s segment.
      *
@@ -92,6 +130,7 @@ class RecClipNormalizeService
 
         $dir = dirname($outputAbsolute);
         $merged = $dir.DIRECTORY_SEPARATOR.'merged_raw_'.uniqid('', true).'.webm';
+        $tmpOut = $dir.DIRECTORY_SEPARATOR.'merged_trim_'.uniqid('', true).'.webm';
 
         try {
             $concat = $this->concatSegments($prefixAbsolute, $currentAbsolute, $merged);
@@ -109,14 +148,28 @@ class RecClipNormalizeService
                 '-sseof', '-'.$keepSeconds,
                 '-i', $merged,
                 ...$this->webmEncodeArgs(),
-                $outputAbsolute,
+                $tmpOut,
             ], 90);
 
-            if (! $cut->successful() || ! is_file($outputAbsolute) || filesize($outputAbsolute) < 1) {
+            if (! $cut->successful() || ! is_file($tmpOut) || filesize($tmpOut) < 1) {
                 Log::warning('REC merge trim failed', ['error' => $cut->errorOutput()]);
 
-                // Prefer a continuous re-encoded merge over a broken trim.
-                return @rename($merged, $outputAbsolute);
+                if ($this->probeDurationSeconds($merged) === null) {
+                    return false;
+                }
+
+                return @rename($merged, $outputAbsolute) || (@copy($merged, $outputAbsolute) && @unlink($merged));
+            }
+
+            if ($this->probeDurationSeconds($tmpOut) === null) {
+                return false;
+            }
+
+            if (! @rename($tmpOut, $outputAbsolute)) {
+                if (! @copy($tmpOut, $outputAbsolute)) {
+                    return false;
+                }
+                @unlink($tmpOut);
             }
 
             Log::info('REC merge ok', [
@@ -129,15 +182,131 @@ class RecClipNormalizeService
             if (is_file($merged)) {
                 @unlink($merged);
             }
+            if (is_file($tmpOut)) {
+                @unlink($tmpOut);
+            }
         }
     }
 
     /**
-     * Re-encode two WebM segments into one continuous file.
+     * @param  list<string>  $segmentAbsolutePaths
+     * @param  list<string>  $extraVideoArgs
+     * @return array{duration_seconds: int, bytes: int}|null
      */
-    private function concatSegments(string $prefixAbsolute, string $currentAbsolute, string $merged): bool
+    private function buildFromSegments(array $segmentAbsolutePaths, string $outputAbsolute, array $extraVideoArgs = []): ?array
     {
-        // Prefer A/V concat with normalized timestamps.
+        if (! $this->ffmpegAvailable()) {
+            return null;
+        }
+
+        $paths = array_values(array_filter($segmentAbsolutePaths, 'is_file'));
+
+        if ($paths === []) {
+            return null;
+        }
+
+        $dir = dirname($outputAbsolute);
+        @mkdir($dir, 0775, true);
+        $tmpOut = $dir.DIRECTORY_SEPARATOR.'build_'.uniqid('', true).'.webm';
+
+        try {
+            if (count($paths) === 1) {
+                $result = $this->runFfmpeg([
+                    '-i', $paths[0],
+                    ...$this->webmVideoEncodeArgs($extraVideoArgs),
+                    '-c:a', 'libopus',
+                    '-b:a', (string) config('rec.audio_bitrate', '96k'),
+                    $tmpOut,
+                ], 180);
+            } else {
+                $ok = $this->concatMany($paths, $tmpOut, $extraVideoArgs);
+                $result = null;
+
+                if (! $ok) {
+                    return null;
+                }
+            }
+
+            if ($result !== null && (! $result->successful() || ! is_file($tmpOut) || filesize($tmpOut) < 1)) {
+                Log::warning('REC build ffmpeg failed', ['error' => $result->errorOutput()]);
+
+                return null;
+            }
+
+            if (! is_file($tmpOut) || filesize($tmpOut) < 1) {
+                return null;
+            }
+
+            $duration = $this->probeDurationSeconds($tmpOut);
+
+            if ($duration === null) {
+                return null;
+            }
+
+            if (! @rename($tmpOut, $outputAbsolute)) {
+                if (! @copy($tmpOut, $outputAbsolute)) {
+                    return null;
+                }
+                @unlink($tmpOut);
+            }
+
+            return [
+                'duration_seconds' => (int) max(1, round($duration)),
+                'bytes' => (int) (@filesize($outputAbsolute) ?: 0),
+            ];
+        } finally {
+            if (is_file($tmpOut)) {
+                @unlink($tmpOut);
+            }
+        }
+    }
+
+    /**
+     * @param  list<string>  $paths
+     * @param  list<string>  $extraVideoArgs
+     */
+    private function concatMany(array $paths, string $outputAbsolute, array $extraVideoArgs = []): bool
+    {
+        if (count($paths) === 2) {
+            return $this->concatSegments($paths[0], $paths[1], $outputAbsolute, $extraVideoArgs);
+        }
+
+        $current = $paths[0];
+        $dir = dirname($outputAbsolute);
+
+        for ($i = 1; $i < count($paths); $i++) {
+            $tmp = $dir.DIRECTORY_SEPARATOR.'concat_step_'.uniqid('', true).'.webm';
+            $ok = $this->concatSegments($current, $paths[$i], $tmp, $extraVideoArgs);
+
+            if ($i > 1 && is_file($current) && str_contains($current, 'concat_step_')) {
+                @unlink($current);
+            }
+
+            if (! $ok) {
+                return false;
+            }
+
+            $current = $tmp;
+        }
+
+        if (! @rename($current, $outputAbsolute)) {
+            return @copy($current, $outputAbsolute) && @unlink($current);
+        }
+
+        return true;
+    }
+
+    /**
+     * Re-encode two WebM segments into one continuous file.
+     *
+     * @param  list<string>  $extraVideoArgs
+     */
+    private function concatSegments(
+        string $prefixAbsolute,
+        string $currentAbsolute,
+        string $merged,
+        array $extraVideoArgs = [],
+    ): bool {
         $withAudio = $this->runFfmpeg([
             '-i', $prefixAbsolute,
             '-i', $currentAbsolute,
@@ -149,7 +318,9 @@ class RecClipNormalizeService
             .'[v0][a0][v1][a1]concat=n=2:v=1:a=1[v][a]',
             '-map', '[v]',
             '-map', '[a]',
-            ...$this->webmEncodeArgs(),
+            ...$this->webmVideoEncodeArgs($extraVideoArgs),
+            '-c:a', 'libopus',
+            '-b:a', (string) config('rec.audio_bitrate', '96k'),
             $merged,
         ], 120);
 
@@ -165,7 +336,6 @@ class RecClipNormalizeService
             @unlink($merged);
         }
 
-        // Some phone captures briefly lack an audio track on one segment.
         $videoOnly = $this->runFfmpeg([
             '-i', $prefixAbsolute,
             '-i', $currentAbsolute,
@@ -175,7 +345,7 @@ class RecClipNormalizeService
             .'[v0][v1]concat=n=2:v=1:a=0[v]',
             '-map', '[v]',
             '-an',
-            ...$this->webmVideoEncodeArgs(),
+            ...$this->webmVideoEncodeArgs($extraVideoArgs),
             $merged,
         ], 120);
 
@@ -198,21 +368,23 @@ class RecClipNormalizeService
         return [
             ...$this->webmVideoEncodeArgs(),
             '-c:a', 'libopus',
-            '-b:a', '96k',
+            '-b:a', (string) config('rec.audio_bitrate', '96k'),
         ];
     }
 
     /**
+     * @param  list<string>  $extra
      * @return list<string>
      */
-    private function webmVideoEncodeArgs(): array
+    private function webmVideoEncodeArgs(array $extra = []): array
     {
         return [
             '-c:v', 'libvpx',
-            '-b:v', '1200k',
+            '-b:v', (string) config('rec.final_video_bitrate', '1200k'),
             '-deadline', 'realtime',
             '-cpu-used', '8',
             '-auto-alt-ref', '0',
+            ...$extra,
         ];
     }
 
@@ -230,11 +402,19 @@ class RecClipNormalizeService
         ]);
     }
 
-    public function ffmpegAvailable(): bool
+    public function ffmpegAvailable(bool $forceProbe = false): bool
     {
-        $result = Process::timeout(5)->run(['ffmpeg', '-version']);
+        if ($forceProbe) {
+            $result = Process::timeout(5)->run(['ffmpeg', '-version']);
 
-        return $result->successful();
+            return $result->successful();
+        }
+
+        return Cache::remember('rec:ffmpeg_available', 60, function () {
+            $result = Process::timeout(5)->run(['ffmpeg', '-version']);
+
+            return $result->successful();
+        });
     }
 
     public function probeDurationSeconds(string $absolutePath): ?float

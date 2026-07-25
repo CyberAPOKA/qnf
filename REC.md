@@ -1,5 +1,14 @@
 # REC — Operações e manutenção
 
+## REC V2
+
+A documentação operacional da V2 está em [`docs/rec/`](docs/rec/), começando por [`architecture.md`](docs/rec/architecture.md) e [`deployment.md`](docs/rec/deployment.md).
+
+- `REC_V2_ENABLED=false` por padrão.
+- Requer `php artisan migrate`.
+- Worker: `php artisan queue:work --queue=rec-video-processing,default`.
+- SAVEs consecutivos são permitidos: debounce de 800 ms, sem cooldown global de 10 s.
+
 Módulo de gravação contínua de vídeos durante jogos. Vários celulares gravam; qualquer um pode acionar **SAVE REC** para capturar os últimos ~30s de todas as câmeras ativas.
 
 ## Onde os vídeos são salvos

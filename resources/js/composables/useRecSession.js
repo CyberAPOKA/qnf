@@ -36,12 +36,15 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     const isSaving = ref(false);
     const saveError = ref(null);
     const isRegistering = ref(false);
+    const saveCooldownRemaining = ref(0);
 
     const gameId = props.game.id;
     const channelName = `game.${gameId}`;
     const recorderId = getOrCreateRecorderId();
 
     let heartbeatTimer = null;
+    let saveCooldownTimer = null;
+    let cooldownSaveUuid = null;
     let echoChannel = null;
     const uploadQueue = [];
     let isProcessingUpload = false;
@@ -59,6 +62,38 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
             clearTimeout(timer);
             waitTimers.delete(uuid);
         }
+    }
+
+    function startSaveCooldown(seconds = 10, saveRequestUuid = null) {
+        if (saveRequestUuid && cooldownSaveUuid === saveRequestUuid) {
+            return;
+        }
+
+        if (saveRequestUuid) {
+            cooldownSaveUuid = saveRequestUuid;
+        }
+
+        const deadline = Date.now() + (Math.max(1, Number(seconds) || 10) * 1000);
+
+        if (saveCooldownTimer) {
+            clearInterval(saveCooldownTimer);
+        }
+
+        const update = () => {
+            saveCooldownRemaining.value = Math.max(
+                0,
+                Math.ceil((deadline - Date.now()) / 1000),
+            );
+
+            if (saveCooldownRemaining.value === 0 && saveCooldownTimer) {
+                clearInterval(saveCooldownTimer);
+                saveCooldownTimer = null;
+                cooldownSaveUuid = null;
+            }
+        };
+
+        update();
+        saveCooldownTimer = setInterval(update, 250);
     }
 
     function armWaitTimeout(uuid) {
@@ -218,14 +253,31 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     function startHeartbeat() {
         stopHeartbeat();
 
+        let consecutiveFailures = 0;
+
         heartbeatTimer = setInterval(async () => {
             try {
                 await axios.post(routeName('games.rec.heartbeat'), {
                     recorder_id: recorderId,
                 });
+                consecutiveFailures = 0;
             } catch (err) {
-                recLog('warn', 'heartbeat failed', { status: err?.response?.status });
-                stopHeartbeat();
+                consecutiveFailures += 1;
+                const status = err?.response?.status;
+                recLog('warn', 'heartbeat failed', { status, consecutiveFailures });
+
+                // Permanent: unauthorized / forbidden / not found lease.
+                if (status === 401 || status === 403 || status === 409) {
+                    stopHeartbeat();
+                    saveError.value = 'Sessão da câmera expirada. Inicie o REC novamente.';
+                    return;
+                }
+
+                // Transient network/5xx: keep trying.
+                if (consecutiveFailures >= 8) {
+                    stopHeartbeat();
+                    saveError.value = 'Heartbeat falhou várias vezes. Verifique a conexão.';
+                }
             }
         }, HEARTBEAT_MS);
     }
@@ -237,8 +289,8 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         }
     }
 
-    async function triggerSave() {
-        if (isSaving.value) {
+    async function triggerSave(captureScope = 'all') {
+        if (isSaving.value || saveCooldownRemaining.value > 0) {
             return null;
         }
 
@@ -246,16 +298,26 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         saveError.value = null;
 
         try {
-            const { data } = await axios.post(routeName('games.rec.save'));
+            const { data } = await axios.post(routeName('games.rec.save'), {
+                capture_scope: captureScope,
+            });
 
             upsertSave(data.save_request, data.expected_recorders);
+            startSaveCooldown(
+                data.cooldown_seconds || 10,
+                data.save_request?.uuid,
+            );
             recLog('info', 'save requested', {
                 uuid: data.save_request?.uuid,
                 expected: data.expected_recorders,
+                captureScope,
             });
 
             return data.save_request;
         } catch (err) {
+            if (err?.response?.status === 429) {
+                startSaveCooldown(err.response.data?.retry_after || 10);
+            }
             saveError.value = err?.response?.data?.message || 'Não foi possível salvar.';
             recLog('error', 'save failed', {
                 status: err?.response?.status,
@@ -379,14 +441,21 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     function handleSaveClipRequested(payload) {
         upsertSave({
             uuid: payload.saveRequestUuid,
+            capture_scope: payload.captureScope || 'all',
+            camera_tags: payload.cameraTags || [],
             triggered_by: payload.triggeredByName,
             triggered_at: new Date().toISOString(),
             clips: [],
         }, payload.expectedRecorders);
+        startSaveCooldown(
+            payload.cooldownSeconds || 10,
+            payload.saveRequestUuid,
+        );
 
         recLog('info', 'SaveClipRequested received', {
             uuid: payload.saveRequestUuid,
             expected: payload.expectedRecorders,
+            captureScope: payload.captureScope,
         });
 
         onSaveRequested?.(payload);
@@ -438,6 +507,9 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         stopHeartbeat();
         waitTimers.forEach((timer) => clearTimeout(timer));
         waitTimers.clear();
+        if (saveCooldownTimer) {
+            clearInterval(saveCooldownTimer);
+        }
     });
 
     return {
@@ -446,6 +518,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         pendingSaves,
         isSaving,
         saveError,
+        saveCooldownRemaining,
         isRegistering,
         recorderId,
         registerRecorder,

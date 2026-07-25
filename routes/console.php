@@ -19,3 +19,15 @@ Schedule::command('futsal:check-payment-deadlines')
 Schedule::command('futsal:poll-payments')
     ->everyMinute()
     ->timezone('America/Sao_Paulo');
+
+Schedule::command('rec:expire-sessions --sync')
+    ->everyMinute()
+    ->timezone('America/Sao_Paulo');
+
+Schedule::command('rec:cleanup --sync')
+    ->everyMinute()
+    ->timezone('America/Sao_Paulo');
+
+Schedule::command('rec:reconcile --fix')
+    ->everyFiveMinutes()
+    ->timezone('America/Sao_Paulo');

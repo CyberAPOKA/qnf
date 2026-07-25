@@ -2,9 +2,11 @@ import pkg from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import express from 'express';
 
-const { Client, LocalAuth } = pkg;
+const { Client, LocalAuth, MessageMedia } = pkg;
 
 const PORT = process.env.WHATSAPP_PORT || 3001;
+const MAX_SEND_ATTEMPTS = 3;
+const RETRY_DELAY_MS = 1500;
 
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
@@ -15,11 +17,19 @@ const client = new Client({
     puppeteer: {
         headless: true,
         executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            // Chrome may detach idle frames; keep the WhatsApp Web page alive.
+            '--disable-features=IsolateOrigins,site-per-process,MemorySaverMode',
+            '--memory-pressure-off',
+            '--disable-dev-shm-usage',
+        ],
     },
 });
 
 let isReady = false;
+let sendQueue = Promise.resolve();
 
 client.on('qr', (qr) => {
     console.log('Scan the QR code below to authenticate:');
@@ -46,9 +56,57 @@ client.on('disconnected', (reason) => {
 
 client.initialize();
 
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isTransientPuppeteerError(err) {
+    const message = err?.message || String(err);
+    return /detached Frame|Execution context was destroyed|Session closed|Target closed|Protocol error/i.test(message);
+}
+
+/**
+ * Serialize all sends through one queue — concurrent Puppeteer evaluate()
+ * calls are a common trigger for detached Frame errors.
+ */
+function enqueueSend(task) {
+    const run = sendQueue.then(task, task);
+    sendQueue = run.catch(() => {});
+    return run;
+}
+
+async function sendWithRetry(fn, label) {
+    let lastError;
+
+    for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
+        if (!isReady) {
+            throw new Error('WhatsApp client not ready');
+        }
+
+        try {
+            return await fn();
+        } catch (err) {
+            lastError = err;
+            const transient = isTransientPuppeteerError(err);
+            console.error(
+                `${label} failed (attempt ${attempt}/${MAX_SEND_ATTEMPTS}):`,
+                err.message,
+            );
+
+            if (!transient || attempt === MAX_SEND_ATTEMPTS) {
+                break;
+            }
+
+            await sleep(RETRY_DELAY_MS * attempt);
+        }
+    }
+
+    throw lastError;
+}
+
 // Express API
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 app.get('/status', (_req, res) => {
     res.json({ ready: isReady });
@@ -65,7 +123,9 @@ app.post('/send', async (req, res) => {
     }
 
     try {
-        await client.sendMessage(to, message);
+        await enqueueSend(() =>
+            sendWithRetry(() => client.sendMessage(to, message), 'Send'),
+        );
         console.log(`Message sent to ${to}`);
         res.json({ success: true });
     } catch (err) {
@@ -85,9 +145,12 @@ app.post('/send-image', async (req, res) => {
     }
 
     try {
-        const { MessageMedia } = pkg;
-        const media = MessageMedia.fromFilePath(imagePath);
-        await client.sendMessage(to, media, { caption: caption || '' });
+        await enqueueSend(() =>
+            sendWithRetry(() => {
+                const media = MessageMedia.fromFilePath(imagePath);
+                return client.sendMessage(to, media, { caption: caption || '' });
+            }, 'Send image'),
+        );
         console.log(`Image sent to ${to}`);
         res.json({ success: true });
     } catch (err) {

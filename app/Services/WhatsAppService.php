@@ -25,11 +25,13 @@ class WhatsAppService
         if (! $this->active) {
             Log::info('[WhatsApp] (inactive) Group message:', ['message' => $message]);
 
-            return false;
+            // No-op success so queued jobs do not retry when WhatsApp is disabled.
+            return true;
         }
 
         if (! $this->groupId) {
             Log::warning('WhatsApp group ID not configured.');
+
             return false;
         }
 
@@ -41,11 +43,12 @@ class WhatsAppService
         if (! $this->active) {
             Log::info('[WhatsApp] (inactive) Group image:', ['image' => $imagePath, 'caption' => $caption]);
 
-            return false;
+            return true;
         }
 
         if (! $this->groupId) {
             Log::warning('WhatsApp group ID not configured.');
+
             return false;
         }
 
@@ -55,7 +58,7 @@ class WhatsAppService
     public function sendToPhone(string $phone, string $message): bool
     {
         if (! $this->active || ! $this->playerActive) {
-            return false;
+            return true;
         }
 
         $chatId = preg_replace('/\D/', '', $phone) . '@c.us';
@@ -66,7 +69,8 @@ class WhatsAppService
     private function sendImage(string $to, string $imagePath, string $caption): bool
     {
         try {
-            $response = Http::timeout(30)->post("{$this->serviceUrl}/send-image", [
+            // Image uploads via Puppeteer can take longer, especially after retries.
+            $response = Http::timeout(90)->post("{$this->serviceUrl}/send-image", [
                 'to' => $to,
                 'imagePath' => $imagePath,
                 'caption' => $caption,
@@ -83,9 +87,11 @@ class WhatsAppService
                 'imagePath' => $imagePath,
                 'imageExists' => file_exists($imagePath),
             ]);
+
             return false;
         } catch (\Exception $e) {
             Log::error('WhatsApp image service error', ['to' => $to, 'error' => $e->getMessage()]);
+
             return false;
         }
     }
@@ -93,7 +99,7 @@ class WhatsAppService
     private function send(string $to, string $message): bool
     {
         try {
-            $response = Http::timeout(10)->post("{$this->serviceUrl}/send", [
+            $response = Http::timeout(30)->post("{$this->serviceUrl}/send", [
                 'to' => $to,
                 'message' => $message,
             ]);
@@ -103,9 +109,11 @@ class WhatsAppService
             }
 
             Log::error('WhatsApp send failed', ['to' => $to, 'error' => $response->json('error')]);
+
             return false;
         } catch (\Exception $e) {
             Log::error('WhatsApp service error', ['to' => $to, 'error' => $e->getMessage()]);
+
             return false;
         }
     }

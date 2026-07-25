@@ -1,7 +1,8 @@
 import { ref, onBeforeUnmount, nextTick } from 'vue';
 
 const BUFFER_SECONDS = 30;
-const MIN_CLIP_SECONDS = 25;
+/** Soft preference only — SAVE may return whatever is available. */
+const MIN_CLIP_SECONDS = 1;
 const TIMESLICE_MS = 1000;
 const FLUSH_MS = 150;
 /** Restart MediaRecorder on this interval so each segment is a clean WebM (timestamps from 0). */
@@ -180,7 +181,7 @@ export function useRecBuffer() {
 
             const { blob, durationMs } = await finalizeCurrentSegment();
 
-            if (blob && blob.size > 0 && durationMs >= MIN_CLIP_SECONDS * 1000) {
+            if (blob && blob.size > 0 && durationMs >= 1_000) {
                 previousSegment = {
                     blob,
                     durationMs,
@@ -281,7 +282,7 @@ export function useRecBuffer() {
                 if (currentOk && durationMs >= minMs) {
                     return {
                         blob,
-                        durationSeconds: Math.round(durationMs / 1000),
+                        durationSeconds: Math.max(1, Math.round(durationMs / 1000)),
                         prefixBlob: null,
                     };
                 }
@@ -297,7 +298,6 @@ export function useRecBuffer() {
                         };
                     }
 
-                    // Current empty — still return previous so SAVE does not fail after 1+ min.
                     return {
                         blob: previousSegment.blob,
                         durationSeconds: Math.round(previousSegment.durationMs / 1000) || BUFFER_SECONDS,
@@ -305,9 +305,13 @@ export function useRecBuffer() {
                     };
                 }
 
-                // First seconds of the whole REC session — not enough footage yet.
+                // First seconds of the whole REC session — return whatever exists.
                 if (currentOk) {
-                    return null;
+                    return {
+                        blob,
+                        durationSeconds: Math.max(1, Math.round(durationMs / 1000)),
+                        prefixBlob: null,
+                    };
                 }
 
                 return null;
@@ -326,13 +330,11 @@ export function useRecBuffer() {
     }
 
     function hasBuffer() {
-        const minMs = MIN_CLIP_SECONDS * 1000;
-
-        if (currentDurationMs() >= minMs) {
+        if (currentDurationMs() >= 1_000) {
             return true;
         }
 
-        return !!(previousSegment?.blob && previousSegment.blob.size > 0 && previousSegment.durationMs >= minMs);
+        return !!(previousSegment?.blob && previousSegment.blob.size > 0);
     }
 
     function stop() {

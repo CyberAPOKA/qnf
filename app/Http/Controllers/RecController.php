@@ -38,6 +38,19 @@ class RecController extends Controller
             'buffer_seconds' => $this->recSession->bufferSeconds(),
             'current_user_id' => $request->user()->id,
             'current_user_name' => $request->user()->name,
+            'rec_v2_enabled' => (bool) config('rec.v2_enabled', false),
+            'rec_config' => [
+                'segment_seconds' => (int) config('rec.segment_seconds', 5),
+                'buffer_seconds' => (int) config('rec.buffer_seconds', 30),
+                'local_retention_seconds' => (int) config('rec.local_retention_seconds', 180),
+                'post_roll_seconds' => (int) config('rec.post_roll_seconds', 2),
+                'heartbeat_seconds' => (int) config('rec.heartbeat_seconds', 10),
+                'recorder_lease_seconds' => (int) config('rec.recorder_lease_seconds', 35),
+                'save_debounce_milliseconds' => (int) config('rec.save_debounce_milliseconds', 800),
+                'pending_save_poll_seconds' => (int) config('rec.pending_save_poll_seconds', 2),
+                'upload_max_concurrency' => (int) config('rec.upload_max_concurrency', 1),
+                'upload_request_timeout_seconds' => (int) config('rec.upload_request_timeout_seconds', 120),
+            ],
         ]);
     }
 
@@ -114,36 +127,80 @@ class RecController extends Controller
 
     public function save(Request $request, Game $game): JsonResponse
     {
-        $recorders = $this->recSession->listRecorders($game->id);
+        $validated = $request->validate([
+            'capture_scope' => ['nullable', 'string', 'in:all,left,right'],
+        ]);
+
+        $captureScope = $validated['capture_scope'] ?? 'all';
+        $cameraTags = $this->recSession->cameraTagsForScope($captureScope);
+        $recorders = $this->recSession->recordersForScope(
+            $this->recSession->listRecorders($game->id),
+            $captureScope,
+        );
 
         if (count($recorders) === 0) {
             Log::warning('REC save rejected: no recorders', [
                 'game_id' => $game->id,
                 'user_id' => $request->user()->id,
+                'capture_scope' => $captureScope,
             ]);
 
-            return response()->json(['message' => 'Nenhuma câmera gravando no momento.'], 422);
+            return response()->json([
+                'message' => $captureScope === 'all'
+                    ? 'Nenhuma câmera gravando no momento.'
+                    : 'Nenhuma câmera desse lado está gravando no momento.',
+            ], 422);
         }
 
-        $saveRequest = $this->recSession->createSaveRequest($game, $request->user());
+        $idempotencyKey = $request->input('idempotency_key');
+        $retryAfterMs = 0;
+
+        if (is_string($idempotencyKey) && $idempotencyKey !== '') {
+            $retryAfterMs = $this->recSession->acquireSaveDebounce($game->id, $idempotencyKey);
+        }
+
+        if ($retryAfterMs > 0) {
+            Log::info('REC save rejected: debounce', [
+                'game_id' => $game->id,
+                'user_id' => $request->user()->id,
+                'capture_scope' => $captureScope,
+                'retry_after_ms' => $retryAfterMs,
+            ]);
+
+            return response()->json([
+                'message' => 'SAVE já enviado. Aguarde um instante.',
+                'retry_after_ms' => $retryAfterMs,
+            ], 429);
+        }
+
+        $saveRequest = $this->recSession->createSaveRequest(
+            $game,
+            $request->user(),
+            $captureScope,
+        );
 
         Log::info('REC save requested', [
             'game_id' => $game->id,
             'user_id' => $request->user()->id,
             'uuid' => $saveRequest->uuid,
+            'capture_scope' => $captureScope,
+            'camera_tags' => $cameraTags,
             'expected_recorders' => count($recorders),
         ]);
 
         // Broadcast to ALL devices (including trigger). Recording clients
         // dedupe uploads locally; trigger that is also recording uploads once.
         $broadcastOk = rescue(
-            function () use ($game, $saveRequest, $request, $recorders) {
+            function () use ($game, $saveRequest, $request, $recorders, $captureScope, $cameraTags) {
                 broadcast(new SaveClipRequested(
                     $game->id,
                     $saveRequest->uuid,
                     $saveRequest->id,
                     $request->user()->name,
                     count($recorders),
+                    $captureScope,
+                    $cameraTags,
+                    $this->recSession->saveDebounceMilliseconds(),
                 ));
 
                 return true;
@@ -164,6 +221,8 @@ class RecController extends Controller
                 $saveRequest->load('triggeredBy'),
             ),
             'expected_recorders' => count($recorders),
+            'debounce_milliseconds' => $this->recSession->saveDebounceMilliseconds(),
+            'cooldown_seconds' => 0,
         ]);
     }
 
@@ -172,7 +231,7 @@ class RecController extends Controller
         $validated = $request->validate([
             'save_request_uuid' => ['required', 'string', 'uuid'],
             'recorder_id' => ['required', 'string', 'max:64'],
-            'camera_tag' => ['nullable', 'string', 'in:A1,A2,B1,B2'],
+            'camera_tag' => ['required', 'string', 'in:A1,A2,B1,B2'],
             'video' => ['required', 'file', 'max:51200'],
             'video_prefix' => ['nullable', 'file', 'max:51200'],
             'duration_seconds' => ['nullable', 'integer', 'min:1', 'max:60'],
@@ -193,6 +252,23 @@ class RecController extends Controller
             ->where('game_id', $game->id)
             ->where('uuid', $validated['save_request_uuid'])
             ->firstOrFail();
+
+        if (! in_array(
+            $validated['camera_tag'],
+            $this->recSession->cameraTagsForScope($saveRequest->capture_scope ?? 'all'),
+            true,
+        )) {
+            Log::warning('REC upload rejected: camera outside capture scope', [
+                'game_id' => $game->id,
+                'uuid' => $saveRequest->uuid,
+                'camera_tag' => $validated['camera_tag'],
+                'capture_scope' => $saveRequest->capture_scope,
+            ]);
+
+            return response()->json([
+                'message' => 'Esta câmera não pertence ao lado selecionado para o SAVE.',
+            ], 422);
+        }
 
         $existing = $saveRequest->clips()
             ->where('recorder_id', $validated['recorder_id'])
