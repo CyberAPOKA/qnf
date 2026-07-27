@@ -213,25 +213,43 @@ export function useRecCapture(options = {}) {
     }
 
     async function getMediaStream() {
-        const video = {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-            aspectRatio: { ideal: 16 / 9 },
-            frameRate: { ideal: 24, max: 30 },
-        };
+        const attempts = [
+            {
+                audio: true,
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    aspectRatio: { ideal: 16 / 9 },
+                    frameRate: { ideal: 24, max: 30 },
+                },
+            },
+            {
+                audio: true,
+                video: { facingMode: { ideal: 'environment' } },
+            },
+            {
+                audio: false,
+                video: { facingMode: { ideal: 'environment' } },
+            },
+            {
+                audio: false,
+                video: true,
+            },
+        ];
 
-        try {
-            hasAudio.value = true;
-            return await navigator.mediaDevices.getUserMedia({ audio: true, video });
-        } catch (audioError) {
+        let lastError = null;
+
+        for (const constraints of attempts) {
             try {
-                hasAudio.value = false;
-                return await navigator.mediaDevices.getUserMedia({ audio: false, video });
-            } catch {
-                throw audioError;
+                hasAudio.value = constraints.audio === true;
+                return await navigator.mediaDevices.getUserMedia(constraints);
+            } catch (attemptError) {
+                lastError = attemptError;
             }
         }
+
+        throw lastError || new Error('getUserMedia failed');
     }
 
     async function start() {
@@ -257,9 +275,18 @@ export function useRecCapture(options = {}) {
             await acquireWakeLock();
             return true;
         } catch (captureError) {
-            error.value = captureError?.name === 'NotAllowedError'
-                ? 'Permissão da câmera negada.'
-                : 'Não foi possível acessar a câmera.';
+            const name = captureError?.name || '';
+            if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+                error.value = 'Permissão da câmera negada. Libere câmera/microfone nas configurações do navegador.';
+            } else if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+                error.value = 'Nenhuma câmera foi encontrada neste aparelho.';
+            } else if (name === 'NotReadableError' || name === 'TrackStartError') {
+                error.value = 'A câmera está em uso por outro aplicativo.';
+            } else if (name === 'SecurityError') {
+                error.value = 'Acesso à câmera bloqueado. Abra o site em HTTPS no navegador do sistema (não use o browser interno do Instagram/WhatsApp).';
+            } else {
+                error.value = 'Não foi possível acessar a câmera.';
+            }
             await stop();
             return false;
         }

@@ -204,32 +204,43 @@ async function toggleRecMode() {
             localError.value = `O ângulo ${selectedAngle.value} já está em uso.`;
             return;
         }
+        if (!isSupported.value) {
+            localError.value = 'Gravação não suportada neste navegador. Use Chrome no Android ou Safari atualizado.';
+            return;
+        }
 
+        // Camera must start before any network await: iOS/Android drop the user-gesture
+        // token after the first await, and getUserMedia then fails or never prompts.
+        const started = await startCapture();
+        if (!started) {
+            localError.value = captureError.value || 'Não foi possível acessar a câmera.';
+            return;
+        }
+
+        const registered = await registerRecorder(selectedAngle.value);
+        if (!registered) {
+            await stopCapture();
+            localError.value = saveError.value || 'Não foi possível registrar esta câmera.';
+            return;
+        }
+
+        await enterFullscreen();
+    } catch (error) {
+        localError.value = error?.response?.data?.message
+            || error?.message
+            || 'Falha ao iniciar o REC MODE.';
+        try {
+            await stopCapture();
+        } catch {
+            // Best-effort cleanup after an unexpected start failure.
+        }
         if (isV2) {
-            const registered = await registerRecorder(selectedAngle.value);
-            if (!registered) {
-                localError.value = saveError.value;
-                return;
-            }
-            const started = await startCapture();
-            if (!started) {
+            try {
                 await unregisterRecorder();
-                localError.value = captureError.value;
-                return;
-            }
-        } else {
-            const started = await startCapture();
-            if (!started) {
-                localError.value = captureError.value;
-                return;
-            }
-            if (!await registerRecorder(selectedAngle.value)) {
-                await stopCapture();
-                localError.value = 'Não foi possível registrar esta câmera.';
-                return;
+            } catch {
+                // Session may never have been created.
             }
         }
-        await enterFullscreen();
     } finally {
         isTogglingRec.value = false;
     }

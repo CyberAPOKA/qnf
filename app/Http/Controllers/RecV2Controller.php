@@ -14,6 +14,7 @@ use App\Services\Rec\RecSaveRequestService;
 use App\Services\Rec\RecSegmentService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -43,6 +44,13 @@ class RecV2Controller extends Controller
         }
 
         $session = $result['session'];
+
+        Log::info('REC V2 session start', [
+            'game_id' => $game->id,
+            'user_id' => $request->user()->id,
+            'session_uuid' => $session->uuid,
+            'camera_tag' => $session->camera_tag,
+        ]);
 
         return response()->json([
             'session' => [

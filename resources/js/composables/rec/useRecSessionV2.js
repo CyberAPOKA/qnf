@@ -292,7 +292,13 @@ export function useRecSessionV2(props, options = {}) {
             uploadQueue?.processNow();
             return true;
         } catch (error) {
-            saveError.value = error?.response?.data?.message || 'Não foi possível iniciar a sessão REC.';
+            const message = error?.response?.data?.message
+                || (typeof error?.message === 'string' && error.message.includes('games.rec.sessions.start')
+                    ? 'Rota REC V2 ausente. Rode o deploy do frontend/Ziggy e limpe o cache de rotas.'
+                    : null)
+                || error?.message
+                || 'Não foi possível iniciar a sessão REC.';
+            saveError.value = message;
             return false;
         } finally {
             isRegistering.value = false;
