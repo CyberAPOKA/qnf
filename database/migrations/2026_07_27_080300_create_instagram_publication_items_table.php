@@ -21,7 +21,7 @@ return new class extends Migration
             $table->text('last_error')->nullable();
             $table->timestamps();
 
-            $table->index(['instagram_publication_id', 'position']);
+            $table->index(['instagram_publication_id', 'position'], 'ig_pub_items_pub_id_position_index');
         });
     }
 
