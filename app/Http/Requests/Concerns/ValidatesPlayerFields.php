@@ -8,12 +8,44 @@ use Illuminate\Validation\Rule;
 
 trait ValidatesPlayerFields
 {
+    protected function basePlayerRules(?int $ignoreUserId = null): array
+    {
+        $instagramUnique = Rule::unique('users', 'instagram_username');
+
+        if ($ignoreUserId) {
+            $instagramUnique->ignore($ignoreUserId);
+        }
+
+        return [
+            'name' => ['required', 'string', 'max:255'],
+            'phone' => $this->phoneRules($ignoreUserId),
+            'position' => ['required', Rule::in(Position::values())],
+            'instagram_username' => ['nullable', 'string', 'max:30', $instagramUnique, \App\Instagram\Support\InstagramUsernameNormalizer::rule()],
+        ];
+    }
+
     protected function prepareForValidation(): void
     {
         if ($this->has('phone')) {
             $this->merge([
                 'phone' => PhoneNumber::normalize($this->input('phone')),
             ]);
+        }
+
+        if ($this->exists('instagram_username')) {
+            $raw = $this->input('instagram_username');
+
+            if ($raw === null || trim((string) $raw) === '') {
+                $this->merge(['instagram_username' => null]);
+            } else {
+                try {
+                    $this->merge([
+                        'instagram_username' => \App\Instagram\Support\InstagramUsernameNormalizer::normalize((string) $raw),
+                    ]);
+                } catch (\InvalidArgumentException) {
+                    // Keep raw input so the validation rule can reject it.
+                }
+            }
         }
     }
 
@@ -26,15 +58,6 @@ trait ValidatesPlayerFields
         }
 
         return ['required', 'regex:/^55\d{10}$/', $unique];
-    }
-
-    protected function basePlayerRules(?int $ignoreUserId = null): array
-    {
-        return [
-            'name' => ['required', 'string', 'max:255'],
-            'phone' => $this->phoneRules($ignoreUserId),
-            'position' => ['required', Rule::in(Position::values())],
-        ];
     }
 
     protected function photoRules(): array
@@ -52,6 +75,7 @@ trait ValidatesPlayerFields
             'phone.required' => 'Informe o telefone do jogador.',
             'phone.regex' => 'Informe um telefone válido com DDD e número (ex.: 555199294672 ou +55 51 9929-4672).',
             'phone.unique' => 'Este telefone já está cadastrado.',
+            'instagram_username.unique' => 'Este username do Instagram já está em uso.',
             'position.required' => 'Selecione a posição do jogador.',
             'position.in' => 'Selecione uma posição válida.',
             'password.required' => 'Informe a senha do jogador.',
@@ -67,6 +91,7 @@ trait ValidatesPlayerFields
         return [
             'name' => 'nome',
             'phone' => 'telefone',
+            'instagram_username' => 'instagram',
             'position' => 'posição',
             'password' => 'senha',
             'ability' => 'habilidade',

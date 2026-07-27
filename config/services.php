@@ -58,4 +58,13 @@ return [
         'language' => env('YOUTUBE_LANGUAGE', 'pt'),
     ],
 
+    'instagram' => [
+        'enabled' => env('INSTAGRAM_ENABLED', false),
+        'dry_run' => env('INSTAGRAM_DRY_RUN', false),
+        'app_id' => env('INSTAGRAM_APP_ID'),
+        'app_secret' => env('INSTAGRAM_APP_SECRET'),
+        'access_token' => env('INSTAGRAM_ACCESS_TOKEN'),
+        'user_id' => env('INSTAGRAM_USER_ID'),
+    ],
+
 ];

@@ -63,5 +63,11 @@ class GenerateWeekTeamImageJob implements ShouldQueue
                 report: false
             );
         }
+
+        rescue(
+            fn () => app(\App\Instagram\Services\InstagramPublishingService::class)
+                ->queueMatchResultPublications($game->fresh(['teams.captain', 'draftPicks.pickedUser', 'weekTeamMusics'])),
+            report: false
+        );
     }
 }

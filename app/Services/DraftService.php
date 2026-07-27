@@ -323,6 +323,12 @@ class DraftService
             );
 
             SendDraftFinishedWhatsApp::dispatch($freshGame->id);
+
+            rescue(
+                fn () => app(\App\Instagram\Services\InstagramPublishingService::class)
+                    ->queueDraftStory($freshGame),
+                report: false
+            );
         }
 
         return $pick;

@@ -57,6 +57,7 @@ const defaultFormData = () => ({
     ability: 5,
     password: '',
     active: true,
+    instagram_username: '',
     photo_front: null,
     photo_side: null,
 });
@@ -82,6 +83,7 @@ const buildForm = (formMode, player = null) => {
         data.position = player.position;
         data.ability = player.ability ?? 5;
         data.active = player.active;
+        data.instagram_username = player.instagram_username ?? '';
     }
 
     if (formMode === 'convert' && player) {
@@ -148,7 +150,7 @@ const onPhoneChange = () => {
 };
 
 const resolveFieldsToValidate = () => {
-    const fields = ['name', 'phone', 'position'];
+    const fields = ['name', 'phone', 'position', 'instagram_username'];
 
     if (isCreate.value) {
         fields.push('password');
@@ -263,6 +265,22 @@ defineExpose({
                         </option>
                     </select>
                     <InputError :message="form.errors.position" class="mt-2" />
+                </div>
+
+                <div>
+                    <InputLabel for="player-instagram" value="Instagram" />
+                    <TextInput
+                        id="player-instagram"
+                        v-model="form.instagram_username"
+                        type="text"
+                        class="mt-1 block w-full"
+                        placeholder="@usuario ou URL do perfil"
+                        @change="form.validate('instagram_username')"
+                    />
+                    <p v-if="form.instagram_username" class="mt-1 text-xs text-gray-500">
+                        Perfil: https://instagram.com/{{ String(form.instagram_username).replace(/^@/, '').toLowerCase() }}
+                    </p>
+                    <InputError :message="form.errors.instagram_username" class="mt-2" />
                 </div>
 
                 <div v-if="isEdit">

@@ -4,6 +4,7 @@ import SectionBorder from '@/Components/SectionBorder.vue';
 import UpdatePasswordForm from '@/Pages/Profile/Partials/UpdatePasswordForm.vue';
 import UpdatePositionForm from '@/Pages/Profile/Partials/UpdatePositionForm.vue';
 import UpdateWhatsAppNotificationsForm from '@/Pages/Profile/Partials/UpdateWhatsAppNotificationsForm.vue';
+import UpdateInstagramForm from '@/Pages/Profile/Partials/UpdateInstagramForm.vue';
 import UpdateMusicForm from '@/Pages/Profile/Partials/UpdateMusicForm.vue';
 
 defineProps({
@@ -31,6 +32,10 @@ defineProps({
                 <SectionBorder />
 
                 <UpdateWhatsAppNotificationsForm />
+
+                <SectionBorder />
+
+                <UpdateInstagramForm />
 
                 <SectionBorder />
 

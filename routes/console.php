@@ -31,3 +31,15 @@ Schedule::command('rec:cleanup --sync')
 Schedule::command('rec:reconcile --fix')
     ->everyFiveMinutes()
     ->timezone('America/Sao_Paulo');
+
+Schedule::command('instagram:refresh-token')
+    ->daily()
+    ->timezone('America/Sao_Paulo');
+
+Schedule::command('instagram:reconcile')
+    ->everyFiveMinutes()
+    ->timezone('America/Sao_Paulo');
+
+Schedule::command('instagram:cleanup-assets')
+    ->dailyAt('03:30')
+    ->timezone('America/Sao_Paulo');

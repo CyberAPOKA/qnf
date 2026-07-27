@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AdminGameController;
+use App\Http\Controllers\AdminInstagramController;
 use App\Http\Controllers\AdminPaymentController;
 use App\Http\Controllers\AdminPlayerController;
 use App\Http\Controllers\DraftController;
@@ -26,6 +27,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
 
     Route::put('/profile/position', [ProfileController::class, 'updatePosition'])->name('profile.update-position');
     Route::put('/profile/whatsapp-notifications', [ProfileController::class, 'updateWhatsAppNotifications'])->name('profile.update-whatsapp-notifications');
+    Route::put('/profile/instagram', [ProfileController::class, 'updateInstagram'])->name('profile.update-instagram');
     Route::put('/profile/music', [ProfileController::class, 'updateMusic'])->name('profile.update-music');
 
     Route::get('/', [GameController::class, 'index'])->name('dashboard');
@@ -70,6 +72,8 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
     Route::prefix('admin')->group(function () {
         Route::get('/players', [AdminPlayerController::class, 'index'])->name('admin.players');
         Route::get('/payments', [AdminPaymentController::class, 'index'])->name('admin.payments');
+        Route::get('/instagram', [AdminInstagramController::class, 'index'])->name('admin.instagram');
+        Route::post('/instagram/{publication}/retry', [AdminInstagramController::class, 'retry'])->name('admin.instagram.retry');
 
         Route::middleware(HandlePrecognitiveRequests::class)->group(function () {
             Route::post('/players', [AdminPlayerController::class, 'store'])->name('admin.players.store');

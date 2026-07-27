@@ -3,12 +3,14 @@
 namespace App\Http\Controllers;
 
 use App\Enums\Position;
+use App\Instagram\Support\InstagramUsernameNormalizer;
 use App\Services\ProfileService;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
+use InvalidArgumentException;
 
 class ProfileController extends Controller
 {
@@ -34,6 +36,41 @@ class ProfileController extends Controller
         ]);
 
         $request->user()->update($validated);
+
+        return back();
+    }
+
+    public function updateInstagram(Request $request): RedirectResponse
+    {
+        $raw = $request->input('instagram_username');
+
+        if ($raw === null || trim((string) $raw) === '') {
+            $request->merge(['instagram_username' => null]);
+        } else {
+            try {
+                $request->merge([
+                    'instagram_username' => InstagramUsernameNormalizer::normalize((string) $raw),
+                ]);
+            } catch (InvalidArgumentException) {
+                // Keep raw for validation.
+            }
+        }
+
+        $validated = $request->validate([
+            'instagram_username' => [
+                'nullable',
+                'string',
+                'max:30',
+                Rule::unique('users', 'instagram_username')->ignore($request->user()->id),
+                InstagramUsernameNormalizer::rule(),
+            ],
+        ], [
+            'instagram_username.unique' => 'Este username do Instagram já está em uso.',
+        ]);
+
+        $request->user()->update([
+            'instagram_username' => $validated['instagram_username'] ?? null,
+        ]);
 
         return back();
     }

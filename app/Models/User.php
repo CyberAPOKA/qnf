@@ -42,6 +42,7 @@ class User extends Authenticatable
         'photo_front',
         'photo_side',
         'whatsapp_notifications',
+        'instagram_username',
         'music_youtube_id',
         'music_title',
         'music_channel',
