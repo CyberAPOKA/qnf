@@ -6,6 +6,9 @@ defineProps({
     registering: Boolean,
     saving: Boolean,
     cooldown: { type: Number, default: 0 },
+    cooldownLeft: { type: Number, default: 0 },
+    cooldownRight: { type: Number, default: 0 },
+    cooldownAll: { type: Number, default: 0 },
     canLeft: Boolean,
     canAll: Boolean,
     canRight: Boolean,
@@ -34,7 +37,7 @@ defineEmits(['toggle', 'save']);
                 @click="$emit('save', 'left')"
             >
                 <i class="fa-solid fa-arrow-left block text-xl" />
-                <span class="block text-xs mt-1">SAVE</span>
+                <span class="block text-xs mt-1">{{ cooldownLeft > 0 ? `${cooldownLeft}s` : 'SAVE' }}</span>
                 <span class="block text-[10px] font-medium opacity-80">B1 + A1</span>
             </button>
             <button
@@ -44,7 +47,7 @@ defineEmits(['toggle', 'save']);
                 @click="$emit('save', 'all')"
             >
                 <i class="fa-solid fa-floppy-disk block text-xl mb-1" />
-                {{ saving ? 'Salvando...' : cooldown > 0 ? `${cooldown}s` : 'SAVE REC' }}
+                {{ saving ? 'Salvando...' : (cooldownAll > 0 || cooldown > 0) ? `${cooldownAll || cooldown}s` : 'SAVE REC' }}
             </button>
             <button
                 type="button"
@@ -53,7 +56,7 @@ defineEmits(['toggle', 'save']);
                 @click="$emit('save', 'right')"
             >
                 <i class="fa-solid fa-arrow-right block text-xl" />
-                <span class="block text-xs mt-1">SAVE</span>
+                <span class="block text-xs mt-1">{{ cooldownRight > 0 ? `${cooldownRight}s` : 'SAVE' }}</span>
                 <span class="block text-[10px] font-medium opacity-80">B2 + A2</span>
             </button>
         </div>

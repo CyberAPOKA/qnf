@@ -8,6 +8,7 @@ export const REC_CONFIG_DEFAULTS = Object.freeze({
     heartbeat_seconds: 10,
     recorder_lease_seconds: 35,
     save_debounce_milliseconds: 800,
+    save_scope_cooldown_seconds: 10,
     pending_save_poll_seconds: 2,
     upload_max_concurrency: 1,
     upload_request_timeout_seconds: 120,

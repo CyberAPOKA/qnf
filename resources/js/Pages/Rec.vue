@@ -87,6 +87,7 @@ const {
     isSaving,
     saveError,
     saveCooldownRemaining,
+    scopeCooldowns,
     isRegistering,
     recorderId,
     registerRecorder,
@@ -109,13 +110,16 @@ const canStartRec = computed(() =>
     && !isTogglingRec.value
     && !isRegistering.value,
 );
-const canSave = computed(() =>
-    activeRecorderCount.value > 0
-    && (isV2 || (!isSaving.value && saveCooldownRemaining.value === 0)),
-);
+const canSave = computed(() => activeRecorderCount.value > 0 && !isSaving.value);
 
 function canSaveScope(scope) {
     if (!canSave.value) return false;
+    if (!isV2 && typeof recSession.isScopeCoolingDown === 'function' && recSession.isScopeCoolingDown(scope)) {
+        return false;
+    }
+    if (isV2 && typeof recSession.isScopeCoolingDown === 'function' && recSession.isScopeCoolingDown(scope)) {
+        return false;
+    }
     const tags = CAPTURE_SCOPE_TAGS[scope] || CAPTURE_SCOPE_TAGS.all;
     return recorders.value.some((item) => tags.includes(item.camera_tag));
 }
@@ -366,7 +370,10 @@ onBeforeUnmount(() => {
                     :toggling="isTogglingRec"
                     :registering="isRegistering"
                     :saving="isSaving"
-                    :cooldown="saveCooldownRemaining"
+                    :cooldown="saveCooldownRemaining || 0"
+                    :cooldown-left="scopeCooldowns?.left || 0"
+                    :cooldown-right="scopeCooldowns?.right || 0"
+                    :cooldown-all="scopeCooldowns?.all || 0"
                     :can-left="canSaveScope('left')"
                     :can-all="canSaveScope('all')"
                     :can-right="canSaveScope('right')"

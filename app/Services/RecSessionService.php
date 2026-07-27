@@ -148,12 +148,128 @@ class RecSessionService
         return max(1, $storedExpiry - (int) floor(microtime(true) * 1000));
     }
 
-    /** @deprecated Use acquireSaveDebounce() */
+    /**
+     * Locks that a SAVE scope activates.
+     *
+     * - left  → locks left (middle also blocked via conflict check)
+     * - right → locks right
+     * - all   → locks all (and therefore both sides)
+     *
+     * @return list<string>
+     */
+    public function scopesLockedBy(string $captureScope): array
+    {
+        return match ($captureScope) {
+            'left' => ['left'],
+            'right' => ['right'],
+            default => ['all', 'left', 'right'],
+        };
+    }
+
+    /**
+     * Locks that block a new SAVE for the given scope.
+     *
+     * @return list<string>
+     */
+    public function scopesBlocking(string $captureScope): array
+    {
+        return match ($captureScope) {
+            'left' => ['left', 'all'],
+            'right' => ['right', 'all'],
+            default => ['left', 'right', 'all'],
+        };
+    }
+
+    public function scopeCooldownSeconds(): int
+    {
+        return max(1, (int) config('rec.save_scope_cooldown_seconds', 10));
+    }
+
+    private function scopeCooldownKey(int $gameId, string $scope): string
+    {
+        return "rec:game:{$gameId}:save-scope:{$scope}";
+    }
+
+    /**
+     * Atomically acquire per-side SAVE locks.
+     *
+     * Left and right do not block each other. Either side blocks "all".
+     * "all" blocks both sides.
+     *
+     * @return array{ok: bool, retry_after: int, locked_scopes: list<string>, cooldown_seconds: int}
+     */
+    public function acquireScopeCooldown(int $gameId, string $captureScope): array
+    {
+        $cooldownSeconds = $this->scopeCooldownSeconds();
+        $blocking = $this->scopesBlocking($captureScope);
+        $maxRemaining = 0;
+
+        foreach ($blocking as $scope) {
+            $storedExpiry = Cache::get($this->scopeCooldownKey($gameId, $scope));
+
+            if (! $storedExpiry) {
+                continue;
+            }
+
+            $remaining = max(0, (int) $storedExpiry - now()->timestamp);
+
+            if ($remaining > 0) {
+                $maxRemaining = max($maxRemaining, $remaining);
+            }
+        }
+
+        if ($maxRemaining > 0) {
+            return [
+                'ok' => false,
+                'retry_after' => $maxRemaining,
+                'locked_scopes' => $this->activeLockedScopes($gameId),
+                'cooldown_seconds' => $cooldownSeconds,
+            ];
+        }
+
+        $expiresAt = now()->addSeconds($cooldownSeconds);
+        $lockedScopes = $this->scopesLockedBy($captureScope);
+
+        foreach ($lockedScopes as $scope) {
+            Cache::put(
+                $this->scopeCooldownKey($gameId, $scope),
+                $expiresAt->timestamp,
+                $expiresAt,
+            );
+        }
+
+        return [
+            'ok' => true,
+            'retry_after' => 0,
+            'locked_scopes' => $lockedScopes,
+            'cooldown_seconds' => $cooldownSeconds,
+        ];
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function activeLockedScopes(int $gameId): array
+    {
+        $locked = [];
+
+        foreach (['left', 'right', 'all'] as $scope) {
+            $storedExpiry = Cache::get($this->scopeCooldownKey($gameId, $scope));
+
+            if ($storedExpiry && ((int) $storedExpiry - now()->timestamp) > 0) {
+                $locked[] = $scope;
+            }
+        }
+
+        return $locked;
+    }
+
+    /** @deprecated Use acquireScopeCooldown() */
     public function acquireSaveCooldown(int $gameId): int
     {
-        $remainingMs = $this->acquireSaveDebounce($gameId);
+        $result = $this->acquireScopeCooldown($gameId, 'all');
 
-        return $remainingMs > 0 ? max(1, (int) ceil($remainingMs / 1000)) : 0;
+        return $result['ok'] ? 0 : $result['retry_after'];
     }
 
     public function saveDebounceMilliseconds(): int
@@ -163,7 +279,7 @@ class RecSessionService
 
     public function saveCooldownSeconds(): int
     {
-        return max(1, (int) ceil($this->saveDebounceMilliseconds() / 1000));
+        return $this->scopeCooldownSeconds();
     }
 
     public function storeClip(

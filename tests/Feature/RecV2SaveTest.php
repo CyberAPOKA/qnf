@@ -52,17 +52,20 @@ class RecV2SaveTest extends TestCase
         $this->assertSame(['A2', 'B2'], collect($right->json('save_request.targets'))->pluck('camera_tag')->sort()->values()->all());
     }
 
-    public function test_consecutive_saves_are_allowed(): void
+    public function test_same_scope_is_blocked_but_opposite_side_is_allowed(): void
     {
         Queue::fake();
 
         $user = User::factory()->create();
         $game = $this->createGame();
         $this->openRecSession($user, $game, 'A1');
+        $this->openRecSession($user, $game, 'A2');
+        $this->openRecSession($user, $game, 'B1');
+        $this->openRecSession($user, $game, 'B2');
 
         $this->actingAs($user)
             ->postJson(route('games.rec.save-requests.store', $game), [
-                'capture_scope' => 'all',
+                'capture_scope' => 'left',
                 'idempotency_key' => 'save-1',
             ])
             ->assertCreated();
@@ -71,6 +74,13 @@ class RecV2SaveTest extends TestCase
             ->postJson(route('games.rec.save-requests.store', $game), [
                 'capture_scope' => 'all',
                 'idempotency_key' => 'save-2',
+            ])
+            ->assertStatus(429);
+
+        $this->actingAs($user)
+            ->postJson(route('games.rec.save-requests.store', $game), [
+                'capture_scope' => 'right',
+                'idempotency_key' => 'save-3',
             ])
             ->assertCreated();
 

@@ -30,6 +30,66 @@ export function useRecSessionV2(props, options = {}) {
     const heartbeatFailures = ref(0);
     const availableMs = ref(0);
     const saveCooldownRemaining = ref(0);
+    const scopeCooldowns = ref({ left: 0, right: 0, all: 0 });
+    const scopeDeadlines = { left: 0, right: 0, all: 0 };
+    let scopeCooldownTimer = null;
+    const cooldownSaveUuids = new Set();
+
+    function scopesLockedBy(captureScope) {
+        if (captureScope === 'left') return ['left'];
+        if (captureScope === 'right') return ['right'];
+        return ['all', 'left', 'right'];
+    }
+
+    function scopesBlocking(captureScope) {
+        if (captureScope === 'left') return ['left', 'all'];
+        if (captureScope === 'right') return ['right', 'all'];
+        return ['left', 'right', 'all'];
+    }
+
+    function syncScopeCooldowns() {
+        const now = Date.now();
+        scopeCooldowns.value = {
+            left: Math.max(0, Math.ceil((scopeDeadlines.left - now) / 1000)),
+            right: Math.max(0, Math.ceil((scopeDeadlines.right - now) / 1000)),
+            all: Math.max(0, Math.ceil((scopeDeadlines.all - now) / 1000)),
+        };
+        saveCooldownRemaining.value = Math.max(
+            scopeCooldowns.value.left,
+            scopeCooldowns.value.right,
+            scopeCooldowns.value.all,
+        );
+    }
+
+    function isScopeCoolingDown(captureScope = 'all') {
+        syncScopeCooldowns();
+        return scopesBlocking(captureScope).some((scope) => (scopeCooldowns.value[scope] || 0) > 0);
+    }
+
+    function startScopeCooldown(seconds = 10, saveRequestUuid = null, lockedScopes = null, captureScope = 'all') {
+        if (saveRequestUuid && cooldownSaveUuids.has(saveRequestUuid)) return;
+        if (saveRequestUuid) cooldownSaveUuids.add(saveRequestUuid);
+
+        const scopes = Array.isArray(lockedScopes) && lockedScopes.length
+            ? lockedScopes
+            : scopesLockedBy(captureScope);
+        const deadline = Date.now() + (Math.max(1, Number(seconds) || 10) * 1000);
+        scopes.forEach((scope) => {
+            if (scope in scopeDeadlines) {
+                scopeDeadlines[scope] = Math.max(scopeDeadlines[scope] || 0, deadline);
+            }
+        });
+        syncScopeCooldowns();
+
+        if (scopeCooldownTimer) clearInterval(scopeCooldownTimer);
+        scopeCooldownTimer = setInterval(() => {
+            syncScopeCooldowns();
+            if (saveCooldownRemaining.value === 0 && scopeCooldownTimer) {
+                clearInterval(scopeCooldownTimer);
+                scopeCooldownTimer = null;
+            }
+        }, 250);
+    }
 
     const gameId = props.game.id;
     const channelName = `game.${gameId}`;
@@ -160,6 +220,16 @@ export function useRecSessionV2(props, options = {}) {
             received: save.clips?.length || 0,
             status: save.status || 'waiting',
         });
+
+        startScopeCooldown(
+            rawPayload?.cooldownSeconds
+                ?? rawPayload?.cooldown_seconds
+                ?? config.save_scope_cooldown_seconds
+                ?? 10,
+            save.uuid,
+            rawPayload?.lockedScopes || rawPayload?.locked_scopes,
+            save.capture_scope || rawPayload?.captureScope || 'all',
+        );
 
         try {
             await acknowledgeSave(save);
@@ -362,6 +432,7 @@ export function useRecSessionV2(props, options = {}) {
     async function triggerSave(captureScope = 'all') {
         const now = Date.now();
         if (now - lastSaveAt < config.save_debounce_milliseconds) return null;
+        if (isScopeCoolingDown(captureScope)) return null;
         lastSaveAt = now;
         activeSaveRequests += 1;
         isSaving.value = true;
@@ -391,8 +462,24 @@ export function useRecSessionV2(props, options = {}) {
                 targets: save.targets || [],
                 status: save.status || 'requested',
             });
+            startScopeCooldown(
+                data.cooldown_seconds ?? config.save_scope_cooldown_seconds ?? 10,
+                save.uuid,
+                data.locked_scopes,
+                captureScope,
+            );
             return save;
         } catch (error) {
+            if (error?.response?.status === 429) {
+                startScopeCooldown(
+                    error.response.data?.retry_after
+                        ?? error.response.data?.cooldown_seconds
+                        ?? 10,
+                    null,
+                    error.response.data?.locked_scopes,
+                    captureScope,
+                );
+            }
             saveError.value = error?.response?.data?.message || 'Não foi possível salvar.';
             return null;
         } finally {
@@ -457,6 +544,7 @@ export function useRecSessionV2(props, options = {}) {
         stopped = true;
         stopHeartbeat();
         stopPolling();
+        if (scopeCooldownTimer) clearInterval(scopeCooldownTimer);
         if (echoChannel) window.Echo.leave(`private-${channelName}`);
     });
 
@@ -476,6 +564,8 @@ export function useRecSessionV2(props, options = {}) {
         sessionExpired,
         heartbeatFailures,
         saveCooldownRemaining,
+        scopeCooldowns,
+        isScopeCoolingDown,
         recorderId: computed(() => session.value?.uuid || null),
         registerRecorder: register,
         unregisterRecorder: unregister,

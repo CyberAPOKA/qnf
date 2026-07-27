@@ -37,6 +37,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     const saveError = ref(null);
     const isRegistering = ref(false);
     const saveCooldownRemaining = ref(0);
+    const scopeCooldowns = ref({ left: 0, right: 0, all: 0 });
 
     const gameId = props.game.id;
     const channelName = `game.${gameId}`;
@@ -44,7 +45,8 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
 
     let heartbeatTimer = null;
     let saveCooldownTimer = null;
-    let cooldownSaveUuid = null;
+    const cooldownSaveUuids = new Set();
+    const scopeDeadlines = { left: 0, right: 0, all: 0 };
     let echoChannel = null;
     const uploadQueue = [];
     let isProcessingUpload = false;
@@ -64,36 +66,70 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         }
     }
 
-    function startSaveCooldown(seconds = 10, saveRequestUuid = null) {
-        if (saveRequestUuid && cooldownSaveUuid === saveRequestUuid) {
+    function scopesLockedBy(captureScope) {
+        if (captureScope === 'left') return ['left'];
+        if (captureScope === 'right') return ['right'];
+        return ['all', 'left', 'right'];
+    }
+
+    function scopesBlocking(captureScope) {
+        if (captureScope === 'left') return ['left', 'all'];
+        if (captureScope === 'right') return ['right', 'all'];
+        return ['left', 'right', 'all'];
+    }
+
+    function syncScopeCooldowns() {
+        const now = Date.now();
+        scopeCooldowns.value = {
+            left: Math.max(0, Math.ceil((scopeDeadlines.left - now) / 1000)),
+            right: Math.max(0, Math.ceil((scopeDeadlines.right - now) / 1000)),
+            all: Math.max(0, Math.ceil((scopeDeadlines.all - now) / 1000)),
+        };
+        saveCooldownRemaining.value = Math.max(
+            scopeCooldowns.value.left,
+            scopeCooldowns.value.right,
+            scopeCooldowns.value.all,
+        );
+    }
+
+    function isScopeCoolingDown(captureScope = 'all') {
+        syncScopeCooldowns();
+        return scopesBlocking(captureScope).some((scope) => (scopeCooldowns.value[scope] || 0) > 0);
+    }
+
+    function startSaveCooldown(seconds = 10, saveRequestUuid = null, lockedScopes = null, captureScope = 'all') {
+        if (saveRequestUuid && cooldownSaveUuids.has(saveRequestUuid)) {
             return;
         }
 
         if (saveRequestUuid) {
-            cooldownSaveUuid = saveRequestUuid;
+            cooldownSaveUuids.add(saveRequestUuid);
         }
 
+        const scopes = Array.isArray(lockedScopes) && lockedScopes.length
+            ? lockedScopes
+            : scopesLockedBy(captureScope);
         const deadline = Date.now() + (Math.max(1, Number(seconds) || 10) * 1000);
+
+        scopes.forEach((scope) => {
+            if (scope in scopeDeadlines) {
+                scopeDeadlines[scope] = Math.max(scopeDeadlines[scope] || 0, deadline);
+            }
+        });
+
+        syncScopeCooldowns();
 
         if (saveCooldownTimer) {
             clearInterval(saveCooldownTimer);
         }
 
-        const update = () => {
-            saveCooldownRemaining.value = Math.max(
-                0,
-                Math.ceil((deadline - Date.now()) / 1000),
-            );
-
+        saveCooldownTimer = setInterval(() => {
+            syncScopeCooldowns();
             if (saveCooldownRemaining.value === 0 && saveCooldownTimer) {
                 clearInterval(saveCooldownTimer);
                 saveCooldownTimer = null;
-                cooldownSaveUuid = null;
             }
-        };
-
-        update();
-        saveCooldownTimer = setInterval(update, 250);
+        }, 250);
     }
 
     function armWaitTimeout(uuid) {
@@ -290,7 +326,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     }
 
     async function triggerSave(captureScope = 'all') {
-        if (isSaving.value || saveCooldownRemaining.value > 0) {
+        if (isSaving.value || isScopeCoolingDown(captureScope)) {
             return null;
         }
 
@@ -304,19 +340,29 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
 
             upsertSave(data.save_request, data.expected_recorders);
             startSaveCooldown(
-                data.cooldown_seconds || 10,
+                data.cooldown_seconds ?? 10,
                 data.save_request?.uuid,
+                data.locked_scopes,
+                captureScope,
             );
             recLog('info', 'save requested', {
                 uuid: data.save_request?.uuid,
                 expected: data.expected_recorders,
                 captureScope,
+                lockedScopes: data.locked_scopes,
             });
 
             return data.save_request;
         } catch (err) {
             if (err?.response?.status === 429) {
-                startSaveCooldown(err.response.data?.retry_after || 10);
+                startSaveCooldown(
+                    err.response.data?.retry_after
+                        ?? err.response.data?.cooldown_seconds
+                        ?? 10,
+                    null,
+                    err.response.data?.locked_scopes,
+                    captureScope,
+                );
             }
             saveError.value = err?.response?.data?.message || 'Não foi possível salvar.';
             recLog('error', 'save failed', {
@@ -448,8 +494,10 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
             clips: [],
         }, payload.expectedRecorders);
         startSaveCooldown(
-            payload.cooldownSeconds || 10,
+            payload.cooldownSeconds ?? 10,
             payload.saveRequestUuid,
+            payload.lockedScopes,
+            payload.captureScope || 'all',
         );
 
         recLog('info', 'SaveClipRequested received', {
@@ -519,6 +567,8 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         isSaving,
         saveError,
         saveCooldownRemaining,
+        scopeCooldowns,
+        isScopeCoolingDown,
         isRegistering,
         recorderId,
         registerRecorder,

@@ -16,6 +16,7 @@ use App\Models\RecSaveTarget;
 use App\Models\RecSaveTargetSegment;
 use App\Models\RecSegment;
 use App\Models\User;
+use App\Services\RecSessionService;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -25,6 +26,7 @@ class RecSaveRequestService
 {
     public function __construct(
         private readonly RecSegmentService $segments,
+        private readonly RecSessionService $recSession,
     ) {}
 
     /**
@@ -55,8 +57,20 @@ class RecSaveRequestService
             }
         } elseif ($debounceMs > 0) {
             $debounceKey = "rec:game:{$game->id}:user:{$user->id}:save-debounce";
-            $ttlSeconds = max(1, (int) ceil($debounceMs / 1000));
             Cache::add($debounceKey, true, now()->addMilliseconds($debounceMs));
+        }
+
+        $scopeLock = $this->recSession->acquireScopeCooldown($game->id, $captureScope);
+
+        if (! $scopeLock['ok']) {
+            throw new HttpException(
+                429,
+                "Aguarde {$scopeLock['retry_after']}s para salvar este lado novamente.",
+                null,
+                [
+                    'Retry-After' => (string) $scopeLock['retry_after'],
+                ],
+            );
         }
 
         $cameraTags = $this->cameraTagsForScope($captureScope);
@@ -104,6 +118,7 @@ class RecSaveRequestService
             $captureUntil,
             $deadlineAt,
             $activeSessions,
+            $scopeLock,
             &$readyTargetIds,
         ) {
             $saveRequest = RecSaveRequest::create([
@@ -171,9 +186,14 @@ class RecSaveRequestService
                 'event_type' => 'save_requested',
                 'payload' => [
                     'save_request_uuid' => $saveRequest->uuid,
+                    'save_request_id' => $saveRequest->id,
                     'capture_scope' => $captureScope,
                     'camera_tags' => $targets->pluck('camera_tag')->values()->all(),
                     'triggered_by' => $user->id,
+                    'triggered_by_name' => $user->name,
+                    'expected_count' => $targets->count(),
+                    'cooldown_seconds' => $scopeLock['cooldown_seconds'],
+                    'locked_scopes' => $scopeLock['locked_scopes'],
                 ],
                 'status' => 'pending',
                 'available_at' => now(),
@@ -183,6 +203,7 @@ class RecSaveRequestService
                 'save_request' => $saveRequest->fresh(['targets', 'triggeredBy']),
                 'targets' => $targets,
                 'outbox' => $outbox,
+                'scope_lock' => $scopeLock,
             ];
         });
 
@@ -197,6 +218,7 @@ class RecSaveRequestService
         return [
             'save_request' => $result['save_request'],
             'targets' => $result['targets'],
+            'scope_lock' => $result['scope_lock'],
         ];
     }
 

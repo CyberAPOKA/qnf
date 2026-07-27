@@ -47,6 +47,7 @@ class RecController extends Controller
                 'heartbeat_seconds' => (int) config('rec.heartbeat_seconds', 10),
                 'recorder_lease_seconds' => (int) config('rec.recorder_lease_seconds', 35),
                 'save_debounce_milliseconds' => (int) config('rec.save_debounce_milliseconds', 800),
+                'save_scope_cooldown_seconds' => (int) config('rec.save_scope_cooldown_seconds', 10),
                 'pending_save_poll_seconds' => (int) config('rec.pending_save_poll_seconds', 2),
                 'upload_max_concurrency' => (int) config('rec.upload_max_concurrency', 1),
                 'upload_request_timeout_seconds' => (int) config('rec.upload_request_timeout_seconds', 120),
@@ -173,6 +174,25 @@ class RecController extends Controller
             ], 429);
         }
 
+        $scopeLock = $this->recSession->acquireScopeCooldown($game->id, $captureScope);
+
+        if (! $scopeLock['ok']) {
+            Log::info('REC save rejected: scope cooldown', [
+                'game_id' => $game->id,
+                'user_id' => $request->user()->id,
+                'capture_scope' => $captureScope,
+                'retry_after' => $scopeLock['retry_after'],
+                'locked_scopes' => $scopeLock['locked_scopes'],
+            ]);
+
+            return response()->json([
+                'message' => "Aguarde {$scopeLock['retry_after']}s para salvar este lado novamente.",
+                'retry_after' => $scopeLock['retry_after'],
+                'locked_scopes' => $scopeLock['locked_scopes'],
+                'cooldown_seconds' => $scopeLock['cooldown_seconds'],
+            ], 429)->header('Retry-After', (string) $scopeLock['retry_after']);
+        }
+
         $saveRequest = $this->recSession->createSaveRequest(
             $game,
             $request->user(),
@@ -186,12 +206,13 @@ class RecController extends Controller
             'capture_scope' => $captureScope,
             'camera_tags' => $cameraTags,
             'expected_recorders' => count($recorders),
+            'locked_scopes' => $scopeLock['locked_scopes'],
         ]);
 
         // Broadcast to ALL devices (including trigger). Recording clients
         // dedupe uploads locally; trigger that is also recording uploads once.
         $broadcastOk = rescue(
-            function () use ($game, $saveRequest, $request, $recorders, $captureScope, $cameraTags) {
+            function () use ($game, $saveRequest, $request, $recorders, $captureScope, $cameraTags, $scopeLock) {
                 broadcast(new SaveClipRequested(
                     $game->id,
                     $saveRequest->uuid,
@@ -200,7 +221,8 @@ class RecController extends Controller
                     count($recorders),
                     $captureScope,
                     $cameraTags,
-                    $this->recSession->saveDebounceMilliseconds(),
+                    $scopeLock['cooldown_seconds'],
+                    $scopeLock['locked_scopes'],
                 ));
 
                 return true;
@@ -222,7 +244,8 @@ class RecController extends Controller
             ),
             'expected_recorders' => count($recorders),
             'debounce_milliseconds' => $this->recSession->saveDebounceMilliseconds(),
-            'cooldown_seconds' => 0,
+            'cooldown_seconds' => $scopeLock['cooldown_seconds'],
+            'locked_scopes' => $scopeLock['locked_scopes'],
         ]);
     }
 

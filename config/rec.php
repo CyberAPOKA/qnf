@@ -22,6 +22,9 @@ return [
 
     'save_debounce_milliseconds' => (int) env('REC_SAVE_DEBOUNCE_MILLISECONDS', 800),
 
+    /** Per-side SAVE lock so left/right don't block each other, but both block "all". */
+    'save_scope_cooldown_seconds' => (int) env('REC_SAVE_SCOPE_COOLDOWN_SECONDS', 10),
+
     'pending_save_poll_seconds' => (int) env('REC_PENDING_SAVE_POLL_SECONDS', 2),
 
     'upload_max_concurrency' => (int) env('REC_UPLOAD_MAX_CONCURRENCY', 1),

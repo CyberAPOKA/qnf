@@ -59,7 +59,7 @@ class PublishRecOutboxEvent implements ShouldQueue
         $gameId = (int) ($event->game_id ?? $payload['game_id'] ?? 0);
 
         match ($event->event_type) {
-            'save_created', 'SaveClipRequested' => broadcast(new SaveClipRequested(
+            'save_created', 'SaveClipRequested', 'save_requested' => broadcast(new SaveClipRequested(
                 $gameId,
                 (string) ($payload['save_request_uuid'] ?? $payload['uuid'] ?? ''),
                 (int) ($payload['save_request_id'] ?? 0),
@@ -67,7 +67,8 @@ class PublishRecOutboxEvent implements ShouldQueue
                 (int) ($payload['expected_recorders'] ?? $payload['expected_count'] ?? 0),
                 (string) ($payload['capture_scope'] ?? 'all'),
                 $payload['camera_tags'] ?? $recSession->cameraTagsForScope($payload['capture_scope'] ?? 'all'),
-                (int) ($payload['cooldown_seconds'] ?? 0),
+                (int) ($payload['cooldown_seconds'] ?? $recSession->scopeCooldownSeconds()),
+                $payload['locked_scopes'] ?? $recSession->scopesLockedBy($payload['capture_scope'] ?? 'all'),
             )),
             'clip_preview_ready', 'ClipPreviewReady' => broadcast(new ClipPreviewReady(
                 $gameId,

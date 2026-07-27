@@ -178,18 +178,35 @@ class RecV2Controller extends Controller
 
     public function createSave(CreateRecSaveRequest $request, Game $game): JsonResponse
     {
+        $captureScope = $request->validated('capture_scope') ?? 'all';
+
         try {
             $result = $this->saves->create(
                 $game,
                 $request->user(),
-                $request->validated('capture_scope') ?? 'all',
+                $captureScope,
                 $request->validated('idempotency_key'),
             );
         } catch (HttpException $e) {
+            if ($e->getStatusCode() === 429) {
+                $locked = app(\App\Services\RecSessionService::class)->activeLockedScopes($game->id);
+
+                return response()->json([
+                    'message' => $e->getMessage(),
+                    'retry_after' => (int) ($e->getHeaders()['Retry-After'] ?? 10),
+                    'locked_scopes' => $locked,
+                    'cooldown_seconds' => (int) config('rec.save_scope_cooldown_seconds', 10),
+                ], 429);
+            }
+
             return response()->json(['message' => $e->getMessage()], $e->getStatusCode());
         }
 
         $saveRequest = $result['save_request'];
+        $scopeLock = $result['scope_lock'] ?? [
+            'cooldown_seconds' => (int) config('rec.save_scope_cooldown_seconds', 10),
+            'locked_scopes' => [],
+        ];
 
         return response()->json([
             'save_request' => [
@@ -208,6 +225,9 @@ class RecV2Controller extends Controller
                     'segments_received' => $target->segments_received,
                 ])->values(),
             ],
+            'expected_recorders' => $saveRequest->expected_count,
+            'cooldown_seconds' => $scopeLock['cooldown_seconds'],
+            'locked_scopes' => $scopeLock['locked_scopes'],
         ], 201);
     }
 
