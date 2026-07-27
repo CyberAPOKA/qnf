@@ -21,10 +21,9 @@ class CleanupInstagramAssetsJob implements ShouldQueue
 
     public int $timeout = 300;
 
-    public bool $afterCommit = true;
-
     public function __construct()
     {
+        $this->afterCommit = true;
         $this->onQueue((string) config('instagram.queue', 'default'));
     }
 

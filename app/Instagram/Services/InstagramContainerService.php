@@ -355,6 +355,7 @@ class InstagramContainerService
             ?? $publication->payload['taggable_usernames']
             ?? [];
 
+        // Stories accept username; x/y are optional but improve placement for mentions.
         if (is_array($usernames) && $usernames !== []) {
             $tags = $this->tagService->distributeTags($usernames);
             if ($tags !== []) {
@@ -370,6 +371,14 @@ class InstagramContainerService
                 $item->metadata['user_tags']
             );
             $params['user_tags'] = $this->tagService->toApiJson($tags);
+        }
+
+        if (! empty($params['user_tags'])) {
+            Log::info('Instagram container including user_tags', [
+                'publication_uuid' => $publication->uuid,
+                'item_id' => $item->id,
+                'tags_json' => $params['user_tags'],
+            ]);
         }
 
         return $params;

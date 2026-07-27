@@ -2,8 +2,12 @@
 
 namespace App\Instagram\Services;
 
+use App\Enums\TeamColor;
+use App\Models\Game;
+use App\Models\GameWeekTeamMusic;
 use App\Models\User;
 use App\Support\PublicStorage;
+use Illuminate\Support\Facades\Log;
 
 class InstagramMusicResolver
 {
@@ -13,42 +17,81 @@ class InstagramMusicResolver
     public function resolveForCaptain(?User $captain): array
     {
         if ($captain) {
-            $fromCaptain = $this->resolveCaptainFile($captain);
+            $fromCaptain = $this->resolveFilePath(
+                $captain->music_file_path,
+                (string) ($captain->music_source ?? ''),
+                $captain->music_title ? (string) $captain->music_title : null,
+                'captain',
+            );
 
             if ($fromCaptain !== null) {
                 return $fromCaptain;
             }
         }
 
-        $default = $this->resolveDefaultAudio();
+        return $this->fallbackDefaultOrNone('captain_youtube_or_missing');
+    }
 
-        if ($default !== null) {
-            return $default;
+    /**
+     * Prefer week-team music snapshot (MP3), then captain file, then default.
+     *
+     * @return array{path: ?string, source: string, title: ?string}
+     */
+    public function resolveForTeam(Game $game, TeamColor $color): array
+    {
+        $game->loadMissing(['weekTeamMusics', 'teams.captain']);
+
+        $snapshot = $game->weekTeamMusics->firstWhere('team_color', $color);
+
+        if ($snapshot instanceof GameWeekTeamMusic) {
+            $fromSnapshot = $this->resolveFilePath(
+                $snapshot->music_file_path,
+                (string) ($snapshot->music_source ?? ''),
+                $snapshot->music_title ? (string) $snapshot->music_title : null,
+                'snapshot',
+            );
+
+            if ($fromSnapshot !== null) {
+                return $fromSnapshot;
+            }
+
+            if (($snapshot->music_source ?? '') === 'youtube' || $snapshot->music_youtube_id) {
+                Log::info('Instagram story audio: YouTube-only snapshot cannot be embedded', [
+                    'game_id' => $game->id,
+                    'team_color' => $color->value,
+                    'youtube_id' => $snapshot->music_youtube_id,
+                ]);
+            }
         }
 
-        return [
-            'path' => null,
-            'source' => 'none',
-            'title' => null,
-        ];
+        $captain = $game->teams->firstWhere('color', $color)?->captain;
+        $fromCaptain = $this->resolveForCaptain($captain);
+
+        if ($fromCaptain['path'] !== null) {
+            return $fromCaptain;
+        }
+
+        return $this->fallbackDefaultOrNone('team_no_mp3');
     }
 
     /**
      * @return array{path: string, source: string, title: ?string}|null
      */
-    private function resolveCaptainFile(User $captain): ?array
-    {
-        $source = (string) ($captain->music_source ?? '');
-
-        if ($source === 'youtube' || (! empty($captain->music_youtube_id) && empty($captain->music_file_path))) {
+    private function resolveFilePath(
+        ?string $relativePath,
+        string $source,
+        ?string $title,
+        string $resolvedSource,
+    ): ?array {
+        if ($source === 'youtube') {
             return null;
         }
 
-        if (empty($captain->music_file_path)) {
+        if (! is_string($relativePath) || trim($relativePath) === '') {
             return null;
         }
 
-        $absolute = PublicStorage::localPath($captain->music_file_path);
+        $absolute = PublicStorage::localPath($relativePath);
 
         if (! $absolute || ! is_file($absolute)) {
             return null;
@@ -62,8 +105,28 @@ class InstagramMusicResolver
 
         return [
             'path' => $absolute,
-            'source' => 'captain',
-            'title' => $captain->music_title ? (string) $captain->music_title : null,
+            'source' => $resolvedSource,
+            'title' => $title,
+        ];
+    }
+
+    /**
+     * @return array{path: ?string, source: string, title: ?string}
+     */
+    private function fallbackDefaultOrNone(string $reason): array
+    {
+        $default = $this->resolveDefaultAudio();
+
+        if ($default !== null) {
+            return $default;
+        }
+
+        Log::info('Instagram story audio fallback to none', ['reason' => $reason]);
+
+        return [
+            'path' => null,
+            'source' => 'none',
+            'title' => null,
         ];
     }
 

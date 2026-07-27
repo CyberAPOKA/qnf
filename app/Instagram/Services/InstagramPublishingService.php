@@ -9,10 +9,10 @@ use App\Instagram\Enums\InstagramTriggerType;
 use App\Instagram\Exceptions\InstagramConfigurationException;
 use App\Instagram\Jobs\ProcessInstagramPublicationJob;
 use App\Instagram\Support\InstagramIdempotencyKey;
+use App\Instagram\Support\InstagramCacheLock;
 use App\Models\Game;
 use App\Models\InstagramPublication;
 use App\Services\WeekTeamImageService;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -156,17 +156,14 @@ class InstagramPublishingService
             $idempotencySuffix,
         );
 
-        $lock = Cache::lock('instagram-publication-create:'.$idempotencyKey, 15);
+        $lockResult = InstagramCacheLock::attempt('instagram-publication-create:'.$idempotencyKey, 15);
+        $lock = $lockResult['lock'];
 
-        return $lock->block(10, function () use (
-            $idempotencyKey,
-            $triggerType,
-            $triggerId,
-            $triggerVersion,
-            $publicationType,
-            $payload,
-            $metadata,
-        ): InstagramPublication {
+        try {
+            if (! $lockResult['acquired'] && ! $lockResult['soft_failed']) {
+                usleep(200_000);
+            }
+
             $existing = InstagramPublication::query()
                 ->where('idempotency_key', $idempotencyKey)
                 ->first();
@@ -211,6 +208,8 @@ class InstagramPublishingService
 
                 throw $e;
             }
-        });
+        } finally {
+            InstagramCacheLock::release($lock);
+        }
     }
 }

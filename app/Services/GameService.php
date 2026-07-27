@@ -16,11 +16,16 @@ class GameService
 {
     public const TZ = 'America/Sao_Paulo';
 
+    /** Week team remains visible until this weekday/hour; then the next round is created. */
+    public const NEXT_ROUND_WEEKDAY = CarbonInterface::THURSDAY;
+
+    public const NEXT_ROUND_HOUR = 12;
+
     public function getOrCreateThisWeekGame(?User $admin = null, ?CarbonInterface $now = null): Game
     {
         $clock = CarbonImmutable::instance($now ?? now(self::TZ))->setTimezone(self::TZ);
         $gameDate = $this->resolveGameDate($clock);
-        $opensAt = $gameDate->subDay()->setTime(17, 0);
+        $opensAt = $this->resolveOpensAt($gameDate);
 
         // Se já existe um jogo não finalizado, retorna ele (evita criar rodada duplicada)
         $activeGame = Game::where('status', '!=', GameStatus::DONE)
@@ -41,7 +46,7 @@ class GameService
 
         if (Game::whereDate('date', $gameDate->toDateString())->where('status', GameStatus::DONE)->exists()) {
             $gameDate = $gameDate->addWeek();
-            $opensAt = $gameDate->subDay()->setTime(17, 0);
+            $opensAt = $this->resolveOpensAt($gameDate);
 
             $existingGame = Game::whereDate('date', $gameDate->toDateString())
                 ->where('status', '!=', GameStatus::DONE)
@@ -52,11 +57,9 @@ class GameService
             }
         }
 
-        $lastGame = Game::orderByDesc('date')->first();
-        $lastGameIsDone = $lastGame?->status === GameStatus::DONE;
-
-        // Novo jogo: sexta–domingo (início da semana) ou assim que a rodada anterior finalizar
-        if ($clock->isFriday() || $clock->isSaturday() || $clock->isSunday() || $lastGameIsDone) {
+        // Nova rodada só a partir de quinta 12h (e sex–dom). Até lá mantém o jogo DONE
+        // com times da semana visíveis — não criar só porque o placar foi registrado.
+        if ($this->canCreateNextRound($clock)) {
             $lastRound = Game::whereYear('date', $gameDate->year)->max('round') ?? 0;
 
             return Game::create([
@@ -68,7 +71,7 @@ class GameService
             ]);
         }
 
-        // Seg-Qui (rodada ainda em andamento): retorna o último jogo (mantém resultados visíveis)
+        // Seg–qui de manhã (rodada finalizada): mantém resultados / time da semana
         return Game::orderByDesc('date')->firstOrFail();
     }
 
@@ -124,12 +127,44 @@ class GameService
         rescue(fn () => broadcast(new CaptainsDrawn($freshGame->id, $payload))->toOthers(), report: false);
     }
 
+    /**
+     * Nova rodada: quinta a partir das 12h, ou sexta–domingo.
+     */
+    public function canCreateNextRound(CarbonInterface $clock): bool
+    {
+        $base = CarbonImmutable::instance($clock)->setTimezone(self::TZ);
+
+        if ($base->isFriday() || $base->isSaturday() || $base->isSunday()) {
+            return true;
+        }
+
+        if ($base->isThursday() && $base->hour >= self::NEXT_ROUND_HOUR) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Inscrições abrem na sexta 17h anterior à segunda do jogo.
+     */
+    public function resolveOpensAt(CarbonImmutable $gameMonday): CarbonImmutable
+    {
+        return $gameMonday->subDays(3)->setTime(17, 0);
+    }
+
     private function resolveGameDate(CarbonInterface $date): CarbonImmutable
     {
         $base = CarbonImmutable::instance($date)->setTimezone(self::TZ);
         $thisMonday = $this->thisWeekMondayDate($base);
 
-        if ($base->isFriday() || $base->isSaturday() || $base->isSunday()) {
+        // Qui 12h+ e sex–dom → próxima segunda
+        if ($this->canCreateNextRound($base)) {
+            if ($base->isFriday() || $base->isSaturday() || $base->isSunday()) {
+                return $thisMonday->addWeek();
+            }
+
+            // Quinta após 12h: ainda na semana do jogo desta segunda (já DONE) → próxima segunda
             return $thisMonday->addWeek();
         }
 

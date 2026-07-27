@@ -182,7 +182,7 @@ class InstagramPublicationPreparer
         $isWinner = collect($winnerColors)->contains(fn (TeamColor $c) => $c === $color);
         $scoring = $this->scoringUsersResolver->resolveForTeamColor($game, $color->value);
         $captain = $team?->captain;
-        $music = $this->musicResolver->resolveForCaptain($captain);
+        $music = $this->musicResolver->resolveForTeam($game, $color);
 
         return [
             'round' => $game->round,
@@ -323,9 +323,11 @@ class InstagramPublicationPreparer
         $stillAbsolute = $dirAbsolute.'/story-'.$color->value.'.jpg';
         $this->assetService->convertPngToJpeg($sourceAbsolute, $stillAbsolute);
 
-        $music = $this->musicResolver->resolveForCaptain(
-            $game->teams->firstWhere('color', $color)?->captain
-        );
+        $music = $this->musicResolver->resolveForTeam($game, $color);
+
+        $usernames = is_array($payload['taggable_usernames'] ?? null)
+            ? $payload['taggable_usernames']
+            : [];
 
         $videoRelative = $dirRelative.'/story-'.$color->value.'.mp4';
         $videoAbsolute = $dirAbsolute.'/story-'.$color->value.'.mp4';
@@ -338,17 +340,17 @@ class InstagramPublicationPreparer
             $duration,
         );
 
-        $tags = $this->tagService->distributeTags(
-            is_array($payload['taggable_usernames'] ?? null) ? $payload['taggable_usernames'] : []
-        );
+        $tags = $this->tagService->distributeTags($usernames);
 
         $this->createItem($publication, 0, InstagramMediaType::Video->value, $videoRelative, [
             'kind' => 'weekly_team_story',
             'team_color' => $color->value,
             'still_path' => $stillRelative,
             'music_source' => $music['source'] ?? 'none',
+            'music_title' => $music['title'] ?? null,
             'taggable_usernames' => array_map(fn ($t) => $t->username, $tags),
             'user_tags' => array_map(fn ($t) => $t->toApiArray(), $tags),
+            'tag_resolution' => $payload['tag_resolution'] ?? null,
         ]);
     }
 

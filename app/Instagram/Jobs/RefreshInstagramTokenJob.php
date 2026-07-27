@@ -19,10 +19,9 @@ class RefreshInstagramTokenJob implements ShouldQueue
 
     public int $timeout = 60;
 
-    public bool $afterCommit = true;
-
     public function __construct()
     {
+        $this->afterCommit = true;
         $this->onQueue((string) config('instagram.queue', 'default'));
     }
 

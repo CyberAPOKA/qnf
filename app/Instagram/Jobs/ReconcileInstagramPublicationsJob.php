@@ -19,10 +19,9 @@ class ReconcileInstagramPublicationsJob implements ShouldQueue
 
     public int $timeout = 120;
 
-    public bool $afterCommit = true;
-
     public function __construct()
     {
+        $this->afterCommit = true;
         $this->onQueue((string) config('instagram.queue', 'default'));
     }
 
@@ -44,7 +43,13 @@ class ReconcileInstagramPublicationsJob implements ShouldQueue
 
         InstagramPublication::query()
             ->whereIn('status', $statuses)
-            ->where('updated_at', '<=', $stuckBefore)
+            ->where(function ($query) use ($stuckBefore): void {
+                $query->where('updated_at', '<=', $stuckBefore)
+                    ->orWhere(function ($q): void {
+                        $q->where('status', InstagramPublicationStatus::Pending->value)
+                            ->where('attempts', 0);
+                    });
+            })
             ->orderBy('id')
             ->chunkById(50, function ($publications) use (&$redispatched): void {
                 foreach ($publications as $publication) {

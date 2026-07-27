@@ -11,13 +11,13 @@ use App\Instagram\Services\InstagramContainerService;
 use App\Instagram\Services\InstagramMediaValidator;
 use App\Instagram\Services\InstagramPublicationPreparer;
 use App\Instagram\Services\InstagramAssetService;
+use App\Instagram\Support\InstagramCacheLock;
 use App\Models\InstagramPublication;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -45,13 +45,15 @@ class ProcessInstagramPublicationJob implements ShouldQueue
         InstagramContainerService $containerService,
         InstagramAssetService $assetService,
     ): void {
-        $lock = Cache::lock('instagram-publication-'.$this->publicationId, 320);
+        $lockResult = InstagramCacheLock::attempt('instagram-publication-'.$this->publicationId, 320);
 
-        if (! $lock->get()) {
+        if (! $lockResult['acquired']) {
             $this->release(15);
 
             return;
         }
+
+        $lock = $lockResult['lock'];
 
         try {
             $publication = InstagramPublication::query()
@@ -90,7 +92,7 @@ class ProcessInstagramPublicationJob implements ShouldQueue
                 return;
             }
         } finally {
-            optional($lock)->release();
+            InstagramCacheLock::release($lock);
         }
     }
 
