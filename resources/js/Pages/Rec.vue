@@ -9,11 +9,9 @@ import RecCameraStage from '@/Components/Rec/RecCameraStage.vue';
 import RecPendingUploads from '@/Components/Rec/RecPendingUploads.vue';
 import RecSaveControls from '@/Components/Rec/RecSaveControls.vue';
 import RecSaveList from '@/Components/Rec/RecSaveList.vue';
-import { useRecBuffer } from '@/composables/useRecBuffer';
-import { useRecSession } from '@/composables/useRecSession';
 import { useRecCapture } from '@/composables/rec/useRecCapture';
 import { useRecSegmentStore } from '@/composables/rec/useRecSegmentStore';
-import { useRecSessionV2 } from '@/composables/rec/useRecSessionV2';
+import { useRecSession } from '@/composables/rec/useRecSession';
 import { useRecUploadQueue } from '@/composables/rec/useRecUploadQueue';
 
 const props = defineProps({
@@ -24,7 +22,6 @@ const props = defineProps({
     current_user_id: Number,
     current_user_name: String,
     rec_config: Object,
-    rec_v2_enabled: Boolean,
 });
 
 const CAPTURE_SCOPE_TAGS = {
@@ -33,7 +30,6 @@ const CAPTURE_SCOPE_TAGS = {
     right: ['A2', 'B2'],
 };
 
-const isV2 = props.rec_v2_enabled === true;
 const selectedAngle = ref(null);
 const localError = ref(null);
 const isTogglingRec = ref(false);
@@ -42,34 +38,28 @@ const stageEl = ref(null);
 const preferLandscapeHint = ref(false);
 const availableMs = ref(0);
 
-const segmentStore = isV2 ? useRecSegmentStore() : null;
+const segmentStore = useRecSegmentStore();
 let recSession = null;
-let uploadQueue = null;
 
-const capture = isV2
-    ? useRecCapture({
-        config: props.rec_config,
-        store: segmentStore,
-        sessionUuid: () => recSession?.session?.value?.uuid || null,
-        cameraTag: () => selectedAngle.value,
-        onSegment: (segment) => uploadQueue?.enqueueSegment(segment),
-    })
-    : useRecBuffer();
+const uploadQueue = useRecUploadQueue({
+    config: props.rec_config,
+    store: segmentStore,
+    gameId: props.game.id,
+});
 
-if (isV2) {
-    uploadQueue = useRecUploadQueue({
-        config: props.rec_config,
-        store: segmentStore,
-        gameId: props.game.id,
-    });
-    recSession = useRecSessionV2(props, {
-        store: segmentStore,
-        capture,
-        uploadQueue,
-    });
-} else {
-    recSession = useRecSession(props, { onSaveRequested: handleSaveRequested });
-}
+const capture = useRecCapture({
+    config: props.rec_config,
+    store: segmentStore,
+    sessionUuid: () => recSession?.session?.value?.uuid || null,
+    cameraTag: () => selectedAngle.value,
+    onSegment: (segment) => uploadQueue?.enqueueSegment(segment),
+});
+
+recSession = useRecSession(props, {
+    store: segmentStore,
+    capture,
+    uploadQueue,
+});
 
 const {
     isRecording,
@@ -93,14 +83,13 @@ const {
     registerRecorder,
     unregisterRecorder,
     triggerSave,
+    isScopeCoolingDown,
+    health,
+    receiveSave,
 } = recSession;
 
 const activeRecorderCount = computed(() => recorders.value.length);
-const isThisDeviceRecording = computed(() =>
-    isV2
-        ? isRecording.value
-        : recorders.value.some((item) => item.recorder_id === recorderId),
-);
+const isThisDeviceRecording = computed(() => isRecording.value);
 const takenAngles = computed(() =>
     new Set(recorders.value.map((item) => item.camera_tag).filter(Boolean)),
 );
@@ -114,12 +103,7 @@ const canSave = computed(() => activeRecorderCount.value > 0 && !isSaving.value)
 
 function canSaveScope(scope) {
     if (!canSave.value) return false;
-    if (!isV2 && typeof recSession.isScopeCoolingDown === 'function' && recSession.isScopeCoolingDown(scope)) {
-        return false;
-    }
-    if (isV2 && typeof recSession.isScopeCoolingDown === 'function' && recSession.isScopeCoolingDown(scope)) {
-        return false;
-    }
+    if (isScopeCoolingDown(scope)) return false;
     const tags = CAPTURE_SCOPE_TAGS[scope] || CAPTURE_SCOPE_TAGS.all;
     return recorders.value.some((item) => tags.includes(item.camera_tag));
 }
@@ -158,12 +142,18 @@ function unlockOrientation() {
 
 async function enterFullscreen() {
     const element = stageEl.value?.$el || stageEl.value;
+    // Always apply CSS fullscreen so iOS works even when Fullscreen API rejects.
+    isFullscreen.value = true;
+    await lockLandscape();
+
     try {
-        await (element?.requestFullscreen?.() || element?.webkitRequestFullscreen?.());
-        isFullscreen.value = true;
-        await lockLandscape();
+        const request = element?.requestFullscreen?.bind(element)
+            || element?.webkitRequestFullscreen?.bind(element);
+        if (request) {
+            await request();
+        }
     } catch {
-        localError.value = 'Não foi possível entrar em tela cheia neste aparelho.';
+        // CSS fullscreen already active; native API is best-effort on iPhone.
     }
 }
 
@@ -180,7 +170,12 @@ async function exitFullscreen() {
 }
 
 function onFullscreenChange() {
-    isFullscreen.value = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    const nativeFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!nativeFullscreen && isFullscreen.value) {
+        // Keep CSS fullscreen unless the user explicitly exited via our UI.
+        return;
+    }
+    isFullscreen.value = nativeFullscreen;
     if (!isFullscreen.value) unlockOrientation();
 }
 
@@ -209,8 +204,7 @@ async function toggleRecMode() {
             return;
         }
 
-        // Camera must start before any network await: iOS/Android drop the user-gesture
-        // token after the first await, and getUserMedia then fails or never prompts.
+        // Camera first: mobile browsers require getUserMedia inside the user gesture.
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
@@ -232,54 +226,15 @@ async function toggleRecMode() {
         try {
             await stopCapture();
         } catch {
-            // Best-effort cleanup after an unexpected start failure.
+            // Best-effort cleanup.
         }
-        if (isV2) {
-            try {
-                await unregisterRecorder();
-            } catch {
-                // Session may never have been created.
-            }
+        try {
+            await unregisterRecorder();
+        } catch {
+            // Session may never have been created.
         }
     } finally {
         isTogglingRec.value = false;
-    }
-}
-
-const handledSaveRequests = new Set();
-
-async function uploadFromLegacyBuffer(saveRequestUuid, cameraTags = null) {
-    if (
-        Array.isArray(cameraTags)
-        && cameraTags.length
-        && !cameraTags.includes(selectedAngle.value)
-    ) return false;
-    if (!isRecording.value || handledSaveRequests.has(saveRequestUuid)) return false;
-    if (!capture.hasBuffer()) {
-        localError.value = `Aguarde pelo menos ${capture.minClipSeconds}s gravando antes de salvar.`;
-        return false;
-    }
-
-    const snapshot = await capture.snapshot();
-    if (!snapshot?.blob?.size) {
-        localError.value = 'Buffer insuficiente. Aguarde alguns segundos e tente de novo.';
-        return false;
-    }
-
-    try {
-        recSession.enqueueUpload(
-            saveRequestUuid,
-            snapshot.blob,
-            snapshot.durationSeconds || capture.bufferSeconds,
-            selectedAngle.value,
-            snapshot.prefixBlob || null,
-        );
-        // Mark only after enqueue succeeds so a transient snapshot/enqueue failure can retry.
-        handledSaveRequests.add(saveRequestUuid);
-        return true;
-    } catch {
-        handledSaveRequests.delete(saveRequestUuid);
-        return false;
     }
 }
 
@@ -287,25 +242,15 @@ async function handleSave(scope = 'all') {
     localError.value = null;
     const save = await triggerSave(scope);
     if (!save) return;
-
-    if (isV2) {
-        await recSession.receiveSave(save);
-    } else if (isRecording.value) {
-        await uploadFromLegacyBuffer(
-            save.uuid,
-            save.camera_tags || CAPTURE_SCOPE_TAGS[scope],
-        );
-    }
-}
-
-async function handleSaveRequested(payload) {
-    if (!isV2) {
-        await uploadFromLegacyBuffer(payload.saveRequestUuid, payload.cameraTags);
-    }
+    await receiveSave(save);
 }
 
 async function updateAvailableMs() {
-    if (isV2) availableMs.value = await capture.getAvailableMs();
+    const ms = await capture.getAvailableMs();
+    availableMs.value = ms;
+    if (recSession?.availableMs) {
+        recSession.availableMs.value = ms;
+    }
 }
 
 onMounted(() => {
@@ -313,10 +258,9 @@ onMounted(() => {
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 });
 
-let availabilityTimer = null;
-if (isV2 && typeof window !== 'undefined') {
-    availabilityTimer = setInterval(updateAvailableMs, 2_000);
-}
+const availabilityTimer = typeof window !== 'undefined'
+    ? setInterval(updateAvailableMs, 2_000)
+    : null;
 
 onBeforeUnmount(() => {
     document.removeEventListener('fullscreenchange', onFullscreenChange);
@@ -366,10 +310,10 @@ onBeforeUnmount(() => {
                 />
 
                 <RecCameraHealthCard
-                    v-if="isV2 && isRecording"
-                    :status="recSession.health.status.value"
-                    :label="recSession.health.label.value"
-                    :color-class="recSession.health.colorClass.value"
+                    v-if="isRecording"
+                    :status="health.status.value"
+                    :label="health.label.value"
+                    :color-class="health.colorClass.value"
                     :available-ms="availableMs"
                     :pending-uploads="uploadQueue.pendingCount.value"
                     :has-audio="capture.hasAudio.value"
@@ -392,17 +336,12 @@ onBeforeUnmount(() => {
                     @save="handleSave"
                 />
 
-                <RecActiveCameras
-                    :cameras="recorders"
-                    :own-id="recorderId"
-                    :v2="isV2"
-                />
+                <RecActiveCameras :cameras="recorders" :own-id="recorderId" />
                 <RecPendingUploads
-                    v-if="isV2"
                     :jobs="uploadQueue.jobs.value"
                     :processing="uploadQueue.isProcessing.value"
                 />
-                <RecSaveList :saves="recentSaves" :pending="pendingSaves" :v2="isV2" />
+                <RecSaveList :saves="recentSaves" :pending="pendingSaves" />
 
                 <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
                     Voltar ao Dashboard

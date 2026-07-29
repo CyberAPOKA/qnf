@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\Log;
 use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
-class RecV2Controller extends Controller
+class RecApiController extends Controller
 {
     public function __construct(
         private readonly RecRecorderSessionService $sessions,
@@ -44,8 +44,9 @@ class RecV2Controller extends Controller
         }
 
         $session = $result['session'];
+        $recorders = $this->sessions->listActiveForGame($game->id);
 
-        Log::info('REC V2 session start', [
+        Log::info('REC session start', [
             'game_id' => $game->id,
             'user_id' => $request->user()->id,
             'session_uuid' => $session->uuid,
@@ -60,6 +61,8 @@ class RecV2Controller extends Controller
                 'lease_expires_at' => $session->lease_expires_at?->toIso8601String(),
                 'token' => $result['token'],
             ],
+            'sessions' => $recorders,
+            'recorders' => $recorders,
             'config' => $result['config'],
             'server_time_ms' => (int) floor(microtime(true) * 1000),
         ], 201);
@@ -85,6 +88,7 @@ class RecV2Controller extends Controller
         }
 
         $fresh = $result['session'];
+        $recorders = $this->sessions->listActiveForGame($game->id);
 
         return response()->json([
             'session' => [
@@ -93,6 +97,8 @@ class RecV2Controller extends Controller
                 'status' => $fresh->status->value,
                 'lease_expires_at' => $fresh->lease_expires_at?->toIso8601String(),
             ],
+            'sessions' => $recorders,
+            'recorders' => $recorders,
             'time_sync' => $result['time_sync'],
             'pending_saves' => $result['pending_saves'],
             'config' => $this->sessions->clientConfig(),
@@ -105,6 +111,7 @@ class RecV2Controller extends Controller
         $this->assertSessionGame($game, $session);
 
         $fresh = $this->sessions->stop($session, $this->sessionToken($request));
+        $recorders = $this->sessions->listActiveForGame($game->id);
 
         return response()->json([
             'session' => [
@@ -112,6 +119,8 @@ class RecV2Controller extends Controller
                 'status' => $fresh->status->value,
                 'stopped_at' => $fresh->stopped_at?->toIso8601String(),
             ],
+            'sessions' => $recorders,
+            'recorders' => $recorders,
         ]);
     }
 

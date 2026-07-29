@@ -1,24 +1,8 @@
-# Rollback operacional
+# Rollback do REC
 
-Rollback preferido:
+Não há flag para “voltar ao V1”. Em incidente:
 
-```dotenv
-REC_V2_ENABLED=false
-```
-
-Depois, aplique a configuração:
-
-```bash
-php artisan config:clear
-```
-
-ou reconstrua o cache conforme o deploy, e recarregue a página REC. Novas sessões usarão o fluxo V1.
-
-## Preservação
-
-- Não reverta migrations nem apague tabelas/arquivos durante o incidente.
-- Mantenha o worker temporariamente se quiser concluir jobs V2 já aceitos; pare-o somente se ele estiver causando o incidente.
-- Preserve IndexedDB dos dispositivos quando houver uploads pendentes.
-- Registre UUIDs de sessão/SAVE e horário da mudança.
-
-O rollback da flag reduz o risco sem destruir evidências. Depois da estabilização, use `rec:inspect-*` e `rec:reconcile --dry-run` para avaliar o backlog V2.
+1. Preserve banco, storage e IndexedDB dos aparelhos.
+2. Corrija o worker / FFmpeg / rotas.
+3. Use `php artisan rec:health --force` e os comandos `rec:inspect-*`.
+4. Se necessário, desative temporariamente o link REC no dashboard (deploy de código), sem apagar dados.

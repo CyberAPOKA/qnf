@@ -42,6 +42,7 @@ export function useRecCapture(options = {}) {
     let chunks = [];
     let sequence = 0;
     let segmentStartedAt = 0;
+    let recordingStartedAt = 0;
     let segmentTimer = null;
     let watchdogTimer = null;
     let wakeLock = null;
@@ -265,6 +266,7 @@ export function useRecCapture(options = {}) {
             const existing = await store.getSegments(sessionUuid());
             sequence = existing.reduce((max, item) => Math.max(max, item.sequence || 0), 0);
             keepRecording = true;
+            recordingStartedAt = Date.now();
             operationChain = Promise.resolve();
             startRecorder();
             startTimers();
@@ -303,27 +305,38 @@ export function useRecCapture(options = {}) {
         await wakeLock?.release?.().catch(() => {});
         wakeLock = null;
         isRecording.value = false;
+        recordingStartedAt = 0;
     }
 
     async function listLocalSegmentsInWindow(from, until = Date.now()) {
         if (isRecording.value) await rotate();
         const fromMs = typeof from === 'string' ? Date.parse(from) : Number(from);
         const untilMs = typeof until === 'string' ? Date.parse(until) : Number(until);
-        const segments = await store.getSegments(sessionUuid());
+        // Include orphan segments created before the session UUID was assigned.
+        const segments = await store.getSegments();
+        const currentSession = sessionUuid();
         return segments.filter((segment) =>
-            segment.endedAt >= (Number.isFinite(fromMs) ? fromMs : 0)
+            (!currentSession || !segment.sessionUuid || segment.sessionUuid === currentSession)
+            && segment.endedAt >= (Number.isFinite(fromMs) ? fromMs : 0)
             && segment.startedAt <= (Number.isFinite(untilMs) ? untilMs : Date.now()));
     }
 
     async function getAvailableMs() {
-        const segments = await store.getSegments(sessionUuid());
-        if (!segments.length) {
-            return isRecording.value ? Math.max(0, Date.now() - segmentStartedAt) : 0;
+        if (isRecording.value && recordingStartedAt) {
+            return Math.min(
+                config.local_retention_seconds * 1000,
+                Math.max(0, Date.now() - recordingStartedAt),
+            );
         }
-        const earliest = Math.min(...segments.map((item) => item.startedAt));
-        const latest = isRecording.value
-            ? Date.now()
-            : Math.max(...segments.map((item) => item.endedAt));
+
+        const segments = await store.getSegments();
+        const currentSession = sessionUuid();
+        const scoped = segments.filter((segment) =>
+            !currentSession || !segment.sessionUuid || segment.sessionUuid === currentSession);
+        if (!scoped.length) return 0;
+
+        const earliest = Math.min(...scoped.map((item) => item.startedAt));
+        const latest = Math.max(...scoped.map((item) => item.endedAt));
         return Math.min(config.local_retention_seconds * 1000, Math.max(0, latest - earliest));
     }
 

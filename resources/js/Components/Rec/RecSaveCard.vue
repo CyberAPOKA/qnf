@@ -4,7 +4,6 @@ import RecClipPlayer from './RecClipPlayer.vue';
 const props = defineProps({
     save: { type: Object, required: true },
     pending: Object,
-    v2: Boolean,
 });
 
 const order = { B1: 0, B2: 1, A1: 2, A2: 3 };
@@ -35,7 +34,7 @@ function time(iso) {
                 {{ pending.received || 0 }}/{{ pending.expected || 0 }} câmeras
             </span>
         </header>
-        <div v-if="v2 && (save.targets?.length || pending?.targets?.length)" class="px-4 py-2 border-b space-y-1">
+        <div v-if="save.targets?.length || pending?.targets?.length" class="px-4 py-2 border-b space-y-1">
             <div
                 v-for="target in (save.targets || pending.targets)"
                 :key="target.uuid || target.camera_tag"

@@ -3,6 +3,8 @@
 namespace App\Services\Rec;
 
 use App\Enums\RecRecorderSessionStatus;
+use App\Events\RecorderJoined;
+use App\Events\RecorderLeft;
 use App\Models\Game;
 use App\Models\RecRecorderSession;
 use App\Models\User;
@@ -63,6 +65,9 @@ class RecRecorderSessionService
                 ? hash('sha256', (string) $client['device_fingerprint'])
                 : null,
         ]);
+
+        $recorders = $this->listActiveForGame($game->id);
+        rescue(fn () => event(new RecorderJoined($game->id, $recorders)));
 
         return [
             'session' => $session,
@@ -151,7 +156,44 @@ class RecRecorderSessionService
             'lease_expires_at' => now(),
         ]);
 
-        return $session->fresh();
+        $fresh = $session->fresh();
+        $recorders = $this->listActiveForGame($session->game_id);
+        rescue(fn () => event(new RecorderLeft($session->game_id, $recorders)));
+
+        return $fresh;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listActiveForGame(int $gameId): array
+    {
+        return RecRecorderSession::query()
+            ->with('user:id,name')
+            ->where('game_id', $gameId)
+            ->whereIn('status', [
+                RecRecorderSessionStatus::Starting->value,
+                RecRecorderSessionStatus::Recording->value,
+                RecRecorderSessionStatus::Degraded->value,
+                RecRecorderSessionStatus::Reconnecting->value,
+            ])
+            ->where(function ($query) {
+                $query->whereNull('lease_expires_at')
+                    ->orWhere('lease_expires_at', '>=', now());
+            })
+            ->orderBy('camera_tag')
+            ->get()
+            ->map(fn (RecRecorderSession $session) => [
+                'uuid' => $session->uuid,
+                'recorder_id' => $session->uuid,
+                'camera_tag' => $session->camera_tag,
+                'user_id' => $session->user_id,
+                'user_name' => $session->user?->name,
+                'status' => $session->status->value,
+                'buffer_available_ms' => $session->buffer_available_ms,
+            ])
+            ->values()
+            ->all();
     }
 
     public function assertToken(RecRecorderSession $session, string $token): void

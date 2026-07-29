@@ -2,10 +2,6 @@
 
 return [
 
-    'v2_enabled' => (bool) env('REC_V2_ENABLED', false),
-
-    'continuous_segments_enabled' => (bool) env('REC_CONTINUOUS_SEGMENTS_ENABLED', false),
-
     'segment_seconds' => (int) env('REC_SEGMENT_SECONDS', 5),
 
     'buffer_seconds' => (int) env('REC_BUFFER_SECONDS', 30),

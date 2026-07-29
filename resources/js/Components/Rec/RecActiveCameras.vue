@@ -2,7 +2,6 @@
 defineProps({
     cameras: { type: Array, default: () => [] },
     ownId: [String, Number],
-    v2: Boolean,
 });
 </script>
 
@@ -19,7 +18,7 @@ defineProps({
                     <span class="truncate">{{ camera.user_name || camera.user?.name }}</span>
                     <span v-if="(camera.uuid || camera.recorder_id) === ownId" class="text-xs text-gray-400">(você)</span>
                 </span>
-                <span v-if="v2" class="text-[10px] text-gray-500">{{ camera.status || 'online' }}</span>
+                <span class="text-[10px] text-gray-500">{{ camera.status || 'online' }}</span>
             </li>
         </ul>
         <p v-else class="text-sm text-gray-500">Nenhuma câmera gravando.</p>

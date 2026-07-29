@@ -12,7 +12,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
 use Tests\TestCase;
 
-class RecV2SessionTest extends TestCase
+class RecSessionTest extends TestCase
 {
     use RefreshDatabase;
 

@@ -187,7 +187,6 @@ Implemente:
 Adicione configurações equivalentes às seguintes, adaptadas ao padrão do projeto:
 
 ```env
-REC_V2_ENABLED=false
 REC_CONTINUOUS_SEGMENTS_ENABLED=false
 REC_SEGMENT_SECONDS=5
 REC_BUFFER_SECONDS=30
@@ -2265,7 +2264,6 @@ Quando possível:
 
 Documente:
 
-- como desativar REC V2;
 - como voltar para endpoints antigos;
 - como pausar workers;
 - como preservar arquivos;

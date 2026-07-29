@@ -1,39 +1,30 @@
-# Troubleshooting rápido
+# Troubleshooting REC
 
-## Diagnóstico básico
+## Câmera não abre no celular
 
-```bash
-php artisan rec:health --force
-php artisan queue:failed
-php artisan rec:reconcile --dry-run
-php artisan schedule:list
+- Use Safari/Chrome do sistema (não o browser do Instagram/WhatsApp).
+- REC MODE precisa de HTTPS.
+- A câmera abre **antes** do registro da sessão (gesto do usuário).
+
+## Tela cheia no iPhone
+
+Usa fallback CSS (`rec-stage--fullscreen`) quando a Fullscreen API falha.
+
+## Buffer “Aquecendo” por muito tempo
+
+O alvo é `REC_BUFFER_SECONDS` (30s). O contador **Buffer** no card de saúde deve subir. Se ficar em 0–5s, segmentos não estão persistindo (MediaRecorder/IndexedDB).
+
+## SAVE sem preview/final
+
+1. Worker escuta `rec-video-processing`?
+2. `php artisan rec:health --force` — FFmpeg yes?
+3. `php artisan queue:failed`
+4. `php artisan rec:inspect-save {uuid}`
+
+## Worker
+
+Supervisor deve ter:
+
+```text
+--queue=rec-video-processing,default
 ```
-
-## Câmera não inicia
-
-- Confirme HTTPS, permissão de câmera/microfone e suporte a MediaRecorder.
-- Verifique tag ocupada, cache compartilhado e lease.
-- Consulte resposta 409/403 e `rec:inspect-session`.
-
-## Segmentos não chegam
-
-- DevTools → IndexedDB `qnf-rec`: veja `segments` e `uploadJobs`.
-- Confirme online, token, timeout, payload máximo e status HTTP.
-- Um `permanent_failed` exige corrigir a causa; retries automáticos cobrem falhas transitórias.
-
-## SAVE não conclui
-
-- `php artisan rec:inspect-save {uuid}`
-- Verifique `expected_count`, targets, `segments_received`, deadline e clip.
-- Confirme worker `rec-video-processing`.
-- Use reconciliação com `--fix` somente após o dry-run.
-
-## Vídeo não reproduz
-
-- Confira existência/tamanho/path, `storage:link`, MIME e permissões.
-- Rode `ffprobe arquivo.webm`.
-- Procure falhas de `libvpx`, `libopus`, preview/final nos logs.
-
-## Mitigação
-
-Se houver impacto geral, defina `REC_V2_ENABLED=false`, aplique a configuração e preserve banco, storage e IndexedDB.

@@ -13,7 +13,7 @@ function wait(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export function useRecSessionV2(props, options = {}) {
+export function useRecSession(props, options = {}) {
     const config = useRecConfig(props.rec_config);
     const store = options.store || useRecSegmentStore();
     const capture = options.capture;
@@ -294,7 +294,7 @@ export function useRecSessionV2(props, options = {}) {
         } catch (error) {
             const message = error?.response?.data?.message
                 || (typeof error?.message === 'string' && error.message.includes('games.rec.sessions.start')
-                    ? 'Rota REC V2 ausente. Rode o deploy do frontend/Ziggy e limpe o cache de rotas.'
+                    ? 'Rota REC ausente. Rode o deploy do frontend/Ziggy e limpe o cache de rotas.'
                     : null)
                 || error?.message
                 || 'Não foi possível iniciar a sessão REC.';
@@ -446,13 +446,9 @@ export function useRecSessionV2(props, options = {}) {
         const idempotencyKey = makeUuid();
 
         try {
-            const route = window.route().has?.('games.rec.save-requests.store')
-                ? routeName('games.rec.save-requests.store')
-                : routeName('games.rec.save');
-            const { data } = await axios.post(route, {
+            const { data } = await axios.post(routeName('games.rec.save-requests.store'), {
                 capture_scope: captureScope,
                 idempotency_key: idempotencyKey,
-                rec_v2: true,
             }, {
                 headers: {
                     ...authHeaders(),

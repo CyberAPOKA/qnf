@@ -3,106 +3,188 @@
 namespace Tests\Feature;
 
 use App\Enums\GameStatus;
+use App\Enums\RecRecorderSessionStatus;
+use App\Enums\RecSegmentStatus;
 use App\Models\Game;
+use App\Models\RecRecorderSession;
 use App\Models\RecSaveRequest;
+use App\Models\RecSegment;
 use App\Models\User;
-use App\Services\RecSessionService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 use Tests\TestCase;
 
 class RecSaveTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_left_save_targets_only_a1_and_b1_and_allows_opposite_side(): void
+    public function test_left_and_right_scope_create_matching_targets(): void
     {
-        $user = User::factory()->create();
-        $otherUser = User::factory()->create();
-        $game = $this->createGame();
-        $session = app(RecSessionService::class);
+        Queue::fake();
 
-        $session->registerRecorder($game, $user, 'rec-a1', 'A1');
-        $session->registerRecorder($game, $user, 'rec-a2', 'A2');
-        $session->registerRecorder($game, $user, 'rec-b1', 'B1');
-        $session->registerRecorder($game, $user, 'rec-b2', 'B2');
+        $user = User::factory()->create();
+        $game = $this->createGame();
+
+        $this->openRecSession($user, $game, 'A1');
+        $this->openRecSession($user, $game, 'A2');
+        $this->openRecSession($user, $game, 'B1');
+        $this->openRecSession($user, $game, 'B2');
+
+        $left = $this->actingAs($user)
+            ->postJson(route('games.rec.save-requests.store', $game), [
+                'capture_scope' => 'left',
+                'idempotency_key' => 'left-1',
+            ])
+            ->assertCreated();
+
+        $this->assertSame(['A1', 'B1'], collect($left->json('save_request.targets'))->pluck('camera_tag')->sort()->values()->all());
+
+        $right = $this->actingAs($user)
+            ->postJson(route('games.rec.save-requests.store', $game), [
+                'capture_scope' => 'right',
+                'idempotency_key' => 'right-1',
+            ])
+            ->assertCreated();
+
+        $this->assertSame(['A2', 'B2'], collect($right->json('save_request.targets'))->pluck('camera_tag')->sort()->values()->all());
+    }
+
+    public function test_same_scope_is_blocked_but_opposite_side_is_allowed(): void
+    {
+        Queue::fake();
+
+        $user = User::factory()->create();
+        $game = $this->createGame();
+        $this->openRecSession($user, $game, 'A1');
+        $this->openRecSession($user, $game, 'A2');
+        $this->openRecSession($user, $game, 'B1');
+        $this->openRecSession($user, $game, 'B2');
 
         $this->actingAs($user)
-            ->postJson(route('games.rec.save', $game), [
+            ->postJson(route('games.rec.save-requests.store', $game), [
                 'capture_scope' => 'left',
+                'idempotency_key' => 'save-1',
             ])
-            ->assertOk()
-            ->assertJsonPath('expected_recorders', 2)
-            ->assertJsonPath('save_request.capture_scope', 'left')
-            ->assertJsonPath('save_request.camera_tags', ['A1', 'B1'])
-            ->assertJsonPath('locked_scopes', ['left']);
+            ->assertCreated();
 
-        $this->assertDatabaseHas('rec_save_requests', [
-            'game_id' => $game->id,
-            'capture_scope' => 'left',
-        ]);
+        $this->actingAs($user)
+            ->postJson(route('games.rec.save-requests.store', $game), [
+                'capture_scope' => 'all',
+                'idempotency_key' => 'save-2',
+            ])
+            ->assertStatus(429);
 
-        $this->actingAs($otherUser)
-            ->postJson(route('games.rec.save', $game), [
+        $this->actingAs($user)
+            ->postJson(route('games.rec.save-requests.store', $game), [
                 'capture_scope' => 'right',
+                'idempotency_key' => 'save-3',
             ])
-            ->assertOk()
-            ->assertJsonPath('expected_recorders', 2)
-            ->assertJsonPath('save_request.capture_scope', 'right')
-            ->assertJsonPath('locked_scopes', ['right']);
+            ->assertCreated();
 
         $this->assertSame(2, RecSaveRequest::count());
     }
 
-    public function test_left_save_blocks_all_but_not_right(): void
+    public function test_save_only_targets_active_cameras_in_scope(): void
     {
+        Queue::fake();
+
         $user = User::factory()->create();
         $game = $this->createGame();
-        $session = app(RecSessionService::class);
+        $this->openRecSession($user, $game, 'A1');
+        $this->openRecSession($user, $game, 'A2');
 
-        $session->registerRecorder($game, $user, 'rec-a1', 'A1');
-        $session->registerRecorder($game, $user, 'rec-a2', 'A2');
-        $session->registerRecorder($game, $user, 'rec-b1', 'B1');
-        $session->registerRecorder($game, $user, 'rec-b2', 'B2');
+        $response = $this->actingAs($user)
+            ->postJson(route('games.rec.save-requests.store', $game), [
+                'capture_scope' => 'left',
+                'idempotency_key' => 'left-only-a1',
+            ])
+            ->assertCreated();
 
-        $this->actingAs($user)
-            ->postJson(route('games.rec.save', $game), ['capture_scope' => 'left'])
-            ->assertOk();
+        $tags = collect($response->json('save_request.targets'))->pluck('camera_tag')->all();
 
-        $this->actingAs($user)
-            ->postJson(route('games.rec.save', $game), ['capture_scope' => 'all'])
-            ->assertStatus(429)
-            ->assertJsonStructure(['message', 'retry_after', 'locked_scopes']);
-
-        $this->actingAs($user)
-            ->postJson(route('games.rec.save', $game), ['capture_scope' => 'left'])
-            ->assertStatus(429);
-
-        $this->actingAs($user)
-            ->postJson(route('games.rec.save', $game), ['capture_scope' => 'right'])
-            ->assertOk();
+        $this->assertSame(['A1'], $tags);
+        $this->assertSame(1, $response->json('save_request.expected_count'));
     }
 
-    public function test_upload_rejects_camera_outside_save_scope(): void
+    public function test_segment_pinning_for_save_window(): void
     {
+        Queue::fake();
+
         $user = User::factory()->create();
         $game = $this->createGame();
-        $saveRequest = app(RecSessionService::class)
-            ->createSaveRequest($game, $user, 'left');
+        $session = $this->createSessionModel($user, $game, 'A1');
 
-        $this->actingAs($user)
-            ->post(route('games.rec.upload', $game), [
-                'save_request_uuid' => $saveRequest->uuid,
-                'recorder_id' => 'rec-a2',
-                'camera_tag' => 'A2',
-                'duration_seconds' => 30,
-                'video' => UploadedFile::fake()->create('clip.webm', 100, 'video/webm'),
+        RecSegment::create([
+            'uuid' => (string) Str::uuid(),
+            'recorder_session_id' => $session->id,
+            'game_id' => $game->id,
+            'sequence' => 1,
+            'idempotency_key' => (string) Str::uuid(),
+            'estimated_server_started_at' => now()->subSeconds(20),
+            'estimated_server_ended_at' => now()->subSeconds(15),
+            'status' => RecSegmentStatus::Verified,
+            'file_path' => 'rec/test.webm',
+            'storage_disk' => 'public',
+            'received_at' => now()->subSeconds(15),
+            'verified_at' => now()->subSeconds(15),
+        ]);
+
+        $response = $this->actingAs($user)
+            ->postJson(route('games.rec.save-requests.store', $game), [
+                'capture_scope' => 'all',
+                'idempotency_key' => 'pin-1',
             ])
-            ->assertStatus(422)
-            ->assertJsonPath(
-                'message',
-                'Esta câmera não pertence ao lado selecionado para o SAVE.',
-            );
+            ->assertCreated();
+
+        $this->assertGreaterThanOrEqual(1, $response->json('save_request.targets.0.segments_received'));
+        $this->assertDatabaseHas('rec_segments', [
+            'recorder_session_id' => $session->id,
+            'status' => RecSegmentStatus::Pinned->value,
+        ]);
+    }
+
+    private function openRecSession(User $user, Game $game, string $cameraTag): array
+    {
+        $response = $this->actingAs($user)
+            ->postJson(route('games.rec.sessions.start', $game), [
+                'camera_tag' => $cameraTag,
+            ])
+            ->assertCreated();
+
+        return [
+            'uuid' => $response->json('session.uuid'),
+            'token' => $response->json('session.token'),
+        ];
+    }
+
+    private function createSessionModel(User $user, Game $game, string $cameraTag): RecRecorderSession
+    {
+        $uuid = (string) Str::uuid();
+
+        app(\App\Services\Rec\RecRecorderLeaseService::class)->acquire(
+            $game->id,
+            $cameraTag,
+            [
+                'session_uuid' => $uuid,
+                'user_id' => $user->id,
+                'camera_tag' => $cameraTag,
+            ],
+            35,
+        );
+
+        return RecRecorderSession::create([
+            'uuid' => $uuid,
+            'game_id' => $game->id,
+            'user_id' => $user->id,
+            'camera_tag' => $cameraTag,
+            'status' => RecRecorderSessionStatus::Recording,
+            'session_token_hash' => Hash::make('token'),
+            'started_at' => now(),
+            'heartbeat_at' => now(),
+            'lease_expires_at' => now()->addSeconds(35),
+        ]);
     }
 
     private function createGame(): Game

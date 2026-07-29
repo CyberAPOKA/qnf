@@ -9,8 +9,8 @@ use App\Http\Controllers\GameController;
 use App\Http\Controllers\MercadoPagoWebhookController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\RecApiController;
 use App\Http\Controllers\RecController;
-use App\Http\Controllers\RecV2Controller;
 use App\Http\Controllers\RoundsController;
 use App\Http\Controllers\StatisticsController;
 use App\Http\Controllers\TimelineController;
@@ -49,22 +49,16 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
         Route::post('/pick', [DraftController::class, 'pick'])->name('games.pick');
 
         Route::get('/rec', [RecController::class, 'show'])->name('games.rec');
-        Route::post('/rec/start', [RecController::class, 'start'])->name('games.rec.start');
-        Route::post('/rec/heartbeat', [RecController::class, 'heartbeat'])->name('games.rec.heartbeat');
-        Route::post('/rec/stop', [RecController::class, 'stop'])->name('games.rec.stop');
-        Route::post('/rec/save', [RecController::class, 'save'])->name('games.rec.save');
-        Route::post('/rec/upload', [RecController::class, 'upload'])->name('games.rec.upload');
-
-        Route::post('/rec/sessions', [RecV2Controller::class, 'startSession'])->name('games.rec.sessions.start');
-        Route::post('/rec/sessions/{session}/heartbeat', [RecV2Controller::class, 'heartbeat'])->name('games.rec.sessions.heartbeat');
-        Route::post('/rec/sessions/{session}/stop', [RecV2Controller::class, 'stopSession'])->name('games.rec.sessions.stop');
-        Route::post('/rec/sessions/{session}/segments', [RecV2Controller::class, 'uploadSegment'])->name('games.rec.sessions.segments');
-        Route::get('/rec/sessions/{session}/segments/status', [RecV2Controller::class, 'segmentStatus'])->name('games.rec.sessions.segments.status');
-        Route::get('/rec/sessions/{session}/save-requests/pending', [RecV2Controller::class, 'pendingSaves'])->name('games.rec.sessions.pending-saves');
-        Route::post('/rec/sessions/{session}/save-requests/{saveRequest}/ack', [RecV2Controller::class, 'ackSave'])->name('games.rec.sessions.ack-save');
-        Route::get('/rec/sessions/{session}/recovery-requests', [RecV2Controller::class, 'recoveryRequests'])->name('games.rec.sessions.recovery');
-        Route::post('/rec/save-requests', [RecV2Controller::class, 'createSave'])->name('games.rec.save-requests.store');
-        Route::get('/rec/save-requests/{saveRequest}', [RecV2Controller::class, 'showSave'])->name('games.rec.save-requests.show');
+        Route::post('/rec/sessions', [RecApiController::class, 'startSession'])->name('games.rec.sessions.start');
+        Route::post('/rec/sessions/{session}/heartbeat', [RecApiController::class, 'heartbeat'])->name('games.rec.sessions.heartbeat');
+        Route::post('/rec/sessions/{session}/stop', [RecApiController::class, 'stopSession'])->name('games.rec.sessions.stop');
+        Route::post('/rec/sessions/{session}/segments', [RecApiController::class, 'uploadSegment'])->name('games.rec.sessions.segments');
+        Route::get('/rec/sessions/{session}/segments/status', [RecApiController::class, 'segmentStatus'])->name('games.rec.sessions.segments.status');
+        Route::get('/rec/sessions/{session}/save-requests/pending', [RecApiController::class, 'pendingSaves'])->name('games.rec.sessions.pending-saves');
+        Route::post('/rec/sessions/{session}/save-requests/{saveRequest}/ack', [RecApiController::class, 'ackSave'])->name('games.rec.sessions.ack-save');
+        Route::get('/rec/sessions/{session}/recovery-requests', [RecApiController::class, 'recoveryRequests'])->name('games.rec.sessions.recovery');
+        Route::post('/rec/save-requests', [RecApiController::class, 'createSave'])->name('games.rec.save-requests.store');
+        Route::get('/rec/save-requests/{saveRequest}', [RecApiController::class, 'showSave'])->name('games.rec.save-requests.show');
     });
 
     Route::post('/payments/{payment}/confirm', [PaymentController::class, 'confirm'])->name('payments.confirm');

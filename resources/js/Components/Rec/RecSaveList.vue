@@ -4,7 +4,6 @@ import RecSaveCard from './RecSaveCard.vue';
 defineProps({
     saves: { type: Array, default: () => [] },
     pending: { type: Object, default: () => ({}) },
-    v2: Boolean,
 });
 </script>
 
@@ -17,7 +16,6 @@ defineProps({
             :key="save.uuid"
             :save="save"
             :pending="pending[save.uuid]"
-            :v2="v2"
         />
     </section>
 </template>
