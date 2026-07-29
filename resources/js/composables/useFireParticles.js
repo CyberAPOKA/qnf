@@ -31,11 +31,28 @@ function normalizeTargets(targets) {
         selector: target.selector,
         colors: target.colors || DEFAULT_COLORS,
         particleCount: target.particleCount,
+        auraClass: target.auraClass || null,
     }));
+}
+
+function positionStyle(rect, wrapperRect, zIndex, { insetY = 0 } = {}) {
+    const top = rect.top - wrapperRect.top + insetY;
+    const height = Math.max(0, rect.height - insetY * 2);
+
+    return `
+        position: absolute;
+        top: ${top}px;
+        left: ${rect.left - wrapperRect.left}px;
+        width: ${rect.width}px;
+        height: ${height}px;
+        pointer-events: none;
+        z-index: ${zIndex};
+    `;
 }
 
 export function useFireParticles() {
     let canvasInstances = [];
+    let overlayNodes = [];
     let animFrameId = null;
 
     function animate() {
@@ -82,10 +99,11 @@ export function useFireParticles() {
     }
 
     /**
-     * Attach particles to elements matching selectors inside a wrapper.
+     * Attach particles (+ optional aura overlays) to elements matching selectors.
+     * Aura is a real <div> so iOS Safari can animate box-shadow (unlike <tr>).
      * @param {HTMLElement} wrapper
-     * @param {string|{selector:string,colors?:string[],particleCount?:number}[]} targets
-     * @param {number} particleCount - default count when a target omits particleCount
+     * @param {string|{selector:string,colors?:string[],particleCount?:number,auraClass?:string}[]} targets
+     * @param {number} particleCount
      */
     function init(wrapper, targets, particleCount = 30) {
         destroy();
@@ -103,22 +121,24 @@ export function useFireParticles() {
 
             elements.forEach((el) => {
                 const rect = el.getBoundingClientRect();
-                const canvas = document.createElement('canvas');
-                const dpr = window.devicePixelRatio || 1;
                 const w = rect.width;
                 const h = rect.height;
 
+                if (target.auraClass) {
+                    const aura = document.createElement('div');
+                    aura.className = target.auraClass;
+                    // Small vertical inset keeps adjacent streak borders from blending.
+                    aura.style.cssText = positionStyle(rect, wrapperRect, 3, { insetY: 2 });
+                    wrapper.appendChild(aura);
+                    overlayNodes.push(aura);
+                }
+
+                const canvas = document.createElement('canvas');
+                const dpr = window.devicePixelRatio || 1;
+
                 canvas.width = w * dpr;
                 canvas.height = h * dpr;
-                canvas.style.cssText = `
-                    position: absolute;
-                    top: ${rect.top - wrapperRect.top}px;
-                    left: ${rect.left - wrapperRect.left}px;
-                    width: ${w}px;
-                    height: ${h}px;
-                    pointer-events: none;
-                    z-index: 4;
-                `;
+                canvas.style.cssText = positionStyle(rect, wrapperRect, 4);
 
                 const ctx = canvas.getContext('2d');
                 ctx.scale(dpr, dpr);
@@ -148,7 +168,11 @@ export function useFireParticles() {
         for (const { canvas } of canvasInstances) {
             canvas.remove();
         }
+        for (const node of overlayNodes) {
+            node.remove();
+        }
         canvasInstances = [];
+        overlayNodes = [];
     }
 
     onUnmounted(destroy);

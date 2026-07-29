@@ -30,10 +30,11 @@ export function streakRowClass(winStreak) {
     return resolveStreakTier(winStreak)?.rowClass ?? '';
 }
 
-/** Targets for useFireParticles.init — one entry per tier with particles. */
+/** Targets for useFireParticles.init — particles + iOS-safe aura overlay. */
 export function streakParticleTargets() {
     return STREAK_TIERS.map((tier) => ({
         selector: tier.particleSelector,
         colors: tier.particleColors,
+        auraClass: `qnf-streak-aura qnf-streak-aura--${tier.id}`,
     }));
 }

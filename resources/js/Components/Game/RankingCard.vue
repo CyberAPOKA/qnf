@@ -236,90 +236,140 @@ watch([linePlayers, showPhotos], refreshFire);
 </template>
 
 <style>
-.qnf-streak-row {
-    position: relative;
-    z-index: 0;
+/* Soft cell tint — glow lives on .qnf-streak-aura overlays (div, iOS-safe). */
+.qnf-streak--hot > td {
+    background-color: rgba(255, 120, 0, 0.10);
+}
+
+.qnf-streak--legendary > td {
+    background-color: rgba(124, 58, 237, 0.12);
+}
+
+.qnf-streak-aura {
     -webkit-transform: translateZ(0);
     transform: translateZ(0);
-    animation: qnfStreakPulse 2.2s ease-in-out infinite;
+    -webkit-animation: qnfStreakPulseHot 2.2s ease-in-out infinite;
+    animation: qnfStreakPulseHot 2.2s ease-in-out infinite;
 }
 
-.qnf-streak-row > td:first-child {
-    border-top-left-radius: 10px;
-    border-bottom-left-radius: 10px;
+.qnf-streak-aura--legendary {
+    -webkit-animation-name: qnfStreakPulseLegendary;
+    animation-name: qnfStreakPulseLegendary;
 }
 
-.qnf-streak-row > td:last-child {
-    border-top-right-radius: 10px;
-    border-bottom-right-radius: 10px;
-}
-
-/* 3+ wins — orange fire */
-.qnf-streak--hot {
-    --streak-bg: rgba(255, 120, 0, 0.10);
-    --streak-inset-a: rgba(255, 140, 0, 0.45);
-    --streak-inset-b: rgba(255, 180, 0, 0.20);
-    --streak-ring: rgba(255, 120, 0, 0.6);
-    --streak-glow-a: rgba(255, 100, 0, 0.45);
-    --streak-glow-b: rgba(255, 180, 0, 0.35);
-    --streak-inset-a-mid: rgba(255, 140, 0, 0.55);
-    --streak-inset-b-mid: rgba(255, 180, 0, 0.25);
-    --streak-ring-mid: rgba(255, 120, 0, 0.7);
-    --streak-glow-a-mid: rgba(255, 120, 0, 0.6);
-    --streak-glow-b-mid: rgba(255, 200, 0, 0.45);
-}
-
-/* 5+ wins — purple legendary */
-.qnf-streak--legendary {
-    --streak-bg: rgba(124, 58, 237, 0.12);
-    --streak-inset-a: rgba(124, 58, 237, 0.45);
-    --streak-inset-b: rgba(168, 85, 247, 0.22);
-    --streak-ring: rgba(147, 51, 234, 0.65);
-    --streak-glow-a: rgba(109, 40, 217, 0.5);
-    --streak-glow-b: rgba(192, 132, 252, 0.4);
-    --streak-inset-a-mid: rgba(139, 92, 246, 0.55);
-    --streak-inset-b-mid: rgba(216, 70, 239, 0.28);
-    --streak-ring-mid: rgba(168, 85, 247, 0.8);
-    --streak-glow-a-mid: rgba(124, 58, 237, 0.65);
-    --streak-glow-b-mid: rgba(232, 121, 249, 0.5);
-}
-
-.qnf-streak-row > td {
-    background-color: var(--streak-bg);
-}
-
-@keyframes qnfStreakPulse {
-    0% {
+/* Tighter vertical outer glow + negative spread = cleaner edge when two streaks stack. */
+@keyframes qnfStreakPulseHot {
+    0%, 100% {
         box-shadow:
-            inset 0 0 25px var(--streak-inset-a),
-            inset 0 0 60px var(--streak-inset-b),
-            0 0 0 2px var(--streak-ring),
-            0 0 18px var(--streak-glow-a),
-            0 0 40px var(--streak-glow-b);
+            inset 0 0 22px rgba(255, 140, 0, 0.42),
+            inset 0 0 50px rgba(255, 180, 0, 0.18),
+            0 0 0 2px rgba(255, 120, 0, 0.7),
+            -10px 0 16px -6px rgba(255, 100, 0, 0.4),
+            10px 0 16px -6px rgba(255, 180, 0, 0.35),
+            0 -4px 10px -6px rgba(255, 120, 0, 0.35),
+            0 4px 10px -6px rgba(255, 120, 0, 0.35);
     }
-
     50% {
         box-shadow:
-            inset 0 0 35px var(--streak-inset-a-mid),
-            inset 0 0 90px var(--streak-inset-b-mid),
-            0 0 0 2px var(--streak-ring-mid),
-            0 0 25px var(--streak-glow-a-mid),
-            0 0 60px var(--streak-glow-b-mid);
+            inset 0 0 30px rgba(255, 140, 0, 0.52),
+            inset 0 0 70px rgba(255, 180, 0, 0.22),
+            0 0 0 2px rgba(255, 140, 0, 0.85),
+            -12px 0 20px -5px rgba(255, 120, 0, 0.5),
+            12px 0 20px -5px rgba(255, 200, 0, 0.42),
+            0 -5px 12px -5px rgba(255, 140, 0, 0.45),
+            0 5px 12px -5px rgba(255, 140, 0, 0.45);
     }
+}
 
-    100% {
+@-webkit-keyframes qnfStreakPulseHot {
+    0%, 100% {
         box-shadow:
-            inset 0 0 25px var(--streak-inset-a),
-            inset 0 0 60px var(--streak-inset-b),
-            0 0 0 2px var(--streak-ring),
-            0 0 18px var(--streak-glow-a),
-            0 0 40px var(--streak-glow-b);
+            inset 0 0 22px rgba(255, 140, 0, 0.42),
+            inset 0 0 50px rgba(255, 180, 0, 0.18),
+            0 0 0 2px rgba(255, 120, 0, 0.7),
+            -10px 0 16px -6px rgba(255, 100, 0, 0.4),
+            10px 0 16px -6px rgba(255, 180, 0, 0.35),
+            0 -4px 10px -6px rgba(255, 120, 0, 0.35),
+            0 4px 10px -6px rgba(255, 120, 0, 0.35);
+    }
+    50% {
+        box-shadow:
+            inset 0 0 30px rgba(255, 140, 0, 0.52),
+            inset 0 0 70px rgba(255, 180, 0, 0.22),
+            0 0 0 2px rgba(255, 140, 0, 0.85),
+            -12px 0 20px -5px rgba(255, 120, 0, 0.5),
+            12px 0 20px -5px rgba(255, 200, 0, 0.42),
+            0 -5px 12px -5px rgba(255, 140, 0, 0.45),
+            0 5px 12px -5px rgba(255, 140, 0, 0.45);
+    }
+}
+
+@keyframes qnfStreakPulseLegendary {
+    0%, 100% {
+        box-shadow:
+            inset 0 0 22px rgba(124, 58, 237, 0.42),
+            inset 0 0 50px rgba(168, 85, 247, 0.2),
+            0 0 0 2px rgba(147, 51, 234, 0.75),
+            -10px 0 16px -6px rgba(109, 40, 217, 0.45),
+            10px 0 16px -6px rgba(192, 132, 252, 0.38),
+            0 -4px 10px -6px rgba(147, 51, 234, 0.4),
+            0 4px 10px -6px rgba(147, 51, 234, 0.4);
+    }
+    50% {
+        box-shadow:
+            inset 0 0 30px rgba(139, 92, 246, 0.52),
+            inset 0 0 70px rgba(216, 70, 239, 0.26),
+            0 0 0 2px rgba(168, 85, 247, 0.9),
+            -12px 0 20px -5px rgba(124, 58, 237, 0.55),
+            12px 0 20px -5px rgba(232, 121, 249, 0.45),
+            0 -5px 12px -5px rgba(168, 85, 247, 0.5),
+            0 5px 12px -5px rgba(168, 85, 247, 0.5);
+    }
+}
+
+@-webkit-keyframes qnfStreakPulseLegendary {
+    0%, 100% {
+        box-shadow:
+            inset 0 0 22px rgba(124, 58, 237, 0.42),
+            inset 0 0 50px rgba(168, 85, 247, 0.2),
+            0 0 0 2px rgba(147, 51, 234, 0.75),
+            -10px 0 16px -6px rgba(109, 40, 217, 0.45),
+            10px 0 16px -6px rgba(192, 132, 252, 0.38),
+            0 -4px 10px -6px rgba(147, 51, 234, 0.4),
+            0 4px 10px -6px rgba(147, 51, 234, 0.4);
+    }
+    50% {
+        box-shadow:
+            inset 0 0 30px rgba(139, 92, 246, 0.52),
+            inset 0 0 70px rgba(216, 70, 239, 0.26),
+            0 0 0 2px rgba(168, 85, 247, 0.9),
+            -12px 0 20px -5px rgba(124, 58, 237, 0.55),
+            12px 0 20px -5px rgba(232, 121, 249, 0.45),
+            0 -5px 12px -5px rgba(168, 85, 247, 0.5),
+            0 5px 12px -5px rgba(168, 85, 247, 0.5);
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .qnf-streak-row {
+    .qnf-streak-aura {
+        -webkit-animation: none !important;
         animation: none !important;
+    }
+
+    .qnf-streak-aura--hot {
+        box-shadow:
+            inset 0 0 22px rgba(255, 140, 0, 0.42),
+            0 0 0 2px rgba(255, 120, 0, 0.7),
+            -8px 0 12px -6px rgba(255, 100, 0, 0.35),
+            8px 0 12px -6px rgba(255, 180, 0, 0.3);
+    }
+
+    .qnf-streak-aura--legendary {
+        box-shadow:
+            inset 0 0 22px rgba(124, 58, 237, 0.42),
+            0 0 0 2px rgba(147, 51, 234, 0.75),
+            -8px 0 12px -6px rgba(109, 40, 217, 0.4),
+            8px 0 12px -6px rgba(192, 132, 252, 0.35);
     }
 }
 </style>
