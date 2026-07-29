@@ -1,15 +1,16 @@
 <script setup>
 import { computed, ref, onMounted, nextTick, watch } from 'vue';
 import DataTable from '@/Components/DataTable.vue';
-import FireIcon from '@/Components/Game/FireIcon.vue';
 import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
+import StreakPlayerName from '@/Components/Game/StreakPlayerName.vue';
 import { useClipboard } from '@/composables/useClipboard';
 import { useFireParticles } from '@/composables/useFireParticles';
+import { streakParticleTargets, streakRowClass } from '@/composables/streakTiers';
 
 const showPhotos = ref(true);
 const rankingWrapper = ref(null);
-const { init: initFire, destroy: destroyFire } = useFireParticles();
+const { init: initFire } = useFireParticles();
 
 const props = defineProps({
     ranking: {
@@ -68,7 +69,8 @@ const goalkeepers = computed(() =>
 
 const lineRowClass = (row) => {
     const classes = [];
-    if (row.win_streak >= 3) classes.push('qnf-streak-row');
+    const streakClass = streakRowClass(row.win_streak);
+    if (streakClass) classes.push(streakClass);
     if (row.zeroPoints) classes.push(rowBgColors.zero);
     else if (row.medal) classes.push(rowBgColors[row.medal]);
     return classes.join(' ');
@@ -99,8 +101,6 @@ const goalkeeperColumns = computed(() =>
     showPhotos.value ? baseGoalkeeperColumns : baseGoalkeeperColumns.filter((c) => c.key !== 'photo'),
 );
 
-// --- Ranking WhatsApp message ---
-
 const medalEmojis = { gold: '🥇', silver: '🥈', bronze: '🥉' };
 
 const rankingMessage = computed(() => {
@@ -122,7 +122,9 @@ const { label: copyRankingLabel, copy: copyRanking } = useClipboard();
 const copyRankingMessage = () => copyRanking(rankingMessage.value);
 
 function refreshFire() {
-    nextTick(() => setTimeout(() => initFire(rankingWrapper.value, '.qnf-streak-row'), 200));
+    nextTick(() => setTimeout(() => {
+        initFire(rankingWrapper.value, streakParticleTargets());
+    }, 200));
 }
 
 onMounted(refreshFire);
@@ -174,18 +176,13 @@ watch([linePlayers, showPhotos], refreshFire);
                 <PlayerPhoto :src="row.photo_front" :initial="row.initial" :alt="row.name" />
             </template>
             <template #cell-name="{ row }">
-                <div>
-                    <div :class="row.win_streak >= 3 ? 'flex items-center justify-center lg:gap-1' : ''">
-                        <FireIcon :streak="row.win_streak" />
-                        <span class="text-sm md:text-base lg:text-lg font-medium text-gray-900">
-                            {{ row.name }}
-                        </span>
-                        <FireIcon :streak="row.win_streak" />
-
-                        <PositionBadge v-if="!showPhotos" :position="row.position"
-                            :label="positionLabels[row.position] || row.position" />
-                    </div>
-                </div>
+                <StreakPlayerName :name="row.name" :streak="row.win_streak">
+                    <PositionBadge
+                        v-if="!showPhotos"
+                        :position="row.position"
+                        :label="positionLabels[row.position] || row.position"
+                    />
+                </StreakPlayerName>
             </template>
             <template #cell-last_results="{ row }">
                 <div class="flex items-center justify-center gap-0.25">
@@ -244,11 +241,7 @@ watch([linePlayers, showPhotos], refreshFire);
     z-index: 0;
     -webkit-transform: translateZ(0);
     transform: translateZ(0);
-    animation: qnfPulse 2.2s ease-in-out infinite;
-}
-
-.qnf-streak-row > td {
-    background-color: rgba(255, 120, 0, 0.10);
+    animation: qnfStreakPulse 2.2s ease-in-out infinite;
 }
 
 .qnf-streak-row > td:first-child {
@@ -261,32 +254,72 @@ watch([linePlayers, showPhotos], refreshFire);
     border-bottom-right-radius: 10px;
 }
 
-@keyframes qnfPulse {
+/* 3+ wins — orange fire */
+.qnf-streak--hot {
+    --streak-bg: rgba(255, 120, 0, 0.10);
+    --streak-inset-a: rgba(255, 140, 0, 0.45);
+    --streak-inset-b: rgba(255, 180, 0, 0.20);
+    --streak-ring: rgba(255, 120, 0, 0.6);
+    --streak-glow-a: rgba(255, 100, 0, 0.45);
+    --streak-glow-b: rgba(255, 180, 0, 0.35);
+    --streak-inset-a-mid: rgba(255, 140, 0, 0.55);
+    --streak-inset-b-mid: rgba(255, 180, 0, 0.25);
+    --streak-ring-mid: rgba(255, 120, 0, 0.7);
+    --streak-glow-a-mid: rgba(255, 120, 0, 0.6);
+    --streak-glow-b-mid: rgba(255, 200, 0, 0.45);
+}
+
+/* 5+ wins — purple legendary */
+.qnf-streak--legendary {
+    --streak-bg: rgba(124, 58, 237, 0.12);
+    --streak-inset-a: rgba(124, 58, 237, 0.45);
+    --streak-inset-b: rgba(168, 85, 247, 0.22);
+    --streak-ring: rgba(147, 51, 234, 0.65);
+    --streak-glow-a: rgba(109, 40, 217, 0.5);
+    --streak-glow-b: rgba(192, 132, 252, 0.4);
+    --streak-inset-a-mid: rgba(139, 92, 246, 0.55);
+    --streak-inset-b-mid: rgba(216, 70, 239, 0.28);
+    --streak-ring-mid: rgba(168, 85, 247, 0.8);
+    --streak-glow-a-mid: rgba(124, 58, 237, 0.65);
+    --streak-glow-b-mid: rgba(232, 121, 249, 0.5);
+}
+
+.qnf-streak-row > td {
+    background-color: var(--streak-bg);
+}
+
+@keyframes qnfStreakPulse {
     0% {
         box-shadow:
-            inset 0 0 25px rgba(255, 140, 0, 0.45),
-            inset 0 0 60px rgba(255, 180, 0, 0.20),
-            0 0 0 2px rgba(255, 120, 0, 0.6),
-            0 0 18px rgba(255, 100, 0, 0.45),
-            0 0 40px rgba(255, 180, 0, 0.35);
+            inset 0 0 25px var(--streak-inset-a),
+            inset 0 0 60px var(--streak-inset-b),
+            0 0 0 2px var(--streak-ring),
+            0 0 18px var(--streak-glow-a),
+            0 0 40px var(--streak-glow-b);
     }
 
     50% {
         box-shadow:
-            inset 0 0 35px rgba(255, 140, 0, 0.55),
-            inset 0 0 90px rgba(255, 180, 0, 0.25),
-            0 0 0 2px rgba(255, 120, 0, 0.7),
-            0 0 25px rgba(255, 120, 0, 0.6),
-            0 0 60px rgba(255, 200, 0, 0.45);
+            inset 0 0 35px var(--streak-inset-a-mid),
+            inset 0 0 90px var(--streak-inset-b-mid),
+            0 0 0 2px var(--streak-ring-mid),
+            0 0 25px var(--streak-glow-a-mid),
+            0 0 60px var(--streak-glow-b-mid);
     }
 
     100% {
         box-shadow:
-            inset 0 0 25px rgba(255, 140, 0, 0.45),
-            inset 0 0 60px rgba(255, 180, 0, 0.20),
-            0 0 0 2px rgba(255, 120, 0, 0.6),
-            0 0 18px rgba(255, 100, 0, 0.45),
-            0 0 40px rgba(255, 180, 0, 0.35);
+            inset 0 0 25px var(--streak-inset-a),
+            inset 0 0 60px var(--streak-inset-b),
+            0 0 0 2px var(--streak-ring),
+            0 0 18px var(--streak-glow-a),
+            0 0 40px var(--streak-glow-b);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .qnf-streak-row {
+        animation: none !important;
     }
 }
 </style>

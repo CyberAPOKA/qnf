@@ -1,12 +1,12 @@
 import { onUnmounted } from 'vue';
 
-const COLORS = ['#ff3b00', '#ff6a00', '#ff9500', '#ffcc00', '#ffee00', '#fff2a0'];
+const DEFAULT_COLORS = ['#ff3b00', '#ff6a00', '#ff9500', '#ffcc00', '#ffee00', '#fff2a0'];
 
 function rand(min, max) {
     return Math.random() * (max - min) + min;
 }
 
-function createParticle(w, h) {
+function createParticle(w, h, colors = DEFAULT_COLORS) {
     return {
         x: rand(0, w),
         y: h + rand(0, 10),
@@ -14,11 +14,24 @@ function createParticle(w, h) {
         vy: rand(-0.2, -0.8),
         r: rand(1.5, 4),
         opacity: rand(0.5, 1),
-        color: COLORS[Math.floor(rand(0, COLORS.length))],
+        color: colors[Math.floor(rand(0, colors.length))],
         life: 0,
         maxLife: rand(100, 280),
         drift: rand(-0.015, 0.015),
+        colors,
     };
+}
+
+function normalizeTargets(targets) {
+    if (typeof targets === 'string') {
+        return [{ selector: targets, colors: DEFAULT_COLORS }];
+    }
+
+    return (targets || []).map((target) => ({
+        selector: target.selector,
+        colors: target.colors || DEFAULT_COLORS,
+        particleCount: target.particleCount,
+    }));
 }
 
 export function useFireParticles() {
@@ -43,7 +56,7 @@ export function useFireParticles() {
                     : p.opacity * (1 - lifeRatio);
 
                 if (p.life >= p.maxLife || alpha <= 0) {
-                    particles[i] = createParticle(w, h);
+                    particles[i] = createParticle(w, h, p.colors);
                     continue;
                 }
 
@@ -55,7 +68,6 @@ export function useFireParticles() {
                 ctx.globalAlpha = Math.max(0, alpha);
                 ctx.fill();
 
-                // Glow
                 ctx.beginPath();
                 ctx.arc(p.x, p.y, p.r * shrink * 2.5, 0, Math.PI * 2);
                 ctx.fillStyle = p.color;
@@ -70,55 +82,62 @@ export function useFireParticles() {
     }
 
     /**
-     * Attach fire particles to elements matching a selector inside a wrapper.
-     * @param {HTMLElement} wrapper - The positioned parent
-     * @param {string} selector - CSS selector for target elements
-     * @param {number} particleCount - Number of particles per element
+     * Attach particles to elements matching selectors inside a wrapper.
+     * @param {HTMLElement} wrapper
+     * @param {string|{selector:string,colors?:string[],particleCount?:number}[]} targets
+     * @param {number} particleCount - default count when a target omits particleCount
      */
-    function init(wrapper, selector, particleCount = 30) {
+    function init(wrapper, targets, particleCount = 30) {
         destroy();
         if (!wrapper) return;
 
-        const elements = wrapper.querySelectorAll(selector);
-        if (!elements.length) return;
+        const normalized = normalizeTargets(targets);
+        if (!normalized.length) return;
 
         const wrapperRect = wrapper.getBoundingClientRect();
+        let attached = 0;
 
-        elements.forEach((el) => {
-            const rect = el.getBoundingClientRect();
-            const canvas = document.createElement('canvas');
-            const dpr = window.devicePixelRatio || 1;
-            const w = rect.width;
-            const h = rect.height;
+        for (const target of normalized) {
+            const elements = wrapper.querySelectorAll(target.selector);
+            const count = target.particleCount ?? particleCount;
 
-            canvas.width = w * dpr;
-            canvas.height = h * dpr;
-            canvas.style.cssText = `
-                position: absolute;
-                top: ${rect.top - wrapperRect.top}px;
-                left: ${rect.left - wrapperRect.left}px;
-                width: ${w}px;
-                height: ${h}px;
-                pointer-events: none;
-                z-index: 4;
-            `;
+            elements.forEach((el) => {
+                const rect = el.getBoundingClientRect();
+                const canvas = document.createElement('canvas');
+                const dpr = window.devicePixelRatio || 1;
+                const w = rect.width;
+                const h = rect.height;
 
-            const ctx = canvas.getContext('2d');
-            ctx.scale(dpr, dpr);
+                canvas.width = w * dpr;
+                canvas.height = h * dpr;
+                canvas.style.cssText = `
+                    position: absolute;
+                    top: ${rect.top - wrapperRect.top}px;
+                    left: ${rect.left - wrapperRect.left}px;
+                    width: ${w}px;
+                    height: ${h}px;
+                    pointer-events: none;
+                    z-index: 4;
+                `;
 
-            wrapper.appendChild(canvas);
+                const ctx = canvas.getContext('2d');
+                ctx.scale(dpr, dpr);
 
-            const particles = [];
-            for (let j = 0; j < particleCount; j++) {
-                const p = createParticle(w, h);
-                p.life = rand(0, p.maxLife);
-                particles.push(p);
-            }
+                wrapper.appendChild(canvas);
 
-            canvasInstances.push({ canvas, ctx, particles, w, h });
-        });
+                const particles = [];
+                for (let j = 0; j < count; j++) {
+                    const p = createParticle(w, h, target.colors);
+                    p.life = rand(0, p.maxLife);
+                    particles.push(p);
+                }
 
-        animate();
+                canvasInstances.push({ canvas, ctx, particles, w, h });
+                attached++;
+            });
+        }
+
+        if (attached) animate();
     }
 
     function destroy() {
