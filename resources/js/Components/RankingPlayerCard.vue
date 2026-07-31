@@ -24,62 +24,40 @@ const isPodium = computed(() =>
 </script>
 
 <template>
-    <article
-        class="ranking-card relative grid items-center border-0 transition duration-150"
-        :class="[
-            THEME_CLASS[player.theme],
-            {
-                'ranking-card--podium': isPodium,
-                'ranking-card--streak-fire': streakType === 'fire',
-                'ranking-card--streak-ice': streakType === 'ice',
-                'ranking-card--streak-purple': streakType === 'purple',
-            },
-        ]"
-    >
+    <article class="ranking-card relative grid items-center border-0 transition duration-150" :class="[
+        THEME_CLASS[player.theme],
+        {
+            'ranking-card--podium': isPodium,
+            'ranking-card--streak-fire': streakType === 'fire',
+            'ranking-card--streak-ice': streakType === 'ice',
+            'ranking-card--streak-purple': streakType === 'purple',
+        },
+    ]">
         <div class="ranking-card__frame pointer-events-none absolute inset-0 z-0" aria-hidden="true" />
 
-        <div class="ranking-card__clipped pointer-events-none absolute inset-0 z-[1] overflow-hidden" aria-hidden="true">
+        <div class="ranking-card__clipped pointer-events-none absolute inset-0 z-[1] overflow-hidden"
+            aria-hidden="true">
             <RankingPlayerStreakEffect :type="streakType" />
             <RankingStreakBorder :type="streakType" />
-            <div class="ranking-card__glow absolute top-1/2 left-[-60px] h-[180px] w-[300px] -translate-y-1/2 rounded-full" />
-            <div class="ranking-card__pattern absolute top-0 right-0 h-full w-[260px]" />
             <div
-                v-if="isPodium"
-                class="ranking-card__photo-blend absolute inset-x-0 bottom-0 h-[42%]"
-            />
+                class="ranking-card__glow absolute top-1/2 left-[-60px] h-[180px] w-[300px] -translate-y-1/2 rounded-full" />
+            <div class="ranking-card__pattern absolute top-0 right-0 h-full w-[260px]" />
+            <div v-if="isPodium" class="ranking-card__photo-blend absolute inset-x-0 bottom-0 h-[42%]" />
         </div>
 
         <RankingRankBadge class="relative z-[2]" :rank="player.rank" :theme="player.theme" />
 
-        <RankingPlayerPhoto
-            class="relative"
-            :class="isPodium ? 'z-[15]' : 'z-[2]'"
-            :src="player.photo_front"
-            :name="player.name"
-            :initial="player.initial"
-            :theme="player.theme"
-        />
+        <RankingPlayerPhoto class="relative" :class="isPodium ? 'z-[15]' : 'z-[2]'" :src="player.photo_front"
+            :name="player.name" :initial="player.initial" :theme="player.theme" />
 
-        <RankingPlayerIdentity
-            class="relative z-[2]"
-            :name="player.name"
-            :win-streak="player.win_streak"
-            :is-goalkeeper="player.isGoalkeeper"
-        />
+        <RankingPlayerIdentity class="relative z-[2]" :name="player.name" :win-streak="player.win_streak"
+            :is-goalkeeper="player.isGoalkeeper" />
 
         <div class="relative z-[2] flex flex-col items-center justify-center gap-2 max-[950px]:pr-1">
-            <RankingPlayerStats
-                :points="player.points"
-                :games="player.games"
-                :movement="player.movement"
-                :points-label="player.pointsLabel"
-                :avg="player.avg"
-            />
+            <RankingPlayerStats :points="player.points" :games="player.games" :movement="player.movement"
+                :points-label="player.pointsLabel" :avg="player.avg" />
 
-            <RankingPlayerForm
-                v-if="player.form?.length"
-                :form="player.form"
-            />
+            <RankingPlayerForm v-if="player.form?.length" :form="player.form" />
         </div>
     </article>
 </template>
@@ -114,25 +92,21 @@ const isPodium = computed(() =>
 
 .ranking-card__frame {
     background:
-        linear-gradient(
-            100deg,
+        linear-gradient(100deg,
             rgba(var(--accent-rgb), 0.18) 0%,
             rgba(9, 13, 25, 0.97) 38%,
-            rgba(7, 11, 22, 0.98) 100%
-        );
+            rgba(7, 11, 22, 0.98) 100%);
     box-shadow:
         inset 0 0 28px rgba(var(--accent-rgb), 0.08),
         0 0 18px rgba(var(--accent-rgb), 0.16);
-    clip-path: polygon(
-        var(--cut) 0,
-        calc(100% - var(--cut)) 0,
-        100% var(--cut),
-        100% calc(100% - var(--cut)),
-        calc(100% - var(--cut)) 100%,
-        var(--cut) 100%,
-        0 calc(100% - var(--cut)),
-        0 var(--cut)
-    );
+    clip-path: polygon(var(--cut) 0,
+            calc(100% - var(--cut)) 0,
+            100% var(--cut),
+            100% calc(100% - var(--cut)),
+            calc(100% - var(--cut)) 100%,
+            var(--cut) 100%,
+            0 calc(100% - var(--cut)),
+            0 var(--cut));
 }
 
 .ranking-card__frame::before {
@@ -140,14 +114,12 @@ const isPodium = computed(() =>
     position: absolute;
     inset: 0;
     background:
-        linear-gradient(
-            120deg,
+        linear-gradient(120deg,
             transparent 0 28%,
             rgba(var(--accent-rgb), 0.08) 28% 28.4%,
             transparent 28.4% 58%,
             rgba(var(--accent-rgb), 0.07) 58% 58.4%,
-            transparent 58.4%
-        );
+            transparent 58.4%);
 }
 
 .ranking-card__frame::after {
@@ -158,40 +130,36 @@ const isPodium = computed(() =>
     background: rgba(var(--accent-rgb), 0.9);
     opacity: 0.85;
     transition: background 180ms ease, opacity 180ms ease;
-    clip-path: polygon(
-        evenodd,
-        var(--cut) 0,
-        calc(100% - var(--cut)) 0,
-        100% var(--cut),
-        100% calc(100% - var(--cut)),
-        calc(100% - var(--cut)) 100%,
-        var(--cut) 100%,
-        0 calc(100% - var(--cut)),
-        0 var(--cut),
-        var(--cut) 0,
-        calc(var(--cut) + var(--border-w)) var(--border-w),
-        var(--border-w) calc(var(--cut) + var(--border-w)),
-        var(--border-w) calc(100% - var(--cut) - var(--border-w)),
-        calc(var(--cut) + var(--border-w)) calc(100% - var(--border-w)),
-        calc(100% - var(--cut) - var(--border-w)) calc(100% - var(--border-w)),
-        calc(100% - var(--border-w)) calc(100% - var(--cut) - var(--border-w)),
-        calc(100% - var(--border-w)) calc(var(--cut) + var(--border-w)),
-        calc(100% - var(--cut) - var(--border-w)) var(--border-w),
-        calc(var(--cut) + var(--border-w)) var(--border-w)
-    );
+    clip-path: polygon(evenodd,
+            var(--cut) 0,
+            calc(100% - var(--cut)) 0,
+            100% var(--cut),
+            100% calc(100% - var(--cut)),
+            calc(100% - var(--cut)) 100%,
+            var(--cut) 100%,
+            0 calc(100% - var(--cut)),
+            0 var(--cut),
+            var(--cut) 0,
+            calc(var(--cut) + var(--border-w)) var(--border-w),
+            var(--border-w) calc(var(--cut) + var(--border-w)),
+            var(--border-w) calc(100% - var(--cut) - var(--border-w)),
+            calc(var(--cut) + var(--border-w)) calc(100% - var(--border-w)),
+            calc(100% - var(--cut) - var(--border-w)) calc(100% - var(--border-w)),
+            calc(100% - var(--border-w)) calc(100% - var(--cut) - var(--border-w)),
+            calc(100% - var(--border-w)) calc(var(--cut) + var(--border-w)),
+            calc(100% - var(--cut) - var(--border-w)) var(--border-w),
+            calc(var(--cut) + var(--border-w)) var(--border-w));
 }
 
 .ranking-card__clipped {
-    clip-path: polygon(
-        var(--cut) 0,
-        calc(100% - var(--cut)) 0,
-        100% var(--cut),
-        100% calc(100% - var(--cut)),
-        calc(100% - var(--cut)) 100%,
-        var(--cut) 100%,
-        0 calc(100% - var(--cut)),
-        0 var(--cut)
-    );
+    clip-path: polygon(var(--cut) 0,
+            calc(100% - var(--cut)) 0,
+            100% var(--cut),
+            100% calc(100% - var(--cut)),
+            calc(100% - var(--cut)) 100%,
+            var(--cut) 100%,
+            0 calc(100% - var(--cut)),
+            0 var(--cut));
 }
 
 .ranking-card:hover {
@@ -218,11 +186,9 @@ const isPodium = computed(() =>
 .ranking-card__pattern {
     opacity: 1;
     background-image:
-        radial-gradient(
-            circle at center,
+        radial-gradient(circle at center,
             rgba(var(--accent-rgb), 0.5) 1px,
-            transparent 1px
-        );
+            transparent 1px);
     background-size: 14px 14px;
     mask-image: linear-gradient(to left, black, transparent);
 }
@@ -231,18 +197,14 @@ const isPodium = computed(() =>
 .ranking-card__photo-blend {
     z-index: 2;
     background:
-        radial-gradient(
-            ellipse 70% 90% at 22% 100%,
+        radial-gradient(ellipse 70% 90% at 22% 100%,
             rgba(7, 11, 22, 0.55) 0%,
             rgba(7, 11, 22, 0.2) 42%,
-            transparent 72%
-        ),
-        linear-gradient(
-            to top,
+            transparent 72%),
+        linear-gradient(to top,
             rgba(7, 11, 22, 0.35) 0%,
             rgba(7, 11, 22, 0.12) 40%,
-            transparent 100%
-        );
+            transparent 100%);
 }
 
 .ranking-card--gold {
@@ -279,13 +241,11 @@ const isPodium = computed(() =>
 
 .ranking-card--streak-fire .ranking-card__frame {
     background:
-        linear-gradient(
-            100deg,
+        linear-gradient(100deg,
             rgba(255, 106, 0, 0.34) 0%,
             rgba(46, 20, 5, 0.96) 30%,
             rgba(9, 13, 25, 0.98) 66%,
-            rgba(7, 11, 22, 0.98) 100%
-        );
+            rgba(7, 11, 22, 0.98) 100%);
     box-shadow:
         inset 0 0 34px rgba(255, 106, 0, 0.26),
         0 0 16px rgba(255, 106, 0, 0.55),
@@ -299,13 +259,11 @@ const isPodium = computed(() =>
 
 .ranking-card--streak-ice .ranking-card__frame {
     background:
-        linear-gradient(
-            100deg,
+        linear-gradient(100deg,
             rgba(14, 165, 233, 0.4) 0%,
             rgba(12, 40, 62, 0.96) 32%,
             rgba(9, 13, 25, 0.98) 66%,
-            rgba(7, 11, 22, 0.98) 100%
-        );
+            rgba(7, 11, 22, 0.98) 100%);
     box-shadow:
         inset 0 0 36px rgba(56, 189, 248, 0.24),
         0 0 16px rgba(125, 211, 252, 0.5),
@@ -319,13 +277,11 @@ const isPodium = computed(() =>
 
 .ranking-card--streak-purple .ranking-card__frame {
     background:
-        linear-gradient(
-            100deg,
+        linear-gradient(100deg,
             rgba(126, 34, 206, 0.5) 0%,
             rgba(42, 16, 72, 0.96) 34%,
             rgba(9, 13, 25, 0.98) 68%,
-            rgba(7, 11, 22, 0.98) 100%
-        );
+            rgba(7, 11, 22, 0.98) 100%);
     box-shadow:
         inset 0 0 42px rgba(168, 85, 247, 0.28),
         0 0 20px rgba(168, 85, 247, 0.72),

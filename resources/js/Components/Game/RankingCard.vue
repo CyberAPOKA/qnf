@@ -102,15 +102,10 @@ const copyRankingMessage = () => copyRanking(rankingMessage.value);
         </div> -->
 
         <div v-if="linePlayers.length" class="ranking-board__list">
-            <div
-                v-for="player in linePlayers"
-                :key="player.id"
-                class="ranking-board__item"
-                :class="{
-                    'ranking-board__item--zero': player.zeroPoints,
-                    'ranking-board__item--podium': player.theme === 'gold' || player.theme === 'silver' || player.theme === 'bronze',
-                }"
-            >
+            <div v-for="player in linePlayers" :key="player.id" class="ranking-board__item" :class="{
+                'ranking-board__item--zero': player.zeroPoints,
+                'ranking-board__item--podium': player.theme === 'gold' || player.theme === 'silver' || player.theme === 'bronze',
+            }">
                 <RankingPlayerCard :player="player" />
             </div>
         </div>
@@ -233,7 +228,7 @@ const copyRankingMessage = () => copyRanking(rankingMessage.value);
 }
 
 /* Espaço maior só entre os do pódio; do 3º para baixo usa o gap normal */
-.ranking-board__item--podium + .ranking-board__item--podium {
+.ranking-board__item--podium+.ranking-board__item--podium {
     margin-top: 14px;
 }
 
