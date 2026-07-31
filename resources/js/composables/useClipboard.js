@@ -1,7 +1,7 @@
 import { ref } from 'vue';
 
-export function useClipboard() {
-    const label = ref('Copiar');
+export function useClipboard(idleLabel = 'Copiar') {
+    const label = ref(idleLabel);
     const copying = ref(false);
 
     async function copy(text) {
@@ -25,7 +25,7 @@ export function useClipboard() {
             label.value = 'Erro ao copiar';
         } finally {
             setTimeout(() => {
-                label.value = 'Copiar';
+                label.value = idleLabel;
                 copying.value = false;
             }, 2000);
         }

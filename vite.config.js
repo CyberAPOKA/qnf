@@ -34,6 +34,55 @@ export default defineConfig(({ isSsrBuild }) => ({
                 ],
                 navigateFallback: null,
                 cleanupOutdatedCaches: true,
+                runtimeCaching: [
+                    {
+                        // Player/profile photos use hashed filenames on upload — safe to cache long-term.
+                        urlPattern: ({ url }) =>
+                            url.pathname.startsWith('/storage/players/')
+                            || url.pathname.startsWith('/storage/profile-photos/'),
+                        handler: 'CacheFirst',
+                        options: {
+                            cacheName: 'qnf-player-photos',
+                            expiration: {
+                                maxEntries: 300,
+                                maxAgeSeconds: 60 * 60 * 24 * 365,
+                            },
+                            cacheableResponse: {
+                                statuses: [0, 200],
+                            },
+                        },
+                    },
+                    {
+                        // Brand/static assets under /assets (rarely change).
+                        urlPattern: ({ url }) => url.pathname.startsWith('/assets/'),
+                        handler: 'CacheFirst',
+                        options: {
+                            cacheName: 'qnf-static-assets',
+                            expiration: {
+                                maxEntries: 80,
+                                maxAgeSeconds: 60 * 60 * 24 * 30,
+                            },
+                            cacheableResponse: {
+                                statuses: [0, 200],
+                            },
+                        },
+                    },
+                    {
+                        // Generated media (week_team, ranking, music, etc.) may overwrite the same path.
+                        urlPattern: ({ url }) => url.pathname.startsWith('/storage/'),
+                        handler: 'StaleWhileRevalidate',
+                        options: {
+                            cacheName: 'qnf-storage-media',
+                            expiration: {
+                                maxEntries: 120,
+                                maxAgeSeconds: 60 * 60 * 24 * 7,
+                            },
+                            cacheableResponse: {
+                                statuses: [0, 200],
+                            },
+                        },
+                    },
+                ],
             },
             manifest: {
                 id: '/',

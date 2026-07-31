@@ -1,86 +1,94 @@
 <script setup>
-import { computed, ref } from 'vue';
-import DataTable from '@/Components/DataTable.vue';
-import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
-import PositionBadge from '@/Components/Game/PositionBadge.vue';
+import { computed } from 'vue';
+import RankingPlayerCard from '@/Components/RankingPlayerCard.vue';
+import { useClipboard } from '@/composables/useClipboard';
 
-const showPhotos = ref(true);
-
-defineProps({
+const props = defineProps({
     ranking: {
         type: Array,
         default: () => [],
     },
 });
 
-const positionLabels = {
-    fixed: 'Fixo',
-    winger: 'Ala',
-    pivot: 'Pivô',
-};
+function assignMedals(players) {
+    let medalRank = 0;
+    let lastScore = null;
+    let lastAvg = null;
 
-const medalColors = {
-    1: 'text-[#B8860B]',
-    2: 'text-[#6B7280]',
-    3: 'text-[#8C4A2F]',
-};
+    return players.map((player) => {
+        if (player.total_score !== lastScore || player.avg_score !== lastAvg) {
+            medalRank++;
+            lastScore = player.total_score;
+            lastAvg = player.avg_score;
+        }
 
-const rowBgColors = {
-    1: 'bg-[#FFF4CC]',
-    2: 'bg-[#F1F5F9]',
-    3: 'bg-[#FCE7DF]',
-};
+        if (player.total_score === 0) return { ...player, medal: null, zeroPoints: true };
+        if (medalRank === 1) return { ...player, medal: 'gold' };
+        if (medalRank === 2) return { ...player, medal: 'silver' };
+        if (medalRank === 3) return { ...player, medal: 'bronze' };
+        return { ...player, medal: null };
+    });
+}
 
-const rowClass = (row) => {
-    if (row.total_score === 0) return 'bg-red-300';
-    return rowBgColors[row.rank] || '';
-};
+function toCardPlayer(player) {
+    return {
+        id: player.id,
+        rank: player.rank,
+        name: player.name,
+        photo_front: player.photo_front,
+        initial: player.initial,
+        points: player.total_score,
+        games: player.games_played,
+        movement: null,
+        form: [],
+        theme: player.medal || 'default',
+        win_streak: 0,
+        pointsLabel: 'VIT',
+        avg: player.avg_score ?? null,
+        zeroPoints: player.zeroPoints,
+    };
+}
 
-const baseColumns = [
-    { key: 'rank', label: '#' },
-    { key: 'photo', label: '' },
-    { key: 'name', label: 'Jogador', class: 'font-bold text-lg text-gray-900' },
-    { key: 'total_score', label: 'Vitórias', align: 'center', class: 'font-bold text-lg text-gray-900' },
-    { key: 'games_played', label: 'Jogos', align: 'center', class: 'font-bold text-lg text-gray-900' },
-    { key: 'avg_score', label: 'Média', align: 'center', class: 'font-bold text-lg text-gray-900' },
-];
-
-const columns = computed(() =>
-    showPhotos.value ? baseColumns : baseColumns.filter((c) => c.key !== 'photo'),
+const players = computed(() =>
+    assignMedals(props.ranking).map(toCardPlayer),
 );
+
+const medalEmojis = { gold: '🥇', silver: '🥈', bronze: '🥉' };
+
+const rankingMessage = computed(() => {
+    const eligible = players.value.filter((p) => p.points >= 1);
+    if (!eligible.length) return '';
+
+    const lines = ['🏆 RANKING DE VITÓRIAS', ''];
+
+    for (const player of eligible) {
+        const medal = player.theme && medalEmojis[player.theme] ? medalEmojis[player.theme] : '🔘';
+        const avg = player.avg != null ? ` · média ${player.avg}` : '';
+        lines.push(`${medal} ${player.name} — ${player.points} vit (${player.games}p)${avg}`);
+    }
+
+    return lines.join('\n');
+});
+
+const { label: copyRankingLabel, copy: copyRanking } = useClipboard();
+const copyRankingMessage = () => copyRanking(rankingMessage.value);
 </script>
 
 <template>
-    <div class="rounded-xl bg-white p-2 lg:p-4 shadow">
-        <div class="flex items-center justify-between">
-            <h3 class="text-base font-semibold text-gray-900">
-                <i class="fa-solid fa-ranking-star mr-1 text-amber-500"></i>
-                Ranking de Vitórias
-            </h3>
-            <label class="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
-                <input type="checkbox" v-model="showPhotos" class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
-                Fotos
-            </label>
+    <div class="ranking-board py-2 lg:py-4 px-1 lg:px-4">
+        <div v-if="players.length" class="ranking-board__list">
+            <div
+                v-for="player in players"
+                :key="player.id"
+                class="ranking-board__item"
+                :class="{
+                    'ranking-board__item--zero': player.zeroPoints,
+                    'ranking-board__item--podium': player.theme === 'gold' || player.theme === 'silver' || player.theme === 'bronze',
+                }"
+            >
+                <RankingPlayerCard :player="player" />
+            </div>
         </div>
-
-        <DataTable :columns="columns" :rows="ranking" :row-class="rowClass"
-            empty-message="Nenhum jogo finalizado ainda.">
-            <template #cell-rank="{ row }">
-                <span v-if="row.rank <= 3 && row.total_score > 0" class="text-lg">
-                    <i class="!text-2xl fa-solid fa-medal drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]"
-                        :class="medalColors[row.rank]"></i>
-                </span>
-                <span v-else class="font-bold text-lg text-gray-900">{{ row.rank }}º</span>
-            </template>
-            <template #cell-photo="{ row }">
-                <PlayerPhoto :src="row.photo_front" :initial="row.initial" :alt="row.name" />
-            </template>
-            <template #cell-name="{ row }">
-                <div class="flex items-center gap-2">
-                    <span class="font-medium text-gray-900">{{ row.name }}</span>
-                    <PositionBadge :position="row.position" :label="positionLabels[row.position] || row.position" />
-                </div>
-            </template>
-        </DataTable>
+        <p v-else class="ranking-board__empty">Nenhum jogo finalizado ainda.</p>
     </div>
 </template>

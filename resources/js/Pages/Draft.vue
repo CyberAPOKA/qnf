@@ -1,19 +1,17 @@
 <script setup>
-import { computed, ref, watch, onMounted, nextTick } from 'vue';
+import { computed, ref, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import PrimaryButton from '@/Components/PrimaryButton.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import ConfirmationModal from '@/Components/ConfirmationModal.vue';
 import DraftStatusCard from '@/Components/Game/DraftStatusCard.vue';
-import TeamCard from '@/Components/Game/TeamCard.vue';
-import FireIcon from '@/Components/Game/FireIcon.vue';
+import TeamsBoard from '@/Components/Game/TeamsBoard.vue';
 import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
 import PositionBadge from '@/Components/Game/PositionBadge.vue';
-import Button from 'primevue/button';
+import RankingPlayerCard from '@/Components/RankingPlayerCard.vue';
 
 import { router, useForm } from '@inertiajs/vue3';
 import { useGameChannel } from '@/composables/useGameChannel';
-import { useFireParticles } from '@/composables/useFireParticles';
 
 const props = defineProps({
     game: Object,
@@ -23,15 +21,6 @@ const props = defineProps({
 
 const { store } = useGameChannel(props);
 const pickForm = useForm({ user_id: null });
-const draftListWrapper = ref(null);
-const { init: initFire } = useFireParticles();
-
-function refreshFire() {
-    nextTick(() => setTimeout(() => initFire(draftListWrapper.value, '.qnf-draft-fire'), 200));
-}
-
-onMounted(refreshFire);
-watch(() => store.game?.available_players, refreshFire);
 
 const turnCaptainName = computed(() => {
     const color = store.game?.turn_color;
@@ -91,6 +80,58 @@ const canPickPlayer = (player) => {
     return true;
 };
 
+// --- Pool de jogadores (cards do ranking) ---
+function mapForm(lastResults = []) {
+    return lastResults.map((result) => (Number(result) === 1 ? 'win' : 'loss'));
+}
+
+function medalTheme(player) {
+    if (player.position === 'goalkeeper') return 'default';
+
+    const rank = Number(player.rank);
+    if (rank === 1) return 'gold';
+    if (rank === 2) return 'silver';
+    if (rank === 3) return 'bronze';
+    return 'default';
+}
+
+function toCardPlayer(player, index) {
+    return {
+        id: player.id,
+        rank: Number(player.rank) || index + 1,
+        name: player.name,
+        photo_front: player.photo_front,
+        initial: player.initial,
+        points: Number(player.total_points) || 0,
+        games: Number(player.games_played) || 0,
+        movement: null,
+        form: mapForm(player.last_results),
+        theme: medalTheme(player),
+        win_streak: Number(player.win_streak) || 0,
+        isGoalkeeper: player.position === 'goalkeeper',
+    };
+}
+
+const availablePool = computed(() =>
+    (store.game?.available_players || []).map((player, index) => ({
+        raw: player,
+        card: toCardPlayer(player, index),
+    })),
+);
+
+const onPickCardClick = (player) => {
+    if (!canPickPlayer(player)) return;
+
+    if (isDoublePick.value && isMyTurn.value) {
+        toggleSelection(player);
+        return;
+    }
+
+    if (isMyTurn.value) {
+        confirmPick(player);
+    }
+};
+
 // --- Single pick mode ---
 const playerToConfirm = ref(null);
 
@@ -127,6 +168,11 @@ const toggleSelection = (player) => {
 };
 
 const isSelected = (playerId) => selectedIds.value.includes(playerId);
+
+const selectionOrder = (playerId) => {
+    const idx = selectedIds.value.indexOf(playerId);
+    return idx >= 0 ? idx + 1 : null;
+};
 
 const selectedPlayers = computed(() => {
     const available = store.game?.available_players || [];
@@ -200,126 +246,52 @@ watch(() => store.game?.status, (status) => {
         </template>
 
         <div class="p-1 lg:p-4" :class="{ '!pb-24': isDoublePick && isMyTurn }">
-            <div class="mx-auto max-w-6xl space-y-3">
+            <div class="mx-auto max-w-4xl space-y-3">
                 <DraftStatusCard :round-text="roundText" :pick-text="pickText" :status="store.game?.status || ''"
                     :is-my-turn="isMyTurn" :turn-captain-name="turnCaptainName" />
 
-                <div class="grid grid-cols-3 gap-1 lg:gap-2">
-                    <TeamCard color="green" :team="store.game?.teams?.green" />
-                    <TeamCard color="yellow" :team="store.game?.teams?.yellow" />
-                    <TeamCard color="blue" :team="store.game?.teams?.blue" />
-                </div>
+                <TeamsBoard :teams="store.game?.teams" title="Times" :show-header="false" />
 
-                <div v-if="store.game?.status === 'drafting'" class="rounded-xl bg-white p-1 lg:p-4 shadow">
-                    <h3 class="text-lg font-bold text-center"
-                        :class="isDoublePick && isMyTurn ? 'text-purple-600' : 'text-red-500'">
+                <section v-if="store.game?.status === 'drafting'">
+                    <h3 class="pool__hint" :class="{ 'pool__hint--double': isDoublePick && isMyTurn }">
                         <template v-if="isDoublePick && isMyTurn">
-                            <i class="fa-solid fa-people-arrows"></i>
+                            <i class="fa-solid fa-people-arrows" aria-hidden="true" />
                             Escolha dupla! Selecione 2 jogadores
-                            <i class="fa-solid fa-people-arrows"></i>
+                            <i class="fa-solid fa-people-arrows" aria-hidden="true" />
                         </template>
                         <template v-else>
-                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true" />
                             Clique e confirme para escolher
-                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <i class="fa-solid fa-triangle-exclamation" aria-hidden="true" />
                         </template>
                     </h3>
-                    <div class="flex justify-between flex-wrap mt-1">
-                        <span class="text-purple-900">
-                            <i class="fa-solid fa-ranking-star"></i>
-                            Posição
-                        </span>
-                        <span class="text-blue-900">
-                            <i class="fa-solid fa-futbol"></i>
-                            Jogos
-                        </span>
-                        <span class="text-[#B8860B]">
-                            <i class="fa-solid fa-trophy"></i>
-                            Pontos
-                        </span>
-                    </div>
-                    <ul ref="draftListWrapper" class="mt-2 space-y-2" style="position: relative;">
-                        <li v-for="player in store.game?.available_players || []" :key="player.id"
-                            class="flex flex-col gap-2 rounded-lg border border-gray-500 p-1 transition-colors shadow"
-                            :class="[
-                                isDoublePick && isMyTurn && isSelected(player.id)
-                                    ? 'border-purple-500 bg-purple-50'
-                                    : 'border-gray-100',
-                                isDoublePick && isMyTurn && canPickPlayer(player) ? 'cursor-pointer' : '',
-                                player.win_streak >= 3 ? 'qnf-draft-fire' : ''
-                            ]"
-                            @click="isDoublePick && isMyTurn && canPickPlayer(player) ? toggleSelection(player) : null">
 
-                            <div class="flex items-center justify-between gap-1">
-                                <!-- Photo -->
-                                <div class="shrink-0">
-                                    <PlayerPhoto :src="player.photo_front" :initial="player.initial" :alt="player.name"
-                                        size="md" class="max-w-28 md:max-w-none"/>
-                                </div>
+                    <div class="ranking-board px-1 py-2 lg:px-4 lg:py-4">
+                        <div class="ranking-board__list space-y-4">
+                            <div v-for="{ raw, card } in availablePool" :key="raw.id"
+                                class="ranking-board__item pick"
+                                :class="{
+                                    'ranking-board__item--podium': card.theme !== 'default',
+                                    'pick--selected': selectionOrder(raw.id) != null,
+                                    'pick--clickable': isMyTurn && canPickPlayer(raw),
+                                    'pick--blocked': isMyTurn && !canPickPlayer(raw),
+                                }"
+                                @click="onPickCardClick(raw)">
 
-                                <!-- Info -->
-                                <div class="flex-1 min-w-0 flex flex-col justify-between">
-                                    <div class="flex items-center">
-                                        <FireIcon :streak="player.win_streak" />
-                                        <p class="font-bold text-gray-900 truncate">{{ player.name }}</p>
-                                        <PositionBadge :position="player.position" :label="player.position_label" />
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        <div class="flex items-center text-purple-900">
-                                            <i class="fa-solid fa-ranking-star"></i>
-                                            <span v-if="player.rank != null && player.position !== 'goalkeeper'"
-                                                class="font-bold">
-                                                {{ player.rank }}º
-                                            </span>
-                                        </div>
-                                        <div class="flex items-center text-blue-900">
-                                            <i class="fa-solid fa-futbol"></i>
-                                            <span class="font-bold">{{ player.games_played }}</span>
-                                        </div>
-                                        <div class="flex items-center text-[#B8860B]">
-                                            <i class="fa-solid fa-trophy"></i>
-                                            <span class="font-bold">{{ player.total_points }}</span>
-                                        </div>
-                                    </div>
-                                    <div v-if="player.last_results?.length" class="flex items-center gap-0.25">
-                                        <span
-                                            v-for="(result, i) in player.last_results"
-                                            :key="i"
-                                            class="inline-flex items-center justify-center rounded-full"
-                                            :class="i === player.last_results.length - 1
-                                                ? (result === 1
-                                                    ? 'text-lg underline underline-offset-2 decoration-green-600'
-                                                    : 'text-lg underline underline-offset-2 decoration-red-500')
-                                                : ''"
-                                        >
-                                            <i v-if="result === 1" class="fa-solid fa-circle-check text-green-600"></i>
-                                            <i v-else class="fa-solid fa-circle-xmark text-red-500"></i>
-                                        </span>
-                                    </div>
-                                </div>
-
-                                <!-- Action: single pick button OR double pick checkbox -->
-                                <div class="shrink-0">
-                                    <template v-if="isDoublePick && isMyTurn">
-                                        <div v-if="canPickPlayer(player)"
-                                            class="flex h-6 w-6 items-center justify-center rounded border-2 transition-colors"
-                                            :class="isSelected(player.id)
-                                                ? 'border-purple-600 bg-purple-600 text-white'
-                                                : 'border-gray-300 bg-white'">
-                                            <i v-if="isSelected(player.id)" class="fa-solid fa-check text-xs"></i>
-                                        </div>
-                                    </template>
-                                    <template v-else>
-                                        <Button v-if="canPickPlayer(player)" severity="contrast"
-                                            :disabled="pickForm.processing" @click="confirmPick(player)">
-                                            Escolher
-                                        </Button>
-                                    </template>
+                                <div class="pick__shell">
+                                    <span
+                                        v-if="selectionOrder(raw.id)"
+                                        class="pick__order"
+                                        aria-hidden="true"
+                                    >
+                                        {{ selectionOrder(raw.id) }}
+                                    </span>
+                                    <RankingPlayerCard class="pick__card" :player="card" />
                                 </div>
                             </div>
-                        </li>
-                    </ul>
-                </div>
+                        </div>
+                    </div>
+                </section>
 
             </div>
         </div>
@@ -404,46 +376,143 @@ watch(() => store.game?.status, (status) => {
     </AppLayout>
 </template>
 
-<style>
-.qnf-draft-fire {
-    animation: qnfDraftGlow 2s ease-in-out infinite;
+<style scoped>
+.pool__hint {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    margin: 0 0 10px;
+    color: #fca5a5;
+    font-family: var(--font-display, 'Rajdhani', sans-serif);
+    font-size: 1rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-align: center;
+    text-transform: uppercase;
+    text-shadow: 0 0 12px rgba(248, 113, 113, 0.35);
 }
 
-@keyframes qnfDraftGlow {
-    0% {
-        box-shadow:
-            0 0 12px 3px rgba(255, 59, 0, 0.5),
-            0 0 30px 8px rgba(255, 90, 0, 0.2),
-            inset 0 0 40px 10px rgba(255, 80, 0, 0.25),
-            inset 0 0 80px 20px rgba(255, 120, 0, 0.1);
+.pool__hint--double {
+    color: #d8b4fe;
+    text-shadow: 0 0 12px rgba(168, 85, 247, 0.45);
+}
+
+.pick {
+    position: relative;
+    transition: filter 160ms ease, opacity 160ms ease;
+}
+
+.pick__shell {
+    --cut: 14px;
+
+    position: relative;
+    width: 100%;
+}
+
+.pick__card {
+    width: 100%;
+}
+
+.pick--clickable {
+    cursor: pointer;
+}
+
+.pick--selected .pick__shell::before {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    z-index: 20;
+    pointer-events: none;
+    background: linear-gradient(135deg, #d8b4fe, #a855f7 40%, #7c3aed 70%, #c084fc);
+    clip-path: polygon(
+        var(--cut) 0,
+        calc(100% - var(--cut)) 0,
+        100% var(--cut),
+        100% calc(100% - var(--cut)),
+        calc(100% - var(--cut)) 100%,
+        var(--cut) 100%,
+        0 calc(100% - var(--cut)),
+        0 var(--cut)
+    );
+    filter: drop-shadow(0 0 12px rgba(168, 85, 247, 0.65));
+}
+
+.pick--selected .pick__shell::after {
+    content: '';
+    position: absolute;
+    inset: -1px;
+    z-index: 21;
+    pointer-events: none;
+    background: transparent;
+    box-shadow: inset 0 0 0 2px rgba(216, 180, 254, 0.95);
+    clip-path: polygon(
+        var(--cut) 0,
+        calc(100% - var(--cut)) 0,
+        100% var(--cut),
+        100% calc(100% - var(--cut)),
+        calc(100% - var(--cut)) 100%,
+        var(--cut) 100%,
+        0 calc(100% - var(--cut)),
+        0 var(--cut)
+    );
+}
+
+.pick--selected .pick__card {
+    position: relative;
+    z-index: 22;
+}
+
+.pick__order {
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border: 2px solid #e9d5ff;
+    border-radius: 999px;
+    background: linear-gradient(180deg, #c084fc, #7c3aed);
+    color: #faf5ff;
+    font-family: var(--font-special, 'Orbitron', sans-serif);
+    font-size: 0.95rem;
+    font-weight: 800;
+    line-height: 1;
+    transform: translateX(-50%);
+    box-shadow:
+        0 0 14px rgba(168, 85, 247, 0.75),
+        0 4px 10px rgba(0, 0, 0, 0.45);
+    pointer-events: none;
+}
+
+.pick--blocked {
+    opacity: 0.45;
+    filter: saturate(0.55);
+}
+
+@media (min-width: 951px) {
+    .pool__hint {
+        font-size: 1.2rem;
     }
-    33% {
-        box-shadow:
-            0 0 18px 5px rgba(255, 140, 0, 0.6),
-            0 0 40px 10px rgba(255, 120, 0, 0.25),
-            inset 0 0 50px 15px rgba(255, 120, 0, 0.3),
-            inset 0 0 100px 25px rgba(255, 160, 0, 0.12);
+
+    .pick__shell {
+        --cut: 14px;
     }
-    66% {
-        box-shadow:
-            0 0 14px 4px rgba(255, 200, 0, 0.5),
-            0 0 35px 8px rgba(255, 160, 0, 0.2),
-            inset 0 0 45px 12px rgba(255, 100, 0, 0.28),
-            inset 0 0 90px 22px rgba(255, 140, 0, 0.1);
-    }
-    100% {
-        box-shadow:
-            0 0 12px 3px rgba(255, 59, 0, 0.5),
-            0 0 30px 8px rgba(255, 90, 0, 0.2),
-            inset 0 0 40px 10px rgba(255, 80, 0, 0.25),
-            inset 0 0 80px 20px rgba(255, 120, 0, 0.1);
+
+    .pick__order {
+        top: -16px;
+        width: 34px;
+        height: 34px;
+        font-size: 1.05rem;
     }
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .qnf-draft-fire {
-        animation: none !important;
-        box-shadow: 0 0 12px 3px rgba(255, 100, 0, 0.4);
+@media (max-width: 950px) {
+    .pick__shell {
+        --cut: 10px;
     }
 }
 </style>

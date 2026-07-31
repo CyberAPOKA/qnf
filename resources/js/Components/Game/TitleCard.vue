@@ -1,8 +1,8 @@
 <template>
     <div class="flex justify-center">
-        <h2 class="qnf-title font-semibold text-lg text-gray-800 leading-tight text-center">
+        <h2 class="qnf-title font-display font-semibold text-lg text-gray-800 leading-tight text-center">
             <i class="fa-solid fa-fire qnf-fire"></i>
-            <span class="qnf-text">QUINTA NOBRE FUTSAL 2026</span>
+            <span class="qnf-text text-white">QUINTA NOBRE FUTSAL 2026</span>
             <i class="fa-solid fa-fire qnf-fire"></i>
         </h2>
     </div>

@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
-import TeamCard from '@/Components/Game/TeamCard.vue';
+import TeamsBoard from '@/Components/Game/TeamsBoard.vue';
 
 const props = defineProps({
     rounds: {
@@ -70,9 +70,9 @@ const playerResult = (teams) => {
 };
 
 const resultConfig = {
-    win: { label: 'Vitória', classes: 'bg-green-100 text-green-800' },
-    draw: { label: 'Empate', classes: 'bg-yellow-100 text-yellow-800' },
-    loss: { label: 'Derrota', classes: 'bg-red-100 text-red-800' },
+    win: { label: 'Vitória' },
+    draw: { label: 'Empate' },
+    loss: { label: 'Derrota' },
 };
 </script>
 
@@ -82,59 +82,268 @@ const resultConfig = {
             <TitleCard />
         </template>
 
-        <div class="px-1 py-2 sm:p-2 lg:p-4">
-            <div class="mx-auto max-w-3xl space-y-3">
-                <div class="rounded-xl bg-white p-4 shadow">
-                    <h2 class="text-lg font-semibold text-gray-900">Rodadas</h2>
-                    <p class="mt-1 text-sm text-gray-500">
-                        Times, jogadores e pontuações de todas as rodadas.
-                    </p>
-                </div>
-
-                <div v-if="!hasRounds" class="rounded-xl bg-white p-6 shadow text-center text-sm text-gray-500">
+        <div class="px-1 py-3 pb-24 sm:px-4 lg:px-8 lg:py-6">
+            <div class="mx-auto max-w-3xl space-y-2">
+                <p v-if="!hasRounds" class="rounds__empty">
                     Nenhuma rodada com times formados ainda.
-                </div>
+                </p>
 
-                <div v-for="round in rounds" :key="round.round" class="rounded-xl bg-white shadow overflow-hidden">
-                    <div class="flex items-center justify-between gap-3 p-4">
-                        <div>
-                            <p class="text-base font-semibold text-gray-900 flex items-center gap-2">
+                <article v-for="round in rounds" :key="round.round" class="round-panel">
+                    <span class="round-panel__corner round-panel__corner--tl" aria-hidden="true" />
+                    <span class="round-panel__corner round-panel__corner--tr" aria-hidden="true" />
+                    <span class="round-panel__corner round-panel__corner--bl" aria-hidden="true" />
+                    <span class="round-panel__corner round-panel__corner--br" aria-hidden="true" />
+
+                    <header class="round-panel__head">
+                        <div class="round-panel__identity">
+                            <h2 class="round-panel__title">
                                 Rodada {{ round.round }}
-                                <span
-                                    v-if="playerResult(round.teams)"
-                                    class="rounded px-2 py-0.5 text-xs font-semibold"
-                                    :class="resultConfig[playerResult(round.teams)].classes"
-                                >
+                                <span v-if="playerResult(round.teams)" class="round-panel__result"
+                                    :class="`round-panel__result--${playerResult(round.teams)}`">
                                     {{ resultConfig[playerResult(round.teams)].label }}
                                 </span>
-                            </p>
-                            <p v-if="round.date" class="text-sm text-gray-500">
-                                {{ formatDate(round.date) }}
-                            </p>
+                                <p v-if="round.date" class="round-panel__date">{{ formatDate(round.date) }}</p>
+                            </h2>
                         </div>
 
-                        <div class="flex items-center gap-3">
-                            <span
-                                v-if="roundScores(round.teams)"
-                                class="text-sm font-semibold text-gray-700 tabular-nums"
-                            >
+                        <!-- <div class="round-panel__meta">
+                            <span v-if="roundScores(round.teams)" class="round-panel__scores">
                                 {{ roundScores(round.teams) }}
                             </span>
-                            <span class="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-700">
-                                {{ round.status_label }}
-                            </span>
-                        </div>
-                    </div>
+                            <span class="round-panel__status">{{ round.status_label }}</span>
+                        </div> -->
+                    </header>
 
-                    <div class="border-t border-gray-100 p-2 lg:p-4">
-                        <div class="grid grid-cols-3 gap-1 lg:gap-2">
-                            <TeamCard color="green" :team="round.teams?.green" />
-                            <TeamCard color="yellow" :team="round.teams?.yellow" />
-                            <TeamCard color="blue" :team="round.teams?.blue" />
-                        </div>
-                    </div>
-                </div>
+                    <div class="round-panel__divider" aria-hidden="true" />
+
+                    <TeamsBoard :teams="round.teams" :show-header="false" flush />
+                </article>
             </div>
         </div>
     </AppLayout>
 </template>
+
+<style scoped>
+.rounds__empty {
+    --cut: 14px;
+
+    margin: 0;
+    padding: 32px 16px;
+    background: rgba(8, 14, 28, 0.7);
+    box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.25);
+    color: #94a3b8;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-align: center;
+    clip-path: polygon(
+        var(--cut) 0,
+        calc(100% - var(--cut)) 0,
+        100% var(--cut),
+        100% calc(100% - var(--cut)),
+        calc(100% - var(--cut)) 100%,
+        var(--cut) 100%,
+        0 calc(100% - var(--cut)),
+        0 var(--cut)
+    );
+}
+
+.round-panel {
+    --cut: 16px;
+    --frame: 1.6px;
+
+    position: relative;
+    padding: 10px 8px 6px;
+    background: transparent;
+    filter: drop-shadow(0 0 18px rgba(56, 189, 248, 0.12)) drop-shadow(0 12px 26px rgba(0, 0, 0, 0.45));
+    clip-path: polygon(
+        var(--cut) 0,
+        calc(100% - var(--cut)) 0,
+        100% var(--cut),
+        100% calc(100% - var(--cut)),
+        calc(100% - var(--cut)) 100%,
+        var(--cut) 100%,
+        0 calc(100% - var(--cut)),
+        0 var(--cut)
+    );
+}
+
+/* Moldura em gradiente ciano → roxo com cantos chanfrados */
+.round-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -2;
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.9), rgba(139, 92, 246, 0.85));
+}
+
+.round-panel::after {
+    content: '';
+    position: absolute;
+    inset: var(--frame);
+    z-index: -1;
+    background:
+        radial-gradient(ellipse at top, rgba(56, 189, 248, 0.08), transparent 55%),
+        linear-gradient(180deg, rgba(10, 17, 32, 0.97) 0%, rgba(5, 9, 18, 0.98) 100%);
+    clip-path: polygon(
+        var(--cut) 0,
+        calc(100% - var(--cut)) 0,
+        100% var(--cut),
+        100% calc(100% - var(--cut)),
+        calc(100% - var(--cut)) 100%,
+        var(--cut) 100%,
+        0 calc(100% - var(--cut)),
+        0 var(--cut)
+    );
+}
+
+.round-panel__corner {
+    position: absolute;
+    z-index: 2;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(56, 189, 248, 0.9);
+    pointer-events: none;
+}
+
+.round-panel__corner--tl {
+    top: 12px;
+    left: 12px;
+    border-right: 0;
+    border-bottom: 0;
+}
+
+.round-panel__corner--tr {
+    top: 12px;
+    right: 12px;
+    border-bottom: 0;
+    border-left: 0;
+}
+
+.round-panel__corner--bl {
+    bottom: 12px;
+    left: 12px;
+    border-top: 0;
+    border-right: 0;
+}
+
+.round-panel__corner--br {
+    right: 12px;
+    bottom: 12px;
+    border-top: 0;
+    border-left: 0;
+}
+
+.round-panel__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 6px 0;
+}
+
+.round-panel__identity {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-width: 0;
+}
+
+.round-panel__title {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: #f8fafc;
+    font-family: var(--font-display, 'Rajdhani', sans-serif);
+    font-size: 1.4rem;
+    font-weight: 800;
+    letter-spacing: 0.01em;
+    line-height: 1.1;
+}
+
+.round-panel__result {
+    --tone: #94a3b8;
+    --tone-rgb: 148, 163, 184;
+
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border: 1px solid rgba(var(--tone-rgb), 0.45);
+    border-radius: 6px;
+    background: rgba(var(--tone-rgb), 0.14);
+    color: var(--tone);
+    font-size: 0.72rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.round-panel__result--win {
+    --tone: #4ade80;
+    --tone-rgb: 74, 222, 128;
+}
+
+.round-panel__result--draw {
+    --tone: #facc15;
+    --tone-rgb: 250, 204, 21;
+}
+
+.round-panel__result--loss {
+    --tone: #f87171;
+    --tone-rgb: 248, 113, 113;
+}
+
+.round-panel__date {
+    margin: 4px 0 0;
+    color: #a2a4a7;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.round-panel__meta {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    gap: 10px;
+}
+
+.round-panel__scores {
+    color: #e2e8f0;
+    font-family: var(--font-special, 'Orbitron', sans-serif);
+    font-size: 0.95rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.round-panel__status {
+    padding: 4px 12px;
+    border: 1px solid rgba(148, 163, 184, 0.3);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.8);
+    color: #cbd5e1;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+}
+
+.round-panel__divider {
+    height: 1px;
+    margin: 6px 2px 8px;
+    background: linear-gradient(90deg, transparent, rgba(56, 189, 248, 0.35), transparent);
+}
+
+@media (max-width: 480px) {
+    .round-panel__head {
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .round-panel__meta {
+        align-self: stretch;
+        justify-content: space-between;
+    }
+}
+</style>

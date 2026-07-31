@@ -72,7 +72,7 @@ class InstagramFeedCarouselRenderer
             $teamScore = $team?->score !== null ? (int) $team->score : null;
         }
 
-        $this->drawCenteredText($canvas, 'Time '.$color->label(), 56, 280, $accent, true);
+        $this->drawCenteredText($canvas, 'Time ' . $color->label(), 56, 280, $accent, true);
         $this->drawCenteredText($canvas, "Rodada {$round}", 26, 350, $muted);
 
         $pointsLabel = $this->pointsLabel($points);
@@ -80,7 +80,7 @@ class InstagramFeedCarouselRenderer
 
         if ($teamScore !== null) {
             $goalsLabel = $teamScore === 1 ? '1 gol' : "{$teamScore} gols";
-            $this->drawCenteredText($canvas, $goalsLabel.' na partida', 24, 520, $muted);
+            $this->drawCenteredText($canvas, $goalsLabel . ' na partida', 24, 520, $muted);
         }
 
         $y = 600;
@@ -97,7 +97,7 @@ class InstagramFeedCarouselRenderer
 
             $ig = $player['instagram_username'] ?? null;
             if (is_string($ig) && $ig !== '') {
-                $label .= '  @'.ltrim($ig, '@');
+                $label .= '  @' . ltrim($ig, '@');
             }
 
             $this->drawCenteredText($canvas, $this->truncate($label, 42), 28, $y, $white);
@@ -165,11 +165,11 @@ class InstagramFeedCarouselRenderer
     private function resolveLogoPath(): ?string
     {
         $candidates = [
-            public_path('assets/images/logo_full.png'),
-            public_path('assets/images/logo.png'),
-            public_path('assets/images/logo_mini.png'),
-            public_path('assets/week_team/logo.png'),
-            public_path('assets/week_team/logo_full.png'),
+            public_path('assets/images/logo.svg'),
+            public_path('assets/images/logo.svg'),
+            public_path('assets/images/logo_mini.svg'),
+            public_path('assets/week_team/logo.svg'),
+            public_path('assets/week_team/logo.svg'),
         ];
 
         foreach ($candidates as $path) {
@@ -183,7 +183,7 @@ class InstagramFeedCarouselRenderer
                 continue;
             }
 
-            $matches = glob($dir.DIRECTORY_SEPARATOR.'*logo*.{png,jpg,jpeg,webp}', GLOB_BRACE) ?: [];
+            $matches = glob($dir . DIRECTORY_SEPARATOR . '*logo*.{png,jpg,jpeg,webp}', GLOB_BRACE) ?: [];
             if ($matches !== []) {
                 return $matches[0];
             }
@@ -291,7 +291,7 @@ class InstagramFeedCarouselRenderer
     {
         $hex = ltrim($hex, '#');
         if (strlen($hex) === 3) {
-            $hex = $hex[0].$hex[0].$hex[1].$hex[1].$hex[2].$hex[2];
+            $hex = $hex[0] . $hex[0] . $hex[1] . $hex[1] . $hex[2] . $hex[2];
         }
 
         $r = hexdec(substr($hex, 0, 2));

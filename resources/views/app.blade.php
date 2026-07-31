@@ -20,9 +20,10 @@
         <link rel="icon" href="{{ asset('pwa-192x192.png') }}" type="image/png" sizes="192x192">
         <link rel="apple-touch-icon" href="{{ asset('apple-touch-icon-180x180.png') }}" sizes="180x180">
 
-        <link rel="preconnect" href="https://fonts.bunny.net">
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
         <link
-            href="https://fonts.bunny.net/css?family=figtree:400,500,600&display=swap"
+            href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Orbitron:wght@500;600;700;800&family=Rajdhani:wght@400;500;600;700&display=swap"
             rel="stylesheet"
         >
 

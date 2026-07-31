@@ -15,7 +15,7 @@ const sizeClasses = {
 
 <template>
     <div v-if="src" class="flex items-center justify-center overflow-hidden" :class="sizeClasses[size]?.container">
-        <img :src="src" :alt="alt"
+        <img :src="src" :alt="alt" loading="lazy" decoding="async"
             class="w-full object-cover object-top" :class="sizeClasses[size]?.img" />
     </div>
     <div v-else class="flex items-center justify-center">

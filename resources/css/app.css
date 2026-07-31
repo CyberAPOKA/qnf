@@ -10,3 +10,40 @@
 .safe-top {
     padding-top: env(safe-area-inset-top, 0px);
 }
+
+@layer base {
+    :root {
+        --font-body: 'Inter', ui-sans-serif, system-ui, sans-serif;
+        --font-display: 'Rajdhani', ui-sans-serif, system-ui, sans-serif;
+        --font-special: 'Orbitron', ui-sans-serif, system-ui, sans-serif;
+    }
+
+    body {
+        font-family: var(--font-body);
+    }
+
+    /* Títulos, ranking, rodada e badges */
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    .round-title,
+    .ranking-board__title,
+    .ranking-board__subtitle,
+    .ranking-player-identity h3,
+    .ranking-rank-badge,
+    .qnf-title,
+    .font-display {
+        font-family: var(--font-display);
+    }
+
+    /* Elementos especiais, números e efeitos de streak */
+    .font-special,
+    .ranking-player-stats strong,
+    .ranking-rank-badge__number,
+    .ranking-player-identity__streak-phrase {
+        font-family: var(--font-special);
+    }
+}

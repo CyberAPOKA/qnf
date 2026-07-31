@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\GameStatus;
 use App\Enums\Position;
+use App\Support\PublicStorage;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
@@ -15,6 +16,7 @@ class StatisticsService
      * @return array{partners: array<int, array{
      *     id: int,
      *     name: string,
+     *     photo_front: string|null,
      *     is_goalkeeper: bool,
      *     games_together: int,
      *     games_against: int,
@@ -33,7 +35,7 @@ class StatisticsService
         $stats = $this->getPartnerStatsForUser($userId);
 
         $users = DB::table('users')
-            ->select('id', 'name', 'position')
+            ->select('id', 'name', 'position', 'photo_front')
             ->get()
             ->keyBy('id');
 
@@ -47,6 +49,7 @@ class StatisticsService
                 return [
                     'id' => (int) $row->partner_id,
                     'name' => $user->name,
+                    'photo_front' => PublicStorage::url($user->photo_front),
                     'is_goalkeeper' => $user->position === Position::GOALKEEPER->value,
                     'games_together' => (int) $row->games_together,
                     'games_against' => (int) $row->games_against,

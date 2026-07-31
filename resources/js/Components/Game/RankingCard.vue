@@ -1,16 +1,7 @@
 <script setup>
-import { computed, ref, onMounted, nextTick, watch } from 'vue';
-import DataTable from '@/Components/DataTable.vue';
-import PlayerPhoto from '@/Components/Game/PlayerPhoto.vue';
-import PositionBadge from '@/Components/Game/PositionBadge.vue';
-import StreakPlayerName from '@/Components/Game/StreakPlayerName.vue';
+import { computed } from 'vue';
+import RankingPlayerCard from '@/Components/RankingPlayerCard.vue';
 import { useClipboard } from '@/composables/useClipboard';
-import { useFireParticles } from '@/composables/useFireParticles';
-import { streakParticleTargets, streakRowClass } from '@/composables/streakTiers';
-
-const showPhotos = ref(true);
-const rankingWrapper = ref(null);
-const { init: initFire } = useFireParticles();
 
 const props = defineProps({
     ranking: {
@@ -18,26 +9,6 @@ const props = defineProps({
         default: () => [],
     },
 });
-
-const positionLabels = {
-    goalkeeper: 'Goleiro',
-    fixed: 'Fixo',
-    winger: 'Ala',
-    pivot: 'Pivô',
-};
-
-const medalColors = {
-    gold: 'text-[#B8860B]',
-    silver: 'text-[#6B7280]',
-    bronze: 'text-[#8C4A2F]',
-};
-
-const rowBgColors = {
-    gold: 'bg-[#FFF4CC]',
-    silver: 'bg-[#F1F5F9]',
-    bronze: 'bg-[#FCE7DF]',
-    zero: 'bg-red-300',
-};
 
 function assignMedals(players) {
     let medalRank = 0;
@@ -59,60 +30,50 @@ function assignMedals(players) {
     });
 }
 
+function mapForm(lastResults = []) {
+    return lastResults.map((result) => (result === 1 ? 'win' : 'loss'));
+}
+
+function toCardPlayer(player) {
+    return {
+        id: player.id,
+        rank: player.rank,
+        name: player.name,
+        photo_front: player.photo_front,
+        initial: player.initial,
+        points: player.total_points,
+        games: player.games_played,
+        movement: player.rank_change,
+        form: mapForm(player.last_results),
+        theme: player.medal || 'default',
+        win_streak: Number(player.win_streak) || 0,
+        zeroPoints: player.zeroPoints,
+        isGoalkeeper: player.position === 'goalkeeper' || player.is_goalkeeper === true,
+    };
+}
+
 const linePlayers = computed(() =>
-    assignMedals(props.ranking.filter((p) => p.position !== 'goalkeeper')),
+    assignMedals(props.ranking.filter((p) => p.position !== 'goalkeeper')).map(toCardPlayer),
 );
 
 const goalkeepers = computed(() =>
-    props.ranking.filter((p) => p.position === 'goalkeeper'),
-);
-
-const lineRowClass = (row) => {
-    const classes = [];
-    const streakClass = streakRowClass(row.win_streak);
-    if (streakClass) classes.push(streakClass);
-    if (row.zeroPoints) classes.push(rowBgColors.zero);
-    else if (row.medal) classes.push(rowBgColors[row.medal]);
-    return classes.join(' ');
-};
-
-const baseLineColumns = [
-    { key: 'rank', label: 'Rank', align: 'center' },
-    { key: 'photo', label: 'Foto', align: 'center' },
-    { key: 'name', label: 'Jogador', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
-    { key: 'total_points', label: 'PTS', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
-    { key: 'games_played', label: 'PJ', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
-    { key: 'last_results', label: 'Últimas 5', align: 'center' },
-];
-
-const baseGoalkeeperColumns = [
-    { key: 'rank', label: 'Rank', align: 'center' },
-    { key: 'photo', label: '' },
-    { key: 'name', label: 'Jogador', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
-    { key: 'total_points', label: 'PTS', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
-    { key: 'games_played', label: 'PJ', align: 'center', class: 'font-bold text-sm sm:text-base lg:text-lg text-gray-900' },
-];
-
-const lineColumns = computed(() =>
-    showPhotos.value ? baseLineColumns : baseLineColumns.filter((c) => c.key !== 'photo'),
-);
-
-const goalkeeperColumns = computed(() =>
-    showPhotos.value ? baseGoalkeeperColumns : baseGoalkeeperColumns.filter((c) => c.key !== 'photo'),
+    props.ranking
+        .filter((p) => p.position === 'goalkeeper')
+        .map((player) => toCardPlayer({ ...player, medal: null, last_results: [] })),
 );
 
 const medalEmojis = { gold: '🥇', silver: '🥈', bronze: '🥉' };
 
 const rankingMessage = computed(() => {
-    const eligible = linePlayers.value.filter((p) => p.total_points >= 1);
+    const eligible = linePlayers.value.filter((p) => p.points >= 1);
     if (!eligible.length) return '';
 
     const lines = ['👑 REI DA QUADRA 2026', ''];
 
     for (const player of eligible) {
-        const medal = player.medal ? medalEmojis[player.medal] : '🔘';
-        const stars = '⭐️'.repeat(player.total_points);
-        lines.push(`${medal} ${player.name} (${player.games_played}p) ${stars}`);
+        const medal = player.theme && medalEmojis[player.theme] ? medalEmojis[player.theme] : '🔘';
+        const stars = '⭐️'.repeat(player.points);
+        lines.push(`${medal} ${player.name} (${player.games}p) ${stars}`);
     }
 
     return lines.join('\n');
@@ -120,256 +81,173 @@ const rankingMessage = computed(() => {
 
 const { label: copyRankingLabel, copy: copyRanking } = useClipboard();
 const copyRankingMessage = () => copyRanking(rankingMessage.value);
-
-function refreshFire() {
-    nextTick(() => setTimeout(() => {
-        initFire(rankingWrapper.value, streakParticleTargets());
-    }, 200));
-}
-
-onMounted(refreshFire);
-
-watch([linePlayers, showPhotos], refreshFire);
 </script>
 
 <template>
-    <div ref="rankingWrapper" class="rounded-xl bg-white sm:px-2 lg:p-4 shadow" style="position: relative;">
-        <div class="flex items-center justify-between p-2">
-            <h3 class="text-base font-semibold text-gray-900">RANKING</h3>
-            <div class="flex items-center gap-3">
-                <label class="flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
-                    <input type="checkbox" v-model="showPhotos"
-                        class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer" />
-                    Fotos
-                </label>
-                <button v-if="rankingMessage" @click="copyRankingMessage"
-                    class="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition">
-                    <i class="fa-brands fa-whatsapp mr-1"></i>
+    <div class="ranking-board py-2 lg:py-4 px-1 lg:px-4">
+        <!-- <div class="ranking-board__header">
+            <div>
+                <h3 class="ranking-board__title">
+                    <i class="fa-solid fa-shield-halved ranking-board__title-icon"></i>
+                    RANKING
+                </h3>
+                <p class="ranking-board__subtitle">Classificação geral</p>
+            </div>
+            <div class="ranking-board__actions">
+                <button v-if="rankingMessage" type="button" class="ranking-board__copy" @click="copyRankingMessage">
+                    <i class="fa-brands fa-whatsapp"></i>
                     {{ copyRankingLabel }}
                 </button>
             </div>
+        </div> -->
+
+        <div v-if="linePlayers.length" class="ranking-board__list">
+            <div
+                v-for="player in linePlayers"
+                :key="player.id"
+                class="ranking-board__item"
+                :class="{
+                    'ranking-board__item--zero': player.zeroPoints,
+                    'ranking-board__item--podium': player.theme === 'gold' || player.theme === 'silver' || player.theme === 'bronze',
+                }"
+            >
+                <RankingPlayerCard :player="player" />
+            </div>
         </div>
-        <DataTable :columns="lineColumns" :rows="linePlayers" :row-class="lineRowClass"
-            empty-message="Nenhum jogo finalizado ainda.">
-            <template #cell-rank="{ row }">
-                <div class="flex flex-col items-center">
-                    <span v-if="row.medal" class="text-lg">
-                        <i class="!text-2xl fa-solid fa-medal drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]"
-                            :class="medalColors[row.medal]"></i>
-                    </span>
-                    <span v-else class="font-bold text-sm sm:text-base lg:text-lg text-gray-900">{{ row.rank }}º</span>
-                    <span v-if="row.rank_change === null" class="text-xs text-blue-500 font-semibold">NOVO</span>
-                    <span v-else-if="row.rank_change > 0" class="text-green-600 flex items-center gap-0.5">
-                        <i class="fa-solid fa-circle-up text-xs"></i>
-                        <span class="text-xs font-bold">{{ row.rank_change }}</span>
-                    </span>
-                    <span v-else-if="row.rank_change < 0" class="text-red-500 flex items-center gap-0.5">
-                        <i class="fa-solid fa-circle-down text-xs"></i>
-                        <span class="text-xs font-bold">{{ Math.abs(row.rank_change) }}</span>
-                    </span>
-                    <span v-else class="text-gray-400">
-                        <i class="fa-solid fa-circle-minus text-xs"></i>
-                    </span>
-                </div>
-            </template>
-            <template #cell-photo="{ row }">
-                <PlayerPhoto :src="row.photo_front" :initial="row.initial" :alt="row.name" />
-            </template>
-            <template #cell-name="{ row }">
-                <StreakPlayerName :name="row.name" :streak="row.win_streak">
-                    <PositionBadge
-                        v-if="!showPhotos"
-                        :position="row.position"
-                        :label="positionLabels[row.position] || row.position"
-                    />
-                </StreakPlayerName>
-            </template>
-            <template #cell-last_results="{ row }">
-                <div class="flex items-center justify-center gap-0.25">
-                    <span
-                        v-for="(result, i) in row.last_results"
-                        :key="i"
-                        class="inline-flex items-center justify-center rounded-full"
-                        :class="i === row.last_results.length - 1
-                            ? (result === 1
-                                ? 'text-lg underline underline-offset-2 decoration-green-600'
-                                : 'text-lg underline underline-offset-2 decoration-red-500')
-                            : ''"
-                    >
-                        <i v-if="result === 1" class="fa-solid fa-circle-check text-green-600"></i>
-                        <i v-else class="fa-solid fa-circle-xmark text-red-500"></i>
-                    </span>
-                </div>
-            </template>
-        </DataTable>
+        <p v-else class="ranking-board__empty">Nenhum jogo finalizado ainda.</p>
     </div>
 
-    <div class="rounded-xl bg-white sm:px-2 lg:p-4 shadow">
-        <h3 class="mb-3 text-base font-semibold text-gray-900 p-2">Ranking - Goleiros</h3>
+    <div class="ranking-board ranking-board--goalkeepers">
+        <div class="ranking-board__header">
+            <div>
+                <h3 class="ranking-board__title">RANKING — GOLEIROS</h3>
+                <p class="ranking-board__subtitle">Classificação dos goleiros</p>
+            </div>
+        </div>
 
-        <DataTable :columns="goalkeeperColumns" :rows="goalkeepers" empty-message="Nenhum goleiro com PJ ainda.">
-            <template #cell-rank="{ row }">
-                <div class="flex flex-col items-center">
-                    <span class="font-bold text-sm sm:text-base lg:text-lg text-gray-900">{{ row.rank }}º</span>
-                    <span v-if="row.rank_change === null" class="text-xs text-blue-500 font-semibold">NOVO</span>
-                    <span v-else-if="row.rank_change > 0" class="text-green-600 flex items-center gap-0.5">
-                        <i class="fa-solid fa-circle-up text-xs"></i>
-                        <span class="text-xs font-bold">{{ row.rank_change }}</span>
-                    </span>
-                    <span v-else-if="row.rank_change < 0" class="text-red-500 flex items-center gap-0.5">
-                        <i class="fa-solid fa-circle-down text-xs"></i>
-                        <span class="text-xs font-bold">{{ Math.abs(row.rank_change) }}</span>
-                    </span>
-                    <span v-else class="text-gray-400">
-                        <i class="fa-solid fa-circle-minus text-xs"></i>
-                    </span>
-                </div>
-            </template>
-            <template #cell-photo="{ row }">
-                <PlayerPhoto :src="row.photo_front" :initial="row.initial" :alt="row.name" />
-            </template>
-            <template #cell-name="{ row }">
-                <span class="font-medium text-gray-900">{{ row.name }}</span>
-            </template>
-        </DataTable>
+        <div v-if="goalkeepers.length" class="ranking-board__list">
+            <RankingPlayerCard v-for="player in goalkeepers" :key="player.id" :player="player" />
+        </div>
+        <p v-else class="ranking-board__empty">Nenhum goleiro com PJ ainda.</p>
     </div>
 </template>
 
 <style>
-/* Soft cell tint — glow lives on .qnf-streak-aura overlays (div, iOS-safe). */
-.qnf-streak--hot > td {
-    background-color: rgba(255, 120, 0, 0.10);
+.ranking-board {
+    position: relative;
+    overflow: visible !important;
+    border: 1px solid rgba(100, 116, 139, 0.35);
+    border-radius: 18px;
+    background:
+        radial-gradient(ellipse at top left, rgba(56, 189, 248, 0.08), transparent 45%),
+        radial-gradient(ellipse at bottom right, rgba(139, 92, 246, 0.08), transparent 40%),
+        linear-gradient(180deg, #0b1220 0%, #070b14 100%);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.04),
+        0 12px 40px rgba(0, 0, 0, 0.35);
 }
 
-.qnf-streak--legendary > td {
-    background-color: rgba(124, 58, 237, 0.12);
+.ranking-board--goalkeepers {
+    margin-top: 1rem;
 }
 
-.qnf-streak-aura {
-    -webkit-transform: translateZ(0);
-    transform: translateZ(0);
-    -webkit-animation: qnfStreakPulseHot 2.2s ease-in-out infinite;
-    animation: qnfStreakPulseHot 2.2s ease-in-out infinite;
+.ranking-board__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 14px;
+    padding: 4px 6px 10px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
 }
 
-.qnf-streak-aura--legendary {
-    -webkit-animation-name: qnfStreakPulseLegendary;
-    animation-name: qnfStreakPulseLegendary;
+.ranking-board__title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    color: #f8fafc;
+    font-size: 1.15rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
-/* Tighter vertical outer glow + negative spread = cleaner edge when two streaks stack. */
-@keyframes qnfStreakPulseHot {
-    0%, 100% {
-        box-shadow:
-            inset 0 0 22px rgba(255, 140, 0, 0.42),
-            inset 0 0 50px rgba(255, 180, 0, 0.18),
-            0 0 0 2px rgba(255, 120, 0, 0.7),
-            -10px 0 16px -6px rgba(255, 100, 0, 0.4),
-            10px 0 16px -6px rgba(255, 180, 0, 0.35),
-            0 -4px 10px -6px rgba(255, 120, 0, 0.35),
-            0 4px 10px -6px rgba(255, 120, 0, 0.35);
-    }
-    50% {
-        box-shadow:
-            inset 0 0 30px rgba(255, 140, 0, 0.52),
-            inset 0 0 70px rgba(255, 180, 0, 0.22),
-            0 0 0 2px rgba(255, 140, 0, 0.85),
-            -12px 0 20px -5px rgba(255, 120, 0, 0.5),
-            12px 0 20px -5px rgba(255, 200, 0, 0.42),
-            0 -5px 12px -5px rgba(255, 140, 0, 0.45),
-            0 5px 12px -5px rgba(255, 140, 0, 0.45);
-    }
+.ranking-board__title-icon {
+    color: #fbbf24;
+    filter: drop-shadow(0 0 8px rgba(251, 191, 36, 0.55));
 }
 
-@-webkit-keyframes qnfStreakPulseHot {
-    0%, 100% {
-        box-shadow:
-            inset 0 0 22px rgba(255, 140, 0, 0.42),
-            inset 0 0 50px rgba(255, 180, 0, 0.18),
-            0 0 0 2px rgba(255, 120, 0, 0.7),
-            -10px 0 16px -6px rgba(255, 100, 0, 0.4),
-            10px 0 16px -6px rgba(255, 180, 0, 0.35),
-            0 -4px 10px -6px rgba(255, 120, 0, 0.35),
-            0 4px 10px -6px rgba(255, 120, 0, 0.35);
-    }
-    50% {
-        box-shadow:
-            inset 0 0 30px rgba(255, 140, 0, 0.52),
-            inset 0 0 70px rgba(255, 180, 0, 0.22),
-            0 0 0 2px rgba(255, 140, 0, 0.85),
-            -12px 0 20px -5px rgba(255, 120, 0, 0.5),
-            12px 0 20px -5px rgba(255, 200, 0, 0.42),
-            0 -5px 12px -5px rgba(255, 140, 0, 0.45),
-            0 5px 12px -5px rgba(255, 140, 0, 0.45);
-    }
+.ranking-board__subtitle {
+    margin: 4px 0 0;
+    color: #a78bfa;
+    font-size: 0.7rem;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
 }
 
-@keyframes qnfStreakPulseLegendary {
-    0%, 100% {
-        box-shadow:
-            inset 0 0 22px rgba(124, 58, 237, 0.42),
-            inset 0 0 50px rgba(168, 85, 247, 0.2),
-            0 0 0 2px rgba(147, 51, 234, 0.75),
-            -10px 0 16px -6px rgba(109, 40, 217, 0.45),
-            10px 0 16px -6px rgba(192, 132, 252, 0.38),
-            0 -4px 10px -6px rgba(147, 51, 234, 0.4),
-            0 4px 10px -6px rgba(147, 51, 234, 0.4);
-    }
-    50% {
-        box-shadow:
-            inset 0 0 30px rgba(139, 92, 246, 0.52),
-            inset 0 0 70px rgba(216, 70, 239, 0.26),
-            0 0 0 2px rgba(168, 85, 247, 0.9),
-            -12px 0 20px -5px rgba(124, 58, 237, 0.55),
-            12px 0 20px -5px rgba(232, 121, 249, 0.45),
-            0 -5px 12px -5px rgba(168, 85, 247, 0.5),
-            0 5px 12px -5px rgba(168, 85, 247, 0.5);
-    }
+.ranking-board__actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
-@-webkit-keyframes qnfStreakPulseLegendary {
-    0%, 100% {
-        box-shadow:
-            inset 0 0 22px rgba(124, 58, 237, 0.42),
-            inset 0 0 50px rgba(168, 85, 247, 0.2),
-            0 0 0 2px rgba(147, 51, 234, 0.75),
-            -10px 0 16px -6px rgba(109, 40, 217, 0.45),
-            10px 0 16px -6px rgba(192, 132, 252, 0.38),
-            0 -4px 10px -6px rgba(147, 51, 234, 0.4),
-            0 4px 10px -6px rgba(147, 51, 234, 0.4);
-    }
-    50% {
-        box-shadow:
-            inset 0 0 30px rgba(139, 92, 246, 0.52),
-            inset 0 0 70px rgba(216, 70, 239, 0.26),
-            0 0 0 2px rgba(168, 85, 247, 0.9),
-            -12px 0 20px -5px rgba(124, 58, 237, 0.55),
-            12px 0 20px -5px rgba(232, 121, 249, 0.45),
-            0 -5px 12px -5px rgba(168, 85, 247, 0.5),
-            0 5px 12px -5px rgba(168, 85, 247, 0.5);
-    }
+.ranking-board__copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border: 1px solid rgba(34, 211, 238, 0.35);
+    border-radius: 8px;
+    background: rgba(8, 145, 178, 0.2);
+    padding: 6px 12px;
+    color: #67e8f9;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+    transition: background 150ms ease, border-color 150ms ease;
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .qnf-streak-aura {
-        -webkit-animation: none !important;
-        animation: none !important;
-    }
+.ranking-board__copy:hover {
+    background: rgba(8, 145, 178, 0.35);
+    border-color: rgba(34, 211, 238, 0.65);
+}
 
-    .qnf-streak-aura--hot {
-        box-shadow:
-            inset 0 0 22px rgba(255, 140, 0, 0.42),
-            0 0 0 2px rgba(255, 120, 0, 0.7),
-            -8px 0 12px -6px rgba(255, 100, 0, 0.35),
-            8px 0 12px -6px rgba(255, 180, 0, 0.3);
-    }
+.ranking-board__list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 10px;
+    overflow: visible;
+}
 
-    .qnf-streak-aura--legendary {
-        box-shadow:
-            inset 0 0 22px rgba(124, 58, 237, 0.42),
-            0 0 0 2px rgba(147, 51, 234, 0.75),
-            -8px 0 12px -6px rgba(109, 40, 217, 0.4),
-            8px 0 12px -6px rgba(192, 132, 252, 0.35);
-    }
+.ranking-board__item {
+    position: relative;
+    overflow: visible;
+}
+
+.ranking-board__item--podium,
+.ranking-board__item:has(.ranking-card--podium) {
+    z-index: 4;
+    overflow: visible;
+}
+
+/* Espaço maior só entre os do pódio; do 3º para baixo usa o gap normal */
+.ranking-board__item--podium + .ranking-board__item--podium {
+    margin-top: 14px;
+}
+
+.ranking-board__item--zero {
+    opacity: 0.72;
+    filter: saturate(0.7);
+}
+
+.ranking-board__empty {
+    margin: 8px 0 0;
+    padding: 24px 12px;
+    color: #64748b;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-align: center;
 }
 </style>

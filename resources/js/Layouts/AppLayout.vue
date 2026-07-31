@@ -37,7 +37,9 @@ const suspensionMessage = computed(() => {
 </script>
 
 <template>
-    <div class="safe-top">
+    <div class="app-shell safe-top">
+        <div class="app-shell__bg" aria-hidden="true"></div>
+
         <Head :title="title" />
 
         <Banner />
@@ -46,8 +48,8 @@ const suspensionMessage = computed(() => {
             {{ suspensionMessage }}
         </div>
 
-        <div class="min-h-screen bg-gray-100">
-            <nav class="bg-white border-b border-gray-100">
+        <div class="relative z-10 min-h-screen bg-transparent">
+            <nav class="border-b border-white/10 bg-black/35 backdrop-blur-md">
                 <!-- Primary Navigation Menu -->
                 <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div class="flex justify-between h-16">
@@ -95,7 +97,7 @@ const suspensionMessage = computed(() => {
                                 <Dropdown v-if="$page.props.jetstream.hasTeamFeatures" align="right" width="60">
                                     <template #trigger>
                                         <span class="inline-flex rounded-md">
-                                            <button type="button" class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-gray-500 bg-white hover:text-gray-700 focus:outline-none focus:bg-gray-50 active:bg-gray-50 transition ease-in-out duration-150">
+                                            <button type="button" class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-slate-200 bg-white/10 hover:text-white hover:bg-white/15 focus:outline-none focus:bg-white/15 active:bg-white/20 transition ease-in-out duration-150">
                                                 {{ $page.props.auth.user.current_team.name }}
 
                                                 <svg class="ms-2 -me-0.5 size-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -152,12 +154,12 @@ const suspensionMessage = computed(() => {
                             <div class="ms-3 relative">
                                 <Dropdown align="right" width="48">
                                     <template #trigger>
-                                        <button v-if="$page.props.jetstream.managesProfilePhotos" class="flex text-sm border-2 border-transparent rounded-full focus:outline-none focus:border-gray-300 transition">
+                                        <button v-if="$page.props.jetstream.managesProfilePhotos" class="flex text-sm border-2 border-transparent rounded-full focus:outline-none focus:border-cyan-300/50 transition">
                                             <img class="size-8 rounded-full object-cover" :src="$page.props.auth.user.profile_photo_url" :alt="$page.props.auth.user.name">
                                         </button>
 
                                         <span v-else class="inline-flex rounded-md">
-                                            <button type="button" class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-gray-500 bg-white hover:text-gray-700 focus:outline-none focus:bg-gray-50 active:bg-gray-50 transition ease-in-out duration-150">
+                                            <button type="button" class="inline-flex items-center px-3 py-2 border border-transparent text-sm leading-4 font-medium rounded-md text-slate-200 bg-white/10 hover:text-white hover:bg-white/15 focus:outline-none focus:bg-white/15 active:bg-white/20 transition ease-in-out duration-150">
                                                 {{ $page.props.auth.user.name }}
 
                                                 <svg class="ms-2 -me-0.5 size-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -196,7 +198,7 @@ const suspensionMessage = computed(() => {
 
                         <!-- Hamburger -->
                         <div class="-me-2 flex items-center sm:hidden">
-                            <button class="inline-flex items-center justify-center p-2 rounded-md text-gray-400 hover:text-gray-500 hover:bg-gray-100 focus:outline-none focus:bg-gray-100 focus:text-gray-500 transition duration-150 ease-in-out" @click="showingNavigationDropdown = ! showingNavigationDropdown">
+                            <button class="inline-flex items-center justify-center p-2 rounded-md text-slate-300 hover:text-white hover:bg-white/10 focus:outline-none focus:bg-white/10 focus:text-white transition duration-150 ease-in-out" @click="showingNavigationDropdown = ! showingNavigationDropdown">
                                 <svg
                                     class="size-6"
                                     stroke="currentColor"
@@ -224,7 +226,7 @@ const suspensionMessage = computed(() => {
                 </div>
 
                 <!-- Responsive Navigation Menu -->
-                <div :class="{'block': showingNavigationDropdown, 'hidden': ! showingNavigationDropdown}" class="sm:hidden">
+                <div :class="{'block': showingNavigationDropdown, 'hidden': ! showingNavigationDropdown}" class="sm:hidden bg-black/50 backdrop-blur-md">
                     <div class="pt-2 pb-3 space-y-1">
                         <ResponsiveNavLink :href="route('dashboard')" :active="route().current('dashboard')">
                             Dashboard
@@ -254,17 +256,17 @@ const suspensionMessage = computed(() => {
                     </div>
 
                     <!-- Responsive Settings Options -->
-                    <div class="pt-4 pb-1 border-t border-gray-200">
+                    <div class="pt-4 pb-1 border-t border-white/10">
                         <div class="flex items-center px-4">
                             <div v-if="$page.props.jetstream.managesProfilePhotos" class="shrink-0 me-3">
                                 <img class="size-10 rounded-full object-cover" :src="$page.props.auth.user.profile_photo_url" :alt="$page.props.auth.user.name">
                             </div>
 
                             <div>
-                                <div class="font-medium text-base text-gray-800">
+                                <div class="font-medium text-base text-slate-100">
                                     {{ $page.props.auth.user.name }}
                                 </div>
-                                <div class="font-medium text-sm text-gray-500">
+                                <div class="font-medium text-sm text-slate-400">
                                     {{ $page.props.auth.user.phone || $page.props.auth.user.email }}
                                 </div>
                             </div>
@@ -288,9 +290,9 @@ const suspensionMessage = computed(() => {
 
                             <!-- Team Management -->
                             <template v-if="$page.props.jetstream.hasTeamFeatures">
-                                <div class="border-t border-gray-200" />
+                                <div class="border-t border-white/10" />
 
-                                <div class="block px-4 py-2 text-xs text-gray-400">
+                                <div class="block px-4 py-2 text-xs text-slate-400">
                                     Manage Team
                                 </div>
 
@@ -305,9 +307,9 @@ const suspensionMessage = computed(() => {
 
                                 <!-- Team Switcher -->
                                 <template v-if="$page.props.auth.user.all_teams.length > 1">
-                                    <div class="border-t border-gray-200" />
+                                    <div class="border-t border-white/10" />
 
-                                    <div class="block px-4 py-2 text-xs text-gray-400">
+                                    <div class="block px-4 py-2 text-xs text-slate-400">
                                         Switch Teams
                                     </div>
 
@@ -331,7 +333,7 @@ const suspensionMessage = computed(() => {
             </nav>
 
             <!-- Page Heading -->
-            <header v-if="$slots.header" class="bg-white shadow">
+            <header v-if="$slots.header" class="bg-transparent">
                 <div class="max-w-7xl mx-auto p-4 sm:px-6 lg:px-8">
                     <slot name="header" />
                 </div>
@@ -344,3 +346,29 @@ const suspensionMessage = computed(() => {
         </div>
     </div>
 </template>
+
+<style scoped>
+.app-shell {
+    position: relative;
+    min-height: 100vh;
+}
+
+.app-shell__bg {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-color: #070b14;
+    background-image: url('/assets/images/background-mobile.png');
+    background-position: center top;
+    background-size: cover;
+    background-repeat: no-repeat;
+}
+
+@media (min-width: 768px) {
+    .app-shell__bg {
+        background-image: url('/assets/images/background-desktop.png');
+        background-position: center;
+    }
+}
+</style>

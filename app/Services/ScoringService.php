@@ -90,9 +90,11 @@ class ScoringService
             ->pluck('score', 'color')
             ->map(fn ($score) => (int) $score);
 
-        // 2. Reset idempotente
+        // 2. Reset idempotente (lista final; exclui espera e desistências)
         DB::table('game_players')
             ->where('game_id', $gameId)
+            ->where('dropped_out', false)
+            ->whereNull('waitlist_at')
             ->update(['points' => 0]);
 
         if ($scores->isEmpty()) {
@@ -110,6 +112,8 @@ class ScoringService
         // 3. Single UPDATE com UNION subquery: capitães + draftados dos times vencedores
         DB::table('game_players')
             ->where('game_id', $gameId)
+            ->where('dropped_out', false)
+            ->whereNull('waitlist_at')
             ->whereIn('user_id', function ($sub) use ($gameId, $winningColors) {
                 $sub->select('captain_user_id')
                     ->from('teams')
@@ -142,6 +146,7 @@ class ScoringService
             ->join('users', 'game_players.user_id', '=', 'users.id')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
+            ->where('game_players.dropped_out', false)
             ->whereNull('game_players.waitlist_at')
             ->select(
                 'users.id',
@@ -183,6 +188,7 @@ class ScoringService
         $query = DB::table('game_players')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
+            ->where('game_players.dropped_out', false)
             ->whereNull('game_players.waitlist_at')
             ->orderByDesc('games.round')
             ->select('game_players.user_id', 'game_players.points');
@@ -219,6 +225,7 @@ class ScoringService
         $query = DB::table('game_players')
             ->join('games', 'game_players.game_id', '=', 'games.id')
             ->where('games.status', GameStatus::DONE->value)
+            ->where('game_players.dropped_out', false)
             ->whereNull('game_players.waitlist_at')
             ->orderByDesc('games.round')
             ->select('game_players.user_id', 'game_players.points');

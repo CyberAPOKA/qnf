@@ -205,7 +205,7 @@ class GameController extends Controller
                     ->where('dropped_out', false)
                     ->firstOrFail();
 
-                $gamePlayer->update(['dropped_out' => true, 'waitlist_at' => null]);
+                $gamePlayer->update(['dropped_out' => true]);
 
                 if (in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL])) {
                     $promoted = $this->waitlistService->promoteFromWaitlistBeforeDraft($lockedGame);

@@ -23,3 +23,19 @@
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^ index.php [L]
 </IfModule>
+
+# Browser cache for static images (served directly; never hits Laravel).
+# Player/profile photos use hashed filenames → long immutable cache.
+# Other assets may be regenerated at the same URL → shorter TTL.
+# Prefer Cache-Control over Expires so regenerable files are not stuck for a year.
+<IfModule mod_headers.c>
+    <If "%{REQUEST_URI} =~ m#^/storage/(players|profile-photos)/#">
+        Header set Cache-Control "public, max-age=31536000, immutable"
+    </If>
+    <ElseIf "%{REQUEST_URI} =~ m#^/(storage|assets)/#">
+        Header set Cache-Control "public, max-age=86400, stale-while-revalidate=604800"
+    </ElseIf>
+    <ElseIf "%{REQUEST_URI} =~ m#\.(?:jpg|jpeg|png|gif|webp|svg|ico)$#">
+        Header set Cache-Control "public, max-age=2592000"
+    </ElseIf>
+</IfModule>
