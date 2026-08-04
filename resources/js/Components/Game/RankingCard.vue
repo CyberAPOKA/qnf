@@ -31,7 +31,11 @@ function assignMedals(players) {
 }
 
 function mapForm(lastResults = []) {
-    return lastResults.map((result) => (result === 1 ? 'win' : 'loss'));
+    return lastResults.map((result) => {
+        if (Number(result) === 1) return 'win';
+        if (Number(result) === 2) return 'draw';
+        return 'loss';
+    });
 }
 
 function toCardPlayer(player) {

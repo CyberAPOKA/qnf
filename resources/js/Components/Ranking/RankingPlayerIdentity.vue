@@ -17,6 +17,14 @@ const displayName = computed(() => firstName(props.name))
 const streakType = computed(() => getRankingStreakType(props.winStreak ?? 0))
 
 const streakBadgeSrc = computed(() => {
+    if (streakType.value === 'dragon') {
+        return '/assets/streak/win-streak-7.webp'
+    }
+
+    if (streakType.value === 'skulls') {
+        return '/assets/streak/win-streak-6.webp'
+    }
+
     if (streakType.value === 'purple') {
         return '/assets/streak/win-streak-5.webp'
     }
@@ -43,6 +51,14 @@ const streakPhrase = computed(() => {
 
     if (streakType.value === 'purple') {
         return 'EL MAGO'
+    }
+
+    if (streakType.value === 'skulls') {
+        return 'CAVEIRA'
+    }
+
+    if (streakType.value === 'dragon') {
+        return 'O DRAGÃO'
     }
 
     return null

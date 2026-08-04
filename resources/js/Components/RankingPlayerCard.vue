@@ -31,6 +31,8 @@ const isPodium = computed(() =>
             'ranking-card--streak-fire': streakType === 'fire',
             'ranking-card--streak-ice': streakType === 'ice',
             'ranking-card--streak-purple': streakType === 'purple',
+            'ranking-card--streak-skulls': streakType === 'skulls',
+            'ranking-card--streak-dragon': streakType === 'dragon',
         },
     ]">
         <div class="ranking-card__frame pointer-events-none absolute inset-0 z-0" aria-hidden="true" />
@@ -304,6 +306,54 @@ const isPodium = computed(() =>
     background: linear-gradient(90deg, #7c3aed, #d8b4fe, #a855f7, #6d28d9);
     opacity: 1;
     filter: drop-shadow(0 0 8px rgba(168, 85, 247, 0.95));
+}
+
+.ranking-card--streak-skulls {
+    --streak-color: #94a3b8;
+    --streak-rgb: 148, 163, 184;
+}
+
+.ranking-card--streak-skulls .ranking-card__frame {
+    background:
+        linear-gradient(100deg,
+            rgba(71, 85, 105, 0.55) 0%,
+            rgba(30, 41, 59, 0.96) 34%,
+            rgba(9, 13, 25, 0.98) 68%,
+            rgba(7, 11, 22, 0.98) 100%);
+    box-shadow:
+        inset 0 0 40px rgba(148, 163, 184, 0.22),
+        0 0 18px rgba(148, 163, 184, 0.55),
+        0 0 40px rgba(71, 85, 105, 0.3);
+}
+
+.ranking-card--streak-skulls .ranking-card__frame::after {
+    background: linear-gradient(90deg, #475569, #e2e8f0, #94a3b8, #64748b);
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(148, 163, 184, 0.9));
+}
+
+.ranking-card--streak-dragon {
+    --streak-color: #ef4444;
+    --streak-rgb: 239, 68, 68;
+}
+
+.ranking-card--streak-dragon .ranking-card__frame {
+    background:
+        linear-gradient(100deg,
+            rgba(185, 28, 28, 0.55) 0%,
+            rgba(69, 10, 10, 0.96) 34%,
+            rgba(9, 13, 25, 0.98) 68%,
+            rgba(7, 11, 22, 0.98) 100%);
+    box-shadow:
+        inset 0 0 42px rgba(239, 68, 68, 0.28),
+        0 0 20px rgba(239, 68, 68, 0.7),
+        0 0 46px rgba(185, 28, 28, 0.34);
+}
+
+.ranking-card--streak-dragon .ranking-card__frame::after {
+    background: linear-gradient(90deg, #7f1d1d, #fecaca, #ef4444, #b91c1c);
+    opacity: 1;
+    filter: drop-shadow(0 0 8px rgba(239, 68, 68, 0.95));
 }
 
 @media (max-width: 950px) {

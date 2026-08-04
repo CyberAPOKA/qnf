@@ -2,7 +2,7 @@ export type PlayerForm = 'win' | 'draw' | 'loss'
 
 export type RankingTheme = 'gold' | 'silver' | 'bronze' | 'default'
 
-export type RankingStreakType = 'fire' | 'ice' | 'purple' | null
+export type RankingStreakType = 'fire' | 'ice' | 'purple' | 'skulls' | 'dragon' | null
 
 export interface RankingPlayer {
     rank: number

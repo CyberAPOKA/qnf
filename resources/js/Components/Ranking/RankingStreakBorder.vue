@@ -222,6 +222,126 @@ defineProps<{
     animation: streak-border-ice-vertical 2.8s ease-in-out infinite 2.1s;
 }
 
+/* ── Skulls (streak 6) ── */
+.ranking-streak-border--skulls .ranking-streak-border__edge {
+    filter:
+        drop-shadow(0 0 4px rgba(255, 255, 255, 0.95))
+        drop-shadow(0 0 8px rgba(148, 163, 184, 1))
+        drop-shadow(0 0 12px rgba(100, 116, 139, 0.9));
+}
+
+.ranking-streak-border--skulls .ranking-streak-border__edge--top,
+.ranking-streak-border--skulls .ranking-streak-border__edge--bottom {
+    width: 42%;
+    height: 3px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(148, 163, 184, 0.3),
+        #ffffff,
+        #94a3b8,
+        transparent
+    );
+}
+
+.ranking-streak-border--skulls .ranking-streak-border__edge--left,
+.ranking-streak-border--skulls .ranking-streak-border__edge--right {
+    width: 3px;
+    height: 42%;
+    background: linear-gradient(
+        180deg,
+        transparent,
+        rgba(148, 163, 184, 0.3),
+        #ffffff,
+        #94a3b8,
+        transparent
+    );
+}
+
+.ranking-streak-border--skulls .ranking-streak-border__edge--top {
+    top: 0;
+    left: -42%;
+    animation: streak-border-top 2.4s linear infinite;
+}
+
+.ranking-streak-border--skulls .ranking-streak-border__edge--right {
+    top: -42%;
+    right: 0;
+    animation: streak-border-right 2.4s linear infinite 0.6s;
+}
+
+.ranking-streak-border--skulls .ranking-streak-border__edge--bottom {
+    right: -42%;
+    bottom: 0;
+    animation: streak-border-bottom 2.4s linear infinite 1.2s;
+}
+
+.ranking-streak-border--skulls .ranking-streak-border__edge--left {
+    bottom: -42%;
+    left: 0;
+    animation: streak-border-left 2.4s linear infinite 1.8s;
+}
+
+/* ── Dragon (streak 7+) ── */
+.ranking-streak-border--dragon .ranking-streak-border__edge {
+    filter:
+        drop-shadow(0 0 4px rgba(254, 202, 202, 1))
+        drop-shadow(0 0 8px rgba(239, 68, 68, 1))
+        drop-shadow(0 0 12px rgba(185, 28, 28, 0.95));
+}
+
+.ranking-streak-border--dragon .ranking-streak-border__edge--top,
+.ranking-streak-border--dragon .ranking-streak-border__edge--bottom {
+    width: 40%;
+    height: 3px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(239, 68, 68, 0.35),
+        #ffffff,
+        #ef4444,
+        transparent
+    );
+}
+
+.ranking-streak-border--dragon .ranking-streak-border__edge--left,
+.ranking-streak-border--dragon .ranking-streak-border__edge--right {
+    width: 3px;
+    height: 40%;
+    background: linear-gradient(
+        180deg,
+        transparent,
+        rgba(239, 68, 68, 0.35),
+        #ffffff,
+        #ef4444,
+        transparent
+    );
+}
+
+.ranking-streak-border--dragon .ranking-streak-border__edge--top {
+    top: 0;
+    left: -40%;
+    animation: streak-border-top 2s linear infinite;
+}
+
+.ranking-streak-border--dragon .ranking-streak-border__edge--right {
+    top: -40%;
+    right: 0;
+    animation: streak-border-right 2s linear infinite 0.5s;
+}
+
+.ranking-streak-border--dragon .ranking-streak-border__edge--bottom {
+    right: -40%;
+    bottom: 0;
+    animation: streak-border-bottom 2s linear infinite 1s;
+}
+
+.ranking-streak-border--dragon .ranking-streak-border__edge--left {
+    bottom: -40%;
+    left: 0;
+    animation: streak-border-left 2s linear infinite 1.5s;
+}
+
 /* Shared chase keyframes (purple / thunder style) */
 @keyframes streak-border-top {
     0% { left: -45%; opacity: 0; }
@@ -330,25 +450,33 @@ defineProps<{
     }
 
     .ranking-streak-border--purple .ranking-streak-border__edge--top,
-    .ranking-streak-border--fire .ranking-streak-border__edge--top {
+    .ranking-streak-border--fire .ranking-streak-border__edge--top,
+    .ranking-streak-border--skulls .ranking-streak-border__edge--top,
+    .ranking-streak-border--dragon .ranking-streak-border__edge--top {
         left: 27.5%;
         right: auto;
     }
 
     .ranking-streak-border--purple .ranking-streak-border__edge--right,
-    .ranking-streak-border--fire .ranking-streak-border__edge--right {
+    .ranking-streak-border--fire .ranking-streak-border__edge--right,
+    .ranking-streak-border--skulls .ranking-streak-border__edge--right,
+    .ranking-streak-border--dragon .ranking-streak-border__edge--right {
         top: 27.5%;
         bottom: auto;
     }
 
     .ranking-streak-border--purple .ranking-streak-border__edge--bottom,
-    .ranking-streak-border--fire .ranking-streak-border__edge--bottom {
+    .ranking-streak-border--fire .ranking-streak-border__edge--bottom,
+    .ranking-streak-border--skulls .ranking-streak-border__edge--bottom,
+    .ranking-streak-border--dragon .ranking-streak-border__edge--bottom {
         right: 27.5%;
         left: auto;
     }
 
     .ranking-streak-border--purple .ranking-streak-border__edge--left,
-    .ranking-streak-border--fire .ranking-streak-border__edge--left {
+    .ranking-streak-border--fire .ranking-streak-border__edge--left,
+    .ranking-streak-border--skulls .ranking-streak-border__edge--left,
+    .ranking-streak-border--dragon .ranking-streak-border__edge--left {
         bottom: 27.5%;
         top: auto;
     }

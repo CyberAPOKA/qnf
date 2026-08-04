@@ -177,9 +177,44 @@ class ScoringService
         return $query->get()->keyBy('id');
     }
 
+    /** Resultado nas últimas partidas / form: vitória */
+    public const RESULT_WIN = 1;
+
+    /** Resultado nas últimas partidas / form: derrota */
+    public const RESULT_LOSS = 0;
+
+    /** Resultado nas últimas partidas / form: empate triplo (ex.: 2x2x2) */
+    public const RESULT_DRAW = 2;
+
+    /**
+     * IDs de jogos com empate triplo (todos os times com o mesmo placar).
+     *
+     * @return array<int, int> game_id => game_id (keyed set)
+     */
+    private function getTripleTieGameIdSet(?int $upToRound = null): array
+    {
+        $query = DB::table('teams')
+            ->join('games', 'teams.game_id', '=', 'games.id')
+            ->where('games.status', GameStatus::DONE->value)
+            ->whereNotNull('teams.score')
+            ->groupBy('teams.game_id')
+            ->havingRaw('COUNT(*) = 3')
+            ->havingRaw('MIN(teams.score) = MAX(teams.score)')
+            ->select('teams.game_id');
+
+        if ($upToRound !== null) {
+            $query->where('games.round', '<=', $upToRound);
+        }
+
+        return $query->pluck('game_id')
+            ->mapWithKeys(fn ($id) => [(int) $id => (int) $id])
+            ->all();
+    }
+
     /**
      * Calcula a sequência de vitórias consecutivas (dos jogos mais recentes)
      * para cada jogador, baseado em game_players.points.
+     * Empate triplo não conta nem como vitória nem como derrota — a streak segue.
      *
      * @return array<int, int> Keyed por user_id => streak count
      */
@@ -191,20 +226,25 @@ class ScoringService
             ->where('game_players.dropped_out', false)
             ->whereNull('game_players.waitlist_at')
             ->orderByDesc('games.round')
-            ->select('game_players.user_id', 'game_players.points');
+            ->select('game_players.user_id', 'game_players.game_id', 'game_players.points');
 
         if ($upToRound !== null) {
             $query->where('games.round', '<=', $upToRound);
         }
 
         $rows = $query->get();
+        $tripleTies = $this->getTripleTieGameIdSet($upToRound);
 
         $streaks = [];
 
         foreach ($rows->groupBy('user_id') as $userId => $games) {
             $streak = 0;
             foreach ($games as $game) {
-                if ((int) $game->points === 1) {
+                if (isset($tripleTies[(int) $game->game_id])) {
+                    continue;
+                }
+
+                if ((int) $game->points === self::RESULT_WIN) {
                     $streak++;
                 } else {
                     break;
@@ -217,8 +257,9 @@ class ScoringService
     }
 
     /**
-     * Últimos N resultados de cada jogador (1 = vitória, 0 = derrota).
-     * Retorna array keyed por user_id => [0, 1, 1, 0, 1] (mais antiga primeiro, mais recente por último).
+     * Últimos N resultados de cada jogador
+     * (1 = vitória, 0 = derrota, 2 = empate triplo).
+     * Retorna array keyed por user_id => [0, 1, 2, 0, 1] (mais antiga primeiro, mais recente por último).
      */
     public function getLastResults(int $count = 5, ?int $upToRound = null): array
     {
@@ -228,17 +269,33 @@ class ScoringService
             ->where('game_players.dropped_out', false)
             ->whereNull('game_players.waitlist_at')
             ->orderByDesc('games.round')
-            ->select('game_players.user_id', 'game_players.points');
+            ->select('game_players.user_id', 'game_players.game_id', 'game_players.points');
 
         if ($upToRound !== null) {
             $query->where('games.round', '<=', $upToRound);
         }
 
         $rows = $query->get();
+        $tripleTies = $this->getTripleTieGameIdSet($upToRound);
 
         $results = [];
         foreach ($rows->groupBy('user_id') as $userId => $games) {
-            $results[$userId] = $games->take($count)->pluck('points')->map(fn ($p) => (int) $p)->reverse()->values()->all();
+            $results[$userId] = $games
+                ->take($count)
+                ->map(function ($game) use ($tripleTies) {
+                    if ((int) $game->points === self::RESULT_WIN) {
+                        return self::RESULT_WIN;
+                    }
+
+                    if (isset($tripleTies[(int) $game->game_id])) {
+                        return self::RESULT_DRAW;
+                    }
+
+                    return self::RESULT_LOSS;
+                })
+                ->reverse()
+                ->values()
+                ->all();
         }
 
         return $results;

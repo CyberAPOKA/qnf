@@ -83,8 +83,9 @@ function roundResult(player) {
     const results = player.last_results ?? [];
     if (!results.length) return null;
 
-    const last = results[results.length - 1];
+    const last = Number(results[results.length - 1]);
     if (last === 1) return 'win';
+    if (last === 2) return 'draw';
     if (last === 0) return 'loss';
 
     return null;
@@ -261,6 +262,13 @@ onUnmounted(stopPlayback);
                                         title="Vitória na rodada"
                                     >
                                         <i class="fa-solid fa-circle-check"></i>
+                                    </span>
+                                    <span
+                                        v-else-if="roundResult(player) === 'draw'"
+                                        class="ml-auto shrink-0 text-amber-500"
+                                        title="Empate na rodada"
+                                    >
+                                        <i class="fa-solid fa-minus"></i>
                                     </span>
                                     <span
                                         v-else-if="roundResult(player) === 'loss'"

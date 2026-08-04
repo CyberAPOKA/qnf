@@ -44,11 +44,12 @@ class AdminPaymentController extends Controller
 
     private function getPaymentsForGame(int $gameId): array
     {
-        // Busca todos os jogadores de linha (não-goleiros, não-convidados) que jogaram
+        // Jogadores de linha inscritos na partida (exclui fila de espera, goleiros e convidados)
         $linePlayers = DB::table('game_players')
             ->join('users', 'game_players.user_id', '=', 'users.id')
             ->where('game_players.game_id', $gameId)
             ->where('game_players.dropped_out', false)
+            ->whereNull('game_players.waitlist_at')
             ->where('users.position', '!=', Position::GOALKEEPER->value)
             ->where('users.guest', false)
             ->select('users.id', 'users.name')

@@ -19,6 +19,14 @@ const videoSrc = computed(() => {
         return '/assets/streak/lightning.webm'
     }
 
+    if (props.type === 'skulls') {
+        return '/assets/streak/skulls.webm'
+    }
+
+    if (props.type === 'dragon') {
+        return '/assets/streak/dragon.webm'
+    }
+
     return null
 })
 </script>
@@ -178,6 +186,70 @@ const videoSrc = computed(() => {
             transparent 59%
         );
     filter: blur(0.4px);
+}
+
+.ranking-streak--skulls .ranking-streak__video {
+    opacity: 0.8;
+}
+
+.ranking-streak--skulls .ranking-streak__overlay {
+    background:
+        radial-gradient(circle at 24% 55%, rgba(148, 163, 184, 0.35), transparent 40%),
+        linear-gradient(90deg, rgba(30, 41, 59, 0.62), rgba(71, 85, 105, 0.18) 52%, transparent 82%);
+}
+
+.ranking-streak--skulls .ranking-streak__particles {
+    background-image:
+        radial-gradient(circle, rgba(226, 232, 240, 0.9) 1px, transparent 1px),
+        radial-gradient(circle, rgba(148, 163, 184, 0.65) 1px, transparent 1px);
+    background-position: 0 0, 9px 11px;
+    background-size: 20px 20px, 30px 30px;
+    mask-image: linear-gradient(to right, black, transparent 84%);
+}
+
+.ranking-streak--skulls .ranking-streak__energy {
+    background:
+        linear-gradient(
+            116deg,
+            transparent 0 17%,
+            rgba(203, 213, 225, 0.22) 17.2% 17.8%,
+            transparent 18% 38%,
+            rgba(100, 116, 139, 0.2) 38.2% 38.8%,
+            transparent 39%
+        );
+}
+
+.ranking-streak--dragon .ranking-streak__video {
+    opacity: 0.8;
+}
+
+.ranking-streak--dragon .ranking-streak__overlay {
+    background:
+        radial-gradient(circle at 26% 52%, rgba(220, 38, 38, 0.48), transparent 40%),
+        linear-gradient(90deg, rgba(127, 29, 29, 0.55), rgba(185, 28, 28, 0.16) 52%, transparent 82%);
+}
+
+.ranking-streak--dragon .ranking-streak__particles {
+    background-image:
+        radial-gradient(circle, rgba(254, 202, 202, 0.95) 1px, transparent 1px),
+        radial-gradient(circle, rgba(239, 68, 68, 0.7) 1px, transparent 1px);
+    background-position: 0 0, 8px 10px;
+    background-size: 18px 18px, 28px 28px;
+    mask-image: linear-gradient(to right, black, transparent 84%);
+}
+
+.ranking-streak--dragon .ranking-streak__energy {
+    background:
+        linear-gradient(
+            116deg,
+            transparent 0 16%,
+            rgba(248, 113, 113, 0.3) 16.2% 16.8%,
+            transparent 17% 36%,
+            rgba(220, 38, 38, 0.24) 36.2% 36.8%,
+            transparent 37% 58%,
+            rgba(185, 28, 28, 0.18) 58.2% 58.8%,
+            transparent 59%
+        );
 }
 
 @media (max-width: 950px) {

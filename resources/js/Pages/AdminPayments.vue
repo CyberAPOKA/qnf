@@ -1,7 +1,10 @@
 <script setup>
 import { ref, watch } from 'vue';
 import AppLayout from '@/Layouts/AppLayout.vue';
+import ConfirmationModal from '@/Components/ConfirmationModal.vue';
 import DataTable from '@/Components/DataTable.vue';
+import PrimaryButton from '@/Components/PrimaryButton.vue';
+import SecondaryButton from '@/Components/SecondaryButton.vue';
 import { router } from '@inertiajs/vue3';
 
 const props = defineProps({
@@ -11,6 +14,8 @@ const props = defineProps({
 });
 
 const selectedGameId = ref(props.selected_game_id);
+const paymentToConfirm = ref(null);
+const confirming = ref(false);
 
 watch(selectedGameId, (newId) => {
     if (newId) {
@@ -21,11 +26,28 @@ watch(selectedGameId, (newId) => {
     }
 });
 
-const confirmPayment = (paymentId) => {
-    if (!paymentId) return;
+const openConfirmModal = (row) => {
+    if (!row?.payment_id) return;
+    paymentToConfirm.value = row;
+};
+
+const closeConfirmModal = () => {
+    if (confirming.value) return;
+    paymentToConfirm.value = null;
+};
+
+const confirmPayment = () => {
+    const paymentId = paymentToConfirm.value?.payment_id;
+    if (!paymentId || confirming.value) return;
+
+    confirming.value = true;
     router.post(route('payments.confirm', paymentId), {}, {
         preserveScroll: true,
         preserveState: false,
+        onFinish: () => {
+            confirming.value = false;
+            paymentToConfirm.value = null;
+        },
     });
 };
 
@@ -107,7 +129,7 @@ const totalCount = () => props.payments.length;
                             <span v-else class="text-xs text-gray-400">—</span>
                         </template>
                         <template #cell-actions="{ row }">
-                            <button v-if="!row.paid_at && row.payment_id" @click="confirmPayment(row.payment_id)"
+                            <button v-if="!row.paid_at && row.payment_id" @click="openConfirmModal(row)"
                                 class="rounded-md bg-green-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-green-700 transition">
                                 Confirmar
                             </button>
@@ -120,5 +142,23 @@ const totalCount = () => props.payments.length;
                 </div>
             </div>
         </div>
+
+        <ConfirmationModal :show="paymentToConfirm !== null" @close="closeConfirmModal">
+            <template #title>Confirmar pagamento</template>
+            <template #content>
+                <p>
+                    Confirmar pagamento de
+                    <strong class="text-gray-900">{{ paymentToConfirm?.user_name }}</strong>?
+                </p>
+            </template>
+            <template #footer>
+                <SecondaryButton :disabled="confirming" @click="closeConfirmModal">Cancelar</SecondaryButton>
+                <PrimaryButton class="ms-3 bg-green-600 hover:bg-green-700 focus:bg-green-700 active:bg-green-700"
+                    :disabled="confirming" @click="confirmPayment">
+                    <i v-if="confirming" class="fa-solid fa-spinner fa-spin mr-2"></i>
+                    Confirmar
+                </PrimaryButton>
+            </template>
+        </ConfirmationModal>
     </AppLayout>
 </template>
