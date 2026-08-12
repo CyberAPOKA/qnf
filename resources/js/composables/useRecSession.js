@@ -3,6 +3,7 @@ import axios from 'axios';
 
 const HEARTBEAT_MS = 12_000;
 const MAX_UPLOAD_RETRIES = 2;
+const SAVE_COOLDOWN_MS = 10_000;
 const RECORDER_STORAGE_KEY = 'qnf_recorder_id';
 
 function getOrCreateRecorderId() {
@@ -36,6 +37,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     const isSaving = ref(false);
     const saveError = ref(null);
     const isRegistering = ref(false);
+    const saveCooldownRemaining = ref(0);
 
     const gameId = props.game.id;
     const channelName = `game.${gameId}`;
@@ -43,11 +45,36 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
 
     let heartbeatTimer = null;
     let echoChannel = null;
+    let saveCooldownTimer = null;
+    let saveCooldownUntil = 0;
     const uploadQueue = [];
     let isProcessingUpload = false;
     const uploadedKeys = new Set();
     const uploadingKeys = new Set();
     const waitTimers = new Map();
+
+    function startSaveCooldown(seconds = SAVE_COOLDOWN_MS / 1000) {
+        const ms = Math.max(1, Number(seconds) || 10) * 1000;
+        saveCooldownUntil = Date.now() + ms;
+        tickSaveCooldown();
+    }
+
+    function tickSaveCooldown() {
+        const remaining = Math.max(0, Math.ceil((saveCooldownUntil - Date.now()) / 1000));
+        saveCooldownRemaining.value = remaining;
+
+        if (remaining <= 0) {
+            if (saveCooldownTimer) {
+                clearInterval(saveCooldownTimer);
+                saveCooldownTimer = null;
+            }
+            return;
+        }
+
+        if (!saveCooldownTimer) {
+            saveCooldownTimer = setInterval(tickSaveCooldown, 250);
+        }
+    }
 
     function uploadKey(saveRequestUuid) {
         return `${saveRequestUuid}:${recorderId}`;
@@ -238,7 +265,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     }
 
     async function triggerSave() {
-        if (isSaving.value) {
+        if (isSaving.value || saveCooldownRemaining.value > 0) {
             return null;
         }
 
@@ -248,6 +275,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         try {
             const { data } = await axios.post(routeName('games.rec.save'));
 
+            startSaveCooldown(data.cooldown_seconds ?? 10);
             upsertSave(data.save_request, data.expected_recorders);
             recLog('info', 'save requested', {
                 uuid: data.save_request?.uuid,
@@ -256,9 +284,25 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
 
             return data.save_request;
         } catch (err) {
+            const status = err?.response?.status;
+            const retryAfter = Number(
+                err?.response?.data?.retry_after
+                ?? err?.response?.headers?.['retry-after']
+                ?? 0,
+            );
+
+            if (status === 429) {
+                startSaveCooldown(retryAfter || 10);
+                recLog('info', 'save ignored (cooldown)', {
+                    status,
+                    retryAfter: retryAfter || 10,
+                });
+                return null;
+            }
+
             saveError.value = err?.response?.data?.message || 'Não foi possível salvar.';
             recLog('error', 'save failed', {
-                status: err?.response?.status,
+                status,
                 message: saveError.value,
             });
             return null;
@@ -377,6 +421,8 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     }
 
     function handleSaveClipRequested(payload) {
+        startSaveCooldown(payload.cooldownSeconds ?? 10);
+
         upsertSave({
             uuid: payload.saveRequestUuid,
             triggered_by: payload.triggeredByName,
@@ -436,6 +482,10 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
     onBeforeUnmount(() => {
         unsubscribe();
         stopHeartbeat();
+        if (saveCooldownTimer) {
+            clearInterval(saveCooldownTimer);
+            saveCooldownTimer = null;
+        }
         waitTimers.forEach((timer) => clearTimeout(timer));
         waitTimers.clear();
     });
@@ -445,6 +495,7 @@ export function useRecSession(props, { onSaveRequested, onClipReady } = {}) {
         recentSaves,
         pendingSaves,
         isSaving,
+        saveCooldownRemaining,
         saveError,
         isRegistering,
         recorderId,

@@ -18,6 +18,7 @@ class SaveClipRequested implements ShouldBroadcastNow
         public int $saveRequestId,
         public string $triggeredByName,
         public int $expectedRecorders,
+        public int $cooldownSeconds = 10,
     ) {}
 
     public function broadcastOn(): array

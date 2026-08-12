@@ -1,7 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { Link } from '@inertiajs/vue3';
-import AppLayout from '@/Layouts/AppLayout.vue';
 import { useRecBuffer } from '@/composables/useRecBuffer';
 import { useRecSession } from '@/composables/useRecSession';
 
@@ -55,6 +54,7 @@ const {
     recentSaves,
     pendingSaves,
     isSaving,
+    saveCooldownRemaining,
     saveError,
     isRegistering,
     recorderId,
@@ -70,7 +70,23 @@ const isThisDeviceRecording = computed(() =>
 
 const activeRecorderCount = computed(() => recorders.value.length);
 
-const canSave = computed(() => activeRecorderCount.value > 0 && !isSaving.value);
+const canSave = computed(() =>
+    activeRecorderCount.value > 0
+    && !isSaving.value
+    && saveCooldownRemaining.value <= 0,
+);
+
+const saveButtonLabel = computed(() => {
+    if (isSaving.value) {
+        return 'Salvando...';
+    }
+
+    if (saveCooldownRemaining.value > 0) {
+        return `Aguarde ${saveCooldownRemaining.value}s`;
+    }
+
+    return 'SAVE REC';
+});
 
 const canStartRec = computed(() =>
     isSupported.value
@@ -278,6 +294,10 @@ async function toggleRecMode() {
 }
 
 async function handleSave() {
+    if (!canSave.value) {
+        return;
+    }
+
     localError.value = null;
     const saveRequest = await triggerSave();
 
@@ -307,332 +327,238 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <AppLayout title="REC">
-        <div class="py-4 pb-28">
-            <div class="max-w-lg mx-auto px-4 space-y-5">
+    <div class="py-4 pb-28">
+        <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
+            Voltar ao Dashboard
+        </Link>
+        <div class="max-w-lg mx-auto px-4 space-y-5">
 
-                <div
-                    v-if="localError || bufferError || saveError"
-                    class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3"
-                >
-                    {{ localError || bufferError || saveError }}
+            <div v-if="localError || bufferError || saveError"
+                class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
+                {{ localError || bufferError || saveError }}
+            </div>
+
+            <div v-if="!isSupported"
+                class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3">
+                Seu navegador não suporta gravação. Use Chrome no Android para melhor resultado.
+            </div>
+
+            <!-- Posição / ângulo na quadra -->
+            <div v-if="!isThisDeviceRecording" class="rounded-2xl bg-white shadow overflow-hidden">
+                <div class="px-4 pt-4 pb-2">
+                    <h2 class="text-lg text-center font-semibold text-gray-900 uppercase tracking-wide">
+                        Ângulo da câmera
+                    </h2>
                 </div>
 
-                <div
-                    v-if="!isSupported"
-                    class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3"
-                >
-                    Seu navegador não suporta gravação. Use Chrome no Android para melhor resultado.
-                </div>
-
-                <!-- Posição / ângulo na quadra -->
-                <div
-                    v-if="!isThisDeviceRecording"
-                    class="rounded-2xl bg-white shadow overflow-hidden"
-                >
-                    <div class="px-4 pt-4 pb-2">
-                        <h2 class="text-lg text-center font-semibold text-gray-900 uppercase tracking-wide">
-                            Ângulo da câmera
-                        </h2>
-                    </div>
-
-                    <div class="px-3 pb-4 space-y-2">
-                        <!-- Lateral B (topo da quadra) -->
-                        <div class="grid grid-cols-2 gap-2">
-                            <button
-                                v-for="angle in CAMERA_ANGLES_B"
-                                :key="angle.tag"
-                                type="button"
-                                class="rounded-xl border-2 px-3 py-3 text-left transition active:scale-[0.98]"
-                                :class="angleButtonClass(angle.tag)"
-                                :disabled="isThisDeviceRecording"
-                                @click="selectAngle(angle.tag)"
-                            >
-                                <span class="inline-flex items-center gap-2">
-                                    <span class="rounded-md bg-red-600 text-white text-xs font-bold px-2 py-0.5">
-                                        {{ angle.tag }}
-                                    </span>
-                                    <span
-                                        v-if="takenAngles.has(angle.tag)"
-                                        class="text-[10px] uppercase font-semibold text-amber-600"
-                                    >
-                                        em uso
-                                    </span>
+                <div class="px-3 pb-4 space-y-2">
+                    <!-- Lateral B (topo da quadra) -->
+                    <div class="grid grid-cols-2 gap-2">
+                        <button v-for="angle in CAMERA_ANGLES_B" :key="angle.tag" type="button"
+                            class="rounded-xl border-2 px-3 py-3 text-left transition active:scale-[0.98]"
+                            :class="angleButtonClass(angle.tag)" :disabled="isThisDeviceRecording"
+                            @click="selectAngle(angle.tag)">
+                            <span class="inline-flex items-center gap-2">
+                                <span class="rounded-md bg-red-600 text-white text-xs font-bold px-2 py-0.5">
+                                    {{ angle.tag }}
                                 </span>
-                                <span class="block text-xs text-gray-600 mt-1">{{ angle.label }}</span>
-                            </button>
-                        </div>
-
-                        <div class="relative rounded-xl overflow-hidden bg-[#1e4fd6]">
-                            <img
-                                src="/assets/rec/court_positions.png"
-                                alt="Mapa de ângulos da quadra"
-                                class="w-full h-auto block opacity-95"
-                            />
-                        </div>
-
-                        <!-- Lateral A (base da quadra / banco) -->
-                        <div class="grid grid-cols-2 gap-2">
-                            <button
-                                v-for="angle in CAMERA_ANGLES_A"
-                                :key="angle.tag"
-                                type="button"
-                                class="rounded-xl border-2 px-3 py-3 text-left transition active:scale-[0.98]"
-                                :class="angleButtonClass(angle.tag)"
-                                :disabled="isThisDeviceRecording"
-                                @click="selectAngle(angle.tag)"
-                            >
-                                <span class="inline-flex items-center gap-2">
-                                    <span class="rounded-md bg-red-600 text-white text-xs font-bold px-2 py-0.5">
-                                        {{ angle.tag }}
-                                    </span>
-                                    <span
-                                        v-if="takenAngles.has(angle.tag)"
-                                        class="text-[10px] uppercase font-semibold text-amber-600"
-                                    >
-                                        em uso
-                                    </span>
+                                <span v-if="takenAngles.has(angle.tag)"
+                                    class="text-[10px] uppercase font-semibold text-amber-600">
+                                    em uso
                                 </span>
-                                <span class="block text-xs text-gray-600 mt-1">{{ angle.label }}</span>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Stage: preview + fullscreen -->
-                <div
-                    ref="stageEl"
-                    class="rec-stage relative rounded-2xl overflow-hidden bg-black shadow-lg"
-                    :class="[
-                        isRecording ? 'block' : 'hidden',
-                        isFullscreen ? 'rec-stage--fullscreen' : 'aspect-video',
-                    ]"
-                >
-                    <video
-                        ref="previewEl"
-                        class="w-full h-full object-cover"
-                        autoplay
-                        muted
-                        playsinline
-                    />
-
-                    <div class="absolute top-3 left-3 flex items-center gap-2">
-                        <div class="flex items-center gap-2 bg-black/60 rounded-full px-3 py-1">
-                            <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
-                            <span class="text-white text-xs font-semibold uppercase tracking-wide">REC</span>
-                        </div>
-                        <div
-                            v-if="selectedAngle"
-                            class="bg-red-600 text-white text-xs font-bold rounded-md px-2.5 py-1"
-                        >
-                            {{ selectedAngle }}
-                        </div>
-                    </div>
-
-                    <div class="absolute top-3 right-3 flex gap-2">
-                        <button
-                            v-if="!isFullscreen"
-                            type="button"
-                            class="bg-black/60 text-white text-xs font-semibold rounded-full px-3 py-1.5"
-                            @click="enterFullscreen"
-                        >
-                            <i class="fa-solid fa-expand mr-1" />
-                            Tela cheia
-                        </button>
-                        <button
-                            v-else
-                            type="button"
-                            class="bg-black/60 text-white text-xs font-semibold rounded-full px-3 py-1.5"
-                            @click="exitFullscreen"
-                        >
-                            <i class="fa-solid fa-compress mr-1" />
-                            Sair
+                            </span>
+                            <span class="block text-xs text-gray-600 mt-1">{{ angle.label }}</span>
                         </button>
                     </div>
 
-                    <div
-                        v-if="preferLandscapeHint && isFullscreen"
-                        class="absolute inset-x-0 bottom-4 flex justify-center pointer-events-none"
-                    >
-                        <div class="bg-black/70 text-white text-xs rounded-full px-4 py-2">
-                            <i class="fa-solid fa-mobile-screen-button mr-1 rotate-90" />
-                            Gire o celular na horizontal
-                        </div>
+                    <div class="relative rounded-xl overflow-hidden bg-[#1e4fd6]">
+                        <img src="/assets/rec/court_positions.png" alt="Mapa de ângulos da quadra"
+                            class="w-full h-auto block opacity-95" />
                     </div>
 
-                    <!-- Floating actions in fullscreen -->
-                    <div
-                        v-if="isFullscreen"
-                        class="absolute inset-x-0 bottom-6 flex justify-center gap-3 px-4"
-                    >
-                        <button
-                            type="button"
-                            class="rounded-full bg-emerald-600 text-white font-bold uppercase text-sm px-6 py-3 shadow-lg disabled:opacity-50"
-                            :disabled="!canSave"
-                            @click="handleSave"
-                        >
-                            SAVE REC
-                        </button>
-                        <button
-                            type="button"
-                            class="rounded-full bg-gray-800 text-white font-bold uppercase text-sm px-6 py-3 shadow-lg"
-                            :disabled="isTogglingRec"
-                            @click="toggleRecMode"
-                        >
-                            Parar
+                    <!-- Lateral A (base da quadra / banco) -->
+                    <div class="grid grid-cols-2 gap-2">
+                        <button v-for="angle in CAMERA_ANGLES_A" :key="angle.tag" type="button"
+                            class="rounded-xl border-2 px-3 py-3 text-left transition active:scale-[0.98]"
+                            :class="angleButtonClass(angle.tag)" :disabled="isThisDeviceRecording"
+                            @click="selectAngle(angle.tag)">
+                            <span class="inline-flex items-center gap-2">
+                                <span class="rounded-md bg-red-600 text-white text-xs font-bold px-2 py-0.5">
+                                    {{ angle.tag }}
+                                </span>
+                                <span v-if="takenAngles.has(angle.tag)"
+                                    class="text-[10px] uppercase font-semibold text-amber-600">
+                                    em uso
+                                </span>
+                            </span>
+                            <span class="block text-xs text-gray-600 mt-1">{{ angle.label }}</span>
                         </button>
                     </div>
                 </div>
+            </div>
 
-                <div
-                    v-if="isRecording && !isFullscreen"
-                    class="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-700"
-                >
-                    <p>
-                        <span class="font-semibold">Ângulo {{ selectedAngle }}</span>
-                        · {{ angleLabel(selectedAngle) }}
-                    </p>
-                    <p class="text-xs text-slate-500 mt-1">
-                        Prefira gravar com o celular na horizontal. Use “Tela cheia” para preencher a tela.
-                    </p>
+            <!-- Stage: preview + fullscreen -->
+            <div ref="stageEl" class="rec-stage relative rounded-2xl overflow-hidden bg-black shadow-lg" :class="[
+                isRecording ? 'block' : 'hidden',
+                isFullscreen ? 'rec-stage--fullscreen' : 'aspect-video',
+            ]">
+                <video ref="previewEl" class="w-full h-full object-cover" autoplay muted playsinline />
+
+                <div class="absolute top-3 left-3 flex items-center gap-2">
+                    <div class="flex items-center gap-2 bg-black/60 rounded-full px-3 py-1">
+                        <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" />
+                        <span class="text-white text-xs font-semibold uppercase tracking-wide">REC</span>
+                    </div>
+                    <div v-if="selectedAngle" class="bg-red-600 text-white text-xs font-bold rounded-md px-2.5 py-1">
+                        {{ selectedAngle }}
+                    </div>
                 </div>
 
-                <div class="grid grid-cols-1 gap-3">
-                    <button
-                        type="button"
-                        class="w-full rounded-2xl py-5 text-lg font-bold uppercase tracking-wider transition active:scale-[0.98] disabled:opacity-50"
-                        :class="isThisDeviceRecording
-                            ? 'bg-gray-800 text-white'
-                            : 'bg-red-600 text-white shadow-lg shadow-red-200'"
-                        :disabled="isThisDeviceRecording ? (isTogglingRec || isRegistering) : !canStartRec"
-                        @click="toggleRecMode"
-                    >
-                        <i class="fa-solid fa-circle-dot mr-2" />
-                        {{ isThisDeviceRecording ? 'Parar REC' : 'REC MODE' }}
+                <div class="absolute top-3 right-3 flex gap-2">
+                    <button v-if="!isFullscreen" type="button"
+                        class="bg-black/60 text-white text-xs font-semibold rounded-full px-3 py-1.5"
+                        @click="enterFullscreen">
+                        <i class="fa-solid fa-expand mr-1" />
+                        Tela cheia
                     </button>
-
-                    <button
-                        type="button"
-                        class="w-full rounded-2xl py-5 text-lg font-bold uppercase tracking-wider bg-emerald-600 text-white shadow-lg shadow-emerald-200 transition active:scale-[0.98] disabled:opacity-50"
-                        :disabled="!canSave"
-                        @click="handleSave"
-                    >
-                        <i class="fa-solid fa-floppy-disk mr-2" />
-                        {{ isSaving ? 'Salvando...' : 'SAVE REC' }}
+                    <button v-else type="button"
+                        class="bg-black/60 text-white text-xs font-semibold rounded-full px-3 py-1.5"
+                        @click="exitFullscreen">
+                        <i class="fa-solid fa-compress mr-1" />
+                        Sair
                     </button>
                 </div>
 
-                <div class="rounded-2xl bg-white shadow p-4">
-                    <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
-                        Gravando agora
-                    </h2>
-
-                    <ul v-if="recorders.length" class="space-y-2">
-                        <li
-                            v-for="recorder in recorders"
-                            :key="recorder.recorder_id"
-                            class="flex items-center justify-between text-sm"
-                        >
-                            <span class="flex items-center gap-2 min-w-0">
-                                <span class="w-2 h-2 rounded-full bg-red-500 shrink-0" />
-                                <span
-                                    v-if="recorder.camera_tag"
-                                    class="rounded bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5"
-                                >
-                                    {{ recorder.camera_tag }}
-                                </span>
-                                <span class="truncate">{{ recorder.user_name }}</span>
-                                <span
-                                    v-if="recorder.recorder_id === recorderId"
-                                    class="text-xs text-gray-400 shrink-0"
-                                >(você)</span>
-                            </span>
-                        </li>
-                    </ul>
-
-                    <p v-else class="text-sm text-gray-500">Nenhuma câmera gravando.</p>
-                </div>
-
-                <div class="space-y-4">
-                    <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide px-1">
-                        Clips salvos
-                    </h2>
-
-                    <p v-if="!recentSaves.length" class="text-sm text-gray-500 px-1">
-                        Nenhum clip salvo ainda.
-                    </p>
-
-                    <div
-                        v-for="save in recentSaves"
-                        :key="save.uuid"
-                        class="rounded-2xl bg-white shadow overflow-hidden"
-                    >
-                        <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
-                            <div>
-                                <p class="text-sm font-semibold text-gray-900">
-                                    {{ formatTime(save.triggered_at) }}
-                                </p>
-                                <p v-if="save.triggered_by" class="text-xs text-gray-500">
-                                    por {{ save.triggered_by }}
-                                </p>
-                            </div>
-                            <span
-                                v-if="pendingLabel(save.uuid)"
-                                class="text-xs font-medium px-2 py-1 rounded-full"
-                                :class="pendingBadgeClass(save.uuid)"
-                            >
-                                {{ pendingLabel(save.uuid) }}
-                            </span>
-                        </div>
-
-                        <div v-if="save.clips?.length" class="p-3 space-y-3">
-                            <div
-                                v-for="clip in save.clips"
-                                :key="clip.id || clip.recorder_id"
-                                class="space-y-1"
-                            >
-                                <p class="text-xs font-medium text-gray-600 flex items-center gap-2">
-                                    <span
-                                        v-if="clip.camera_tag"
-                                        class="rounded bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5"
-                                    >
-                                        {{ clip.camera_tag }}
-                                    </span>
-                                    {{ clip.user_name }}
-                                </p>
-                                <video
-                                    :src="clip.url"
-                                    controls
-                                    playsinline
-                                    preload="metadata"
-                                    class="w-full rounded-xl bg-black"
-                                />
-                            </div>
-                        </div>
-
-                        <div
-                            v-else-if="pendingSaves[save.uuid]?.status === 'failed'"
-                            class="px-4 py-6 text-center text-sm text-red-600"
-                        >
-                            {{ pendingSaves[save.uuid]?.error || 'Falha ao salvar o clip.' }}
-                        </div>
-
-                        <div v-else class="px-4 py-6 text-center text-sm text-gray-500">
-                            <i class="fa-solid fa-spinner fa-spin mr-1" />
-                            {{ pendingSaves[save.uuid]?.status === 'uploading' ? 'Enviando...' : 'Aguardando câmeras...' }}
-                        </div>
+                <div v-if="preferLandscapeHint && isFullscreen"
+                    class="absolute inset-x-0 bottom-4 flex justify-center pointer-events-none">
+                    <div class="bg-black/70 text-white text-xs rounded-full px-4 py-2">
+                        <i class="fa-solid fa-mobile-screen-button mr-1 rotate-90" />
+                        Gire o celular na horizontal
                     </div>
                 </div>
 
-                <Link
-                    :href="route('dashboard')"
-                    class="block text-center text-sm text-indigo-600 font-medium py-2"
-                >
-                    Voltar ao Dashboard
-                </Link>
+                <!-- Floating actions in fullscreen -->
+                <div v-if="isFullscreen" class="absolute inset-x-0 bottom-6 flex justify-center gap-3 px-4">
+                    <button type="button"
+                        class="rounded-full bg-emerald-600 text-white font-bold uppercase text-sm px-6 py-3 shadow-lg disabled:opacity-50"
+                        :disabled="!canSave" @click="handleSave">
+                        {{ saveButtonLabel }}
+                    </button>
+                    <button type="button"
+                        class="rounded-full bg-gray-800 text-white font-bold uppercase text-sm px-6 py-3 shadow-lg"
+                        :disabled="isTogglingRec" @click="toggleRecMode">
+                        Parar
+                    </button>
+                </div>
+            </div>
+
+            <div v-if="isRecording && !isFullscreen"
+                class="rounded-xl bg-slate-50 border border-slate-200 px-4 py-3 text-sm text-slate-700">
+                <p>
+                    <span class="font-semibold">Ângulo {{ selectedAngle }}</span>
+                    · {{ angleLabel(selectedAngle) }}
+                </p>
+                <p class="text-xs text-slate-500 mt-1">
+                    Prefira gravar com o celular na horizontal. Use “Tela cheia” para preencher a tela.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3">
+                <button type="button"
+                    class="w-full rounded-2xl py-5 text-lg font-bold uppercase tracking-wider transition active:scale-[0.98] disabled:opacity-50"
+                    :class="isThisDeviceRecording
+                        ? 'bg-gray-800 text-white'
+                        : 'bg-red-600 text-white shadow-lg shadow-red-200'"
+                    :disabled="isThisDeviceRecording ? (isTogglingRec || isRegistering) : !canStartRec"
+                    @click="toggleRecMode">
+                    <i class="fa-solid fa-circle-dot mr-2" />
+                    {{ isThisDeviceRecording ? 'Parar REC' : 'REC MODE' }}
+                </button>
+
+                <button type="button"
+                    class="w-full rounded-2xl py-5 text-lg font-bold uppercase tracking-wider bg-emerald-600 text-white shadow-lg shadow-emerald-200 transition active:scale-[0.98] disabled:opacity-50"
+                    :disabled="!canSave" @click="handleSave">
+                    <i class="fa-solid fa-floppy-disk mr-2" />
+                    {{ saveButtonLabel }}
+                </button>
+            </div>
+
+            <div class="rounded-2xl bg-white shadow p-4">
+                <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-3">
+                    Gravando agora
+                </h2>
+
+                <ul v-if="recorders.length" class="space-y-2">
+                    <li v-for="recorder in recorders" :key="recorder.recorder_id"
+                        class="flex items-center justify-between text-sm">
+                        <span class="flex items-center gap-2 min-w-0">
+                            <span class="w-2 h-2 rounded-full bg-red-500 shrink-0" />
+                            <span v-if="recorder.camera_tag"
+                                class="rounded bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5">
+                                {{ recorder.camera_tag }}
+                            </span>
+                            <span class="truncate">{{ recorder.user_name }}</span>
+                            <span v-if="recorder.recorder_id === recorderId"
+                                class="text-xs text-gray-400 shrink-0">(você)</span>
+                        </span>
+                    </li>
+                </ul>
+
+                <p v-else class="text-sm text-gray-500">Nenhuma câmera gravando.</p>
+            </div>
+
+            <div class="space-y-4">
+                <h2 class="text-sm font-semibold text-gray-700 uppercase tracking-wide px-1">
+                    Clips salvos
+                </h2>
+
+                <p v-if="!recentSaves.length" class="text-sm text-gray-500 px-1">
+                    Nenhum clip salvo ainda.
+                </p>
+
+                <div v-for="save in recentSaves" :key="save.uuid" class="rounded-2xl bg-white shadow overflow-hidden">
+                    <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
+                        <div>
+                            <p class="text-sm font-semibold text-gray-900">
+                                {{ formatTime(save.triggered_at) }}
+                            </p>
+                            <p v-if="save.triggered_by" class="text-xs text-gray-500">
+                                por {{ save.triggered_by }}
+                            </p>
+                        </div>
+                        <span v-if="pendingLabel(save.uuid)" class="text-xs font-medium px-2 py-1 rounded-full"
+                            :class="pendingBadgeClass(save.uuid)">
+                            {{ pendingLabel(save.uuid) }}
+                        </span>
+                    </div>
+
+                    <div v-if="save.clips?.length" class="p-3 grid grid-cols-2 gap-2">
+                        <div v-for="clip in save.clips" :key="clip.id || clip.recorder_id" class="space-y-1 min-w-0">
+                            <p class="text-[11px] font-medium text-gray-600 flex items-center gap-1.5 min-w-0">
+                                <span v-if="clip.camera_tag"
+                                    class="rounded bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 shrink-0">
+                                    {{ clip.camera_tag }}
+                                </span>
+                                <span class="truncate">{{ clip.user_name }}</span>
+                            </p>
+                            <video :src="clip.url" controls playsinline preload="metadata"
+                                class="w-full aspect-video max-h-36 rounded-lg bg-black object-contain" />
+                        </div>
+                    </div>
+
+                    <div v-else-if="pendingSaves[save.uuid]?.status === 'failed'"
+                        class="px-4 py-6 text-center text-sm text-red-600">
+                        {{ pendingSaves[save.uuid]?.error || 'Falha ao salvar o clip.' }}
+                    </div>
+
+                    <div v-else class="px-4 py-6 text-center text-sm text-gray-500">
+                        <i class="fa-solid fa-spinner fa-spin mr-1" />
+                        {{ pendingSaves[save.uuid]?.status === 'uploading' ? 'Enviando...' : 'Aguardando câmeras...' }}
+                    </div>
+                </div>
             </div>
         </div>
-    </AppLayout>
+    </div>
 </template>
 
 <style scoped>

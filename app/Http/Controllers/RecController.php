@@ -125,7 +125,24 @@ class RecController extends Controller
             return response()->json(['message' => 'Nenhuma câmera gravando no momento.'], 422);
         }
 
-        $saveRequest = $this->recSession->createSaveRequest($game, $request->user());
+        $result = $this->recSession->createSaveRequest($game, $request->user());
+
+        if (! $result['created']) {
+            Log::info('REC save ignored (cooldown)', [
+                'game_id' => $game->id,
+                'user_id' => $request->user()->id,
+                'existing_uuid' => $result['save_request']?->uuid,
+                'retry_after' => $result['retry_after'],
+            ]);
+
+            return response()->json([
+                'message' => 'Já existe um SAVE em andamento. Aguarde para gerar outro clip.',
+                'retry_after' => $result['retry_after'],
+            ], 429)->header('Retry-After', (string) $result['retry_after']);
+        }
+
+        $saveRequest = $result['save_request'];
+        $cooldownSeconds = $this->recSession->saveCooldownSeconds();
 
         Log::info('REC save requested', [
             'game_id' => $game->id,
@@ -137,13 +154,14 @@ class RecController extends Controller
         // Broadcast to ALL devices (including trigger). Recording clients
         // dedupe uploads locally; trigger that is also recording uploads once.
         $broadcastOk = rescue(
-            function () use ($game, $saveRequest, $request, $recorders) {
+            function () use ($game, $saveRequest, $request, $recorders, $cooldownSeconds) {
                 broadcast(new SaveClipRequested(
                     $game->id,
                     $saveRequest->uuid,
                     $saveRequest->id,
                     $request->user()->name,
                     count($recorders),
+                    $cooldownSeconds,
                 ));
 
                 return true;
@@ -164,6 +182,7 @@ class RecController extends Controller
                 $saveRequest->load('triggeredBy'),
             ),
             'expected_recorders' => count($recorders),
+            'cooldown_seconds' => $cooldownSeconds,
         ]);
     }
 
