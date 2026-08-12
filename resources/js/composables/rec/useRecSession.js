@@ -1,6 +1,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import axios from 'axios';
 import { useRecConfig } from './recConfig';
+import { createRecHeartbeatScheduler } from './recHeartbeatScheduler';
 import { useRecHealth } from './useRecHealth';
 import { useRecSegmentStore } from './useRecSegmentStore';
 
@@ -110,6 +111,9 @@ export function useRecSession(props, options = {}) {
     let stopped = false;
     let lastSaveAt = 0;
     let activeSaveRequests = 0;
+    const heartbeatScheduler = createRecHeartbeatScheduler(() => {
+        sendHeartbeat({ scheduleNext: false });
+    });
 
     function routeName(name, params = {}) {
         try {
@@ -445,16 +449,10 @@ export function useRecSession(props, options = {}) {
     }
 
     function ensureHeartbeatLoop() {
-        if (heartbeatTimer || !session.value || stopped || sessionExpired.value) return;
+        if (!session.value || stopped || sessionExpired.value) return;
         const intervalMs = Math.max(5, Number(config.heartbeat_seconds) || 10) * 1000;
-        // Fire immediately is handled by callers; interval keeps lease alive even if one call hangs.
-        heartbeatTimer = setInterval(() => {
-            if (!session.value || stopped || sessionExpired.value) {
-                stopHeartbeat();
-                return;
-            }
-            sendHeartbeat({ scheduleNext: false });
-        }, intervalMs);
+        heartbeatScheduler.start(intervalMs);
+        heartbeatTimer = true;
     }
 
     function startHeartbeat() {
@@ -463,7 +461,7 @@ export function useRecSession(props, options = {}) {
     }
 
     function stopHeartbeat() {
-        clearInterval(heartbeatTimer);
+        heartbeatScheduler.stop();
         heartbeatTimer = null;
     }
 

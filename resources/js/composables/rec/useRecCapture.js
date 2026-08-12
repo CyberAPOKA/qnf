@@ -2,7 +2,7 @@ import { nextTick, onBeforeUnmount, ref } from 'vue';
 import { useRecConfig } from './recConfig';
 import { useRecSegmentStore } from './useRecSegmentStore';
 
-const FLUSH_MS = 120;
+const FLUSH_MS = 150;
 const WATCHDOG_MS = 2_000;
 
 function wait(milliseconds) {
@@ -23,27 +23,25 @@ function isAppleMobile() {
 function pickMimeType() {
     if (typeof MediaRecorder === 'undefined') return '';
 
-    // On iOS, an empty mimeType (browser default) is often more stable than forcing mp4.
     if (isAppleMobile()) {
-        const types = ['', 'video/mp4'];
-        for (const type of types) {
-            if (!type || MediaRecorder.isTypeSupported(type)) return type;
-        }
+        // Prefer browser default on iOS; forced mp4 is flaky across versions.
+        if (MediaRecorder.isTypeSupported('video/mp4')) return 'video/mp4';
         return '';
     }
 
-    const types = [
+    return [
         'video/webm;codecs=vp8,opus',
         'video/webm;codecs=vp8',
         'video/webm',
         'video/mp4',
-    ];
-    return types.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+    ].find((type) => MediaRecorder.isTypeSupported(type)) || '';
 }
 
 export function useRecCapture(options = {}) {
     const config = useRecConfig(options.config);
     const store = options.store || useRecSegmentStore();
+    const apple = isAppleMobile();
+
     const isRecording = ref(false);
     const isSupported = ref(
         typeof window !== 'undefined'
@@ -52,10 +50,12 @@ export function useRecCapture(options = {}) {
     );
     const error = ref(null);
     const previewEl = ref(null);
-    const hasAudio = ref(true);
+    const hasAudio = ref(!apple);
     const availableMs = ref(0);
+    const encodingReady = ref(false);
 
-    let stream = null;
+    let cameraStream = null;
+    let recordStream = null;
     let recorder = null;
     let chunks = [];
     let sequence = 0;
@@ -64,17 +64,22 @@ export function useRecCapture(options = {}) {
     let segmentTimer = null;
     let watchdogTimer = null;
     let availableTimer = null;
+    let canvasPump = null;
+    let recordCanvas = null;
     let wakeLock = null;
     let keepRecording = false;
-    let operationChain = Promise.resolve();
-    const mutedSince = new Map();
-    const segmentMs = Math.max(
-        config.segment_seconds * 1000,
-        isAppleMobile() ? 60_000 : config.segment_seconds * 1000,
-    );
-    const maxLocalSegments = isAppleMobile() ? 3 : 24;
     let encodingStarted = false;
     let rotating = false;
+    let operationChain = Promise.resolve();
+    const mutedSince = new Map();
+
+    // iOS: shorter rolling windows reduce memory pressure without rotating too often.
+    const segmentMs = apple
+        ? Math.max(10_000, Math.min(20_000, (config.segment_seconds || 5) * 1000 * 2))
+        : Math.max(1_000, config.segment_seconds * 1000);
+    const maxLocalSegments = apple
+        ? Math.max(3, Math.ceil((config.buffer_seconds || 30) / (segmentMs / 1000)) + 1)
+        : 24;
 
     function sessionUuid() {
         return typeof options.sessionUuid === 'function'
@@ -99,10 +104,8 @@ export function useRecCapture(options = {}) {
             availableMs.value = 0;
             return 0;
         }
-        const ms = Math.min(
-            Math.max(1, Number(config.local_retention_seconds) || 180) * 1000,
-            Math.max(0, Date.now() - recordingStartedAt),
-        );
+        const retentionMs = Math.max(1, Number(config.local_retention_seconds) || 180) * 1000;
+        const ms = Math.min(retentionMs, Math.max(0, Date.now() - recordingStartedAt));
         availableMs.value = ms;
         return ms;
     }
@@ -110,7 +113,7 @@ export function useRecCapture(options = {}) {
     function startAvailableTimer() {
         stopAvailableTimer();
         tickAvailableMs();
-        availableTimer = setInterval(tickAvailableMs, 500);
+        availableTimer = setInterval(tickAvailableMs, 250);
     }
 
     function stopAvailableTimer() {
@@ -120,37 +123,110 @@ export function useRecCapture(options = {}) {
 
     async function attachPreview() {
         const video = previewEl.value;
-        if (!video || !stream) return false;
-
+        if (!video || !cameraStream) return false;
         try {
             video.setAttribute('playsinline', 'true');
             video.setAttribute('webkit-playsinline', 'true');
             video.muted = true;
+            video.playsInline = true;
             video.autoplay = true;
-            if (video.srcObject !== stream) {
-                video.srcObject = stream;
+            if (video.srcObject !== cameraStream) {
+                video.srcObject = cameraStream;
             }
-            const playResult = video.play();
-            if (playResult?.then) await playResult.catch(() => {});
-            return true;
+            await video.play().catch(() => {});
+            return video.readyState >= 2;
         } catch {
             return false;
         }
     }
 
-    async function waitForPreview(timeoutMs = 4_000) {
+    async function waitForPreview(timeoutMs = 5_000) {
         const started = Date.now();
         while (Date.now() - started < timeoutMs) {
-            await attachPreview();
+            await nextTick();
+            const ok = await attachPreview();
             const video = previewEl.value;
-            if (video && video.srcObject && video.readyState >= 2) return true;
-            await wait(200);
+            if (ok && video && video.videoWidth > 0) return true;
+            await wait(100);
         }
         return !!(previewEl.value?.srcObject);
     }
 
+    function stopCanvasPump() {
+        if (canvasPump) {
+            cancelAnimationFrame(canvasPump);
+            canvasPump = null;
+        }
+    }
+
+    function buildClonedRecordStream() {
+        if (!cameraStream) return null;
+        const tracks = cameraStream.getVideoTracks().map((track) => track.clone());
+        if (!tracks.length) return null;
+        return new MediaStream(tracks);
+    }
+
+    function buildCanvasRecordStream() {
+        const video = previewEl.value;
+        if (!video || typeof document === 'undefined') return null;
+        if (typeof HTMLCanvasElement === 'undefined' || !HTMLCanvasElement.prototype.captureStream) {
+            return null;
+        }
+
+        recordCanvas = recordCanvas || document.createElement('canvas');
+        const width = video.videoWidth || 640;
+        const height = video.videoHeight || 360;
+        recordCanvas.width = width;
+        recordCanvas.height = height;
+        const ctx = recordCanvas.getContext('2d', { alpha: false });
+        if (!ctx) return null;
+
+        stopCanvasPump();
+        const fps = 15;
+        let lastDraw = 0;
+        const draw = (now) => {
+            if (!keepRecording) return;
+            if (now - lastDraw >= 1000 / fps) {
+                lastDraw = now;
+                try {
+                    ctx.drawImage(video, 0, 0, width, height);
+                } catch {
+                    // drawImage can throw briefly while the video is resizing.
+                }
+            }
+            canvasPump = requestAnimationFrame(draw);
+        };
+        canvasPump = requestAnimationFrame(draw);
+        return recordCanvas.captureStream(fps);
+    }
+
+    function releaseRecordStream() {
+        stopCanvasPump();
+        recordStream?.getTracks?.().forEach((track) => {
+            try {
+                track.stop();
+            } catch {
+                // ignore
+            }
+        });
+        recordStream = null;
+    }
+
+    function ensureRecordStream() {
+        if (recordStream) return recordStream;
+
+        if (apple) {
+            // Prefer clone: same frames as camera, isolated from the <video> element.
+            recordStream = buildClonedRecordStream() || buildCanvasRecordStream();
+        } else {
+            recordStream = cameraStream;
+        }
+
+        return recordStream;
+    }
+
     async function acquireWakeLock() {
-        if (isAppleMobile()) return;
+        if (apple) return;
         if (!navigator.wakeLock?.request || document.visibilityState !== 'visible') return;
         try {
             wakeLock = await navigator.wakeLock.request('screen');
@@ -158,21 +234,8 @@ export function useRecCapture(options = {}) {
                 wakeLock = null;
             }, { once: true });
         } catch {
-            // Wake Lock is an enhancement; recording remains usable without it.
+            // optional
         }
-    }
-
-    function recorderOptions(mimeType) {
-        // Bitrate hints crash or freeze some iOS Safari builds — keep options minimal.
-        if (isAppleMobile()) {
-            return mimeType ? { mimeType } : {};
-        }
-
-        return {
-            ...(mimeType ? { mimeType } : {}),
-            videoBitsPerSecond: 1_200_000,
-            ...(hasAudio.value ? { audioBitsPerSecond: 96_000 } : {}),
-        };
     }
 
     async function pruneOldSegments() {
@@ -181,10 +244,11 @@ export function useRecCapture(options = {}) {
             const segments = await store.getSegments(currentSession);
             const overflow = segments.length - maxLocalSegments;
             if (overflow <= 0) return;
-            const doomed = segments.slice(0, overflow);
-            await Promise.all(doomed.map((segment) => store.deleteSegment(segment.uuid).catch(() => {})));
+            await Promise.all(
+                segments.slice(0, overflow).map((segment) => store.deleteSegment(segment.uuid).catch(() => {})),
+            );
         } catch {
-            // Retention is best-effort.
+            // best-effort
         }
     }
 
@@ -197,47 +261,50 @@ export function useRecCapture(options = {}) {
         };
     }
 
-    function startRecorder() {
-        if (!stream || !keepRecording) return;
-
-        chunks = [];
-        segmentStartedAt = Date.now();
+    function createMediaRecorder(target) {
         const mimeType = pickMimeType();
-        const attempts = isAppleMobile()
+        const attempts = apple
             ? [
-                () => new MediaRecorder(stream),
-                () => new MediaRecorder(stream, mimeType ? { mimeType } : {}),
+                () => new MediaRecorder(target),
+                () => (mimeType ? new MediaRecorder(target, { mimeType }) : null),
             ]
             : [
-                () => new MediaRecorder(stream, recorderOptions(mimeType)),
-                () => new MediaRecorder(stream, mimeType ? { mimeType } : {}),
-                () => new MediaRecorder(stream),
+                () => new MediaRecorder(target, {
+                    ...(mimeType ? { mimeType } : {}),
+                    videoBitsPerSecond: 1_200_000,
+                    ...(hasAudio.value ? { audioBitsPerSecond: 96_000 } : {}),
+                }),
+                () => (mimeType ? new MediaRecorder(target, { mimeType }) : null),
+                () => new MediaRecorder(target),
             ];
 
-        let created = null;
         let lastError = null;
         for (const attempt of attempts) {
             try {
-                created = attempt();
-                break;
+                const created = attempt();
+                if (created) return created;
             } catch (recorderError) {
                 lastError = recorderError;
             }
         }
+        throw lastError || new Error('MediaRecorder failed');
+    }
 
-        if (!created) {
-            error.value = 'Este navegador não consegue gravar o vídeo da câmera.';
-            throw lastError || new Error('MediaRecorder failed');
+    function startRecorder() {
+        if (!keepRecording) return;
+        const target = ensureRecordStream();
+        if (!target) {
+            throw new Error('Stream de gravação indisponível.');
         }
 
-        recorder = created;
+        chunks = [];
+        segmentStartedAt = Date.now();
+        recorder = createMediaRecorder(target);
         bindRecorder(recorder);
-        // Never use timeslice on iOS — it commonly freezes Safari.
-        if (isAppleMobile()) {
-            recorder.start();
-        } else {
-            recorder.start(1_000);
-        }
+
+        // timeslice freezes many iOS builds; Android benefits from it.
+        if (apple) recorder.start();
+        else recorder.start(1_000);
     }
 
     function finalizeRecorder() {
@@ -268,13 +335,13 @@ export function useRecCapture(options = {}) {
                 resolve(blob?.size ? { blob, startedAt, endedAt } : null);
             };
 
-            hangTimer = setTimeout(() => finish(), 3_000);
+            hangTimer = setTimeout(() => finish(), apple ? 2_500 : 3_000);
             activeRecorder.onstop = finish;
-            if (!isAppleMobile()) {
+            if (!apple) {
                 try {
                     activeRecorder.requestData();
                 } catch {
-                    // Some MediaRecorder implementations do not support requestData here.
+                    // ignore
                 }
             }
             try {
@@ -304,23 +371,28 @@ export function useRecCapture(options = {}) {
                 uploadVerified: false,
             });
             await pruneOldSegments();
+            // Never await upload here — it must not block rotate/heartbeat.
             Promise.resolve(options.onSegment?.(segment)).catch(() => {});
             return segment;
         } catch {
-            error.value = 'Não foi possível guardar o segmento localmente. O SAVE pode falhar neste aparelho.';
+            error.value = 'Não foi possível guardar o segmento localmente.';
             return null;
         }
     }
 
     async function rotate() {
-        if (rotating) return null;
+        if (rotating || !encodingStarted) return null;
         rotating = true;
         try {
             return await runExclusive(async () => {
                 if (!recorder || recorder.state !== 'recording') return null;
                 const finalized = await finalizeRecorder();
                 const segment = await persistFinalized(finalized);
-                if (keepRecording) startRecorder();
+                if (keepRecording && encodingStarted) {
+                    // Yield to the browser before re-starting MediaRecorder (critical on iOS).
+                    await wait(apple ? 250 : 50);
+                    startRecorder();
+                }
                 return segment;
             });
         } finally {
@@ -334,24 +406,26 @@ export function useRecCapture(options = {}) {
             if (document.visibilityState === 'hidden') return;
             rotate().catch(() => {});
         }, segmentMs);
+
         watchdogTimer = setInterval(() => {
-            if (!stream) return;
-            stream.getTracks().forEach((track) => {
+            if (!cameraStream) return;
+            cameraStream.getTracks().forEach((track) => {
                 if (track.readyState === 'ended') {
-                    error.value = 'A câmera ou o microfone foi desconectado.';
+                    error.value = 'A câmera foi desconectada.';
                     return;
                 }
                 if (track.muted) {
                     const since = mutedSince.get(track) || Date.now();
                     mutedSince.set(track, since);
                     if (Date.now() - since > 10_000) {
-                        error.value = `${track.kind === 'video' ? 'Câmera' : 'Áudio'} sem sinal.`;
+                        error.value = 'Câmera sem sinal.';
                     }
                 } else {
                     mutedSince.delete(track);
                 }
             });
             attachPreview();
+            tickAvailableMs();
         }, WATCHDOG_MS);
     }
 
@@ -371,8 +445,8 @@ export function useRecCapture(options = {}) {
         return label.includes('front')
             || label.includes('frontal')
             || /\buser\b/.test(label)
-            || label.includes('face time')
-            || label.includes('facetime');
+            || label.includes('facetime')
+            || label.includes('face time');
     }
 
     async function findRearDeviceId() {
@@ -394,7 +468,7 @@ export function useRecCapture(options = {}) {
     }
 
     async function getMediaStream() {
-        const attempts = [
+        const videoOnlyAttempts = [
             { audio: false, video: { facingMode: { exact: 'environment' } } },
             { audio: false, video: { facingMode: 'environment' } },
             { audio: false, video: { facingMode: { ideal: 'environment' } } },
@@ -402,30 +476,29 @@ export function useRecCapture(options = {}) {
 
         let lastError = null;
 
-        for (const constraints of attempts) {
+        for (const constraints of videoOnlyAttempts) {
             try {
-                hasAudio.value = false;
                 const media = await navigator.mediaDevices.getUserMedia(constraints);
                 if (isFrontCameraTrack(media.getVideoTracks()[0])) {
                     media.getTracks().forEach((track) => track.stop());
                     continue;
                 }
+                hasAudio.value = false;
                 return media;
             } catch (attemptError) {
                 lastError = attemptError;
             }
         }
 
-        // After permission, labels are usually available — pick the rear device explicitly.
         const rearDeviceId = await findRearDeviceId();
         if (rearDeviceId) {
             try {
-                hasAudio.value = false;
                 const media = await navigator.mediaDevices.getUserMedia({
                     audio: false,
                     video: { deviceId: { exact: rearDeviceId } },
                 });
                 if (!isFrontCameraTrack(media.getVideoTracks()[0])) {
+                    hasAudio.value = false;
                     return media;
                 }
                 media.getTracks().forEach((track) => track.stop());
@@ -434,14 +507,19 @@ export function useRecCapture(options = {}) {
             }
         }
 
-        if (!isAppleMobile()) {
+        if (!apple) {
             try {
-                hasAudio.value = true;
                 const media = await navigator.mediaDevices.getUserMedia({
                     audio: true,
-                    video: { facingMode: { exact: 'environment' } },
+                    video: {
+                        facingMode: { exact: 'environment' },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        frameRate: { ideal: 24, max: 30 },
+                    },
                 });
                 if (!isFrontCameraTrack(media.getVideoTracks()[0])) {
+                    hasAudio.value = true;
                     return media;
                 }
                 media.getTracks().forEach((track) => track.stop());
@@ -455,6 +533,7 @@ export function useRecCapture(options = {}) {
 
     async function start() {
         error.value = null;
+        encodingReady.value = false;
         if (!isSupported.value) {
             error.value = 'Gravação não suportada neste navegador.';
             return false;
@@ -462,7 +541,7 @@ export function useRecCapture(options = {}) {
         if (isRecording.value) return true;
 
         try {
-            stream = await getMediaStream();
+            cameraStream = await getMediaStream();
             keepRecording = true;
             encodingStarted = false;
             recordingStartedAt = Date.now();
@@ -470,7 +549,6 @@ export function useRecCapture(options = {}) {
             isRecording.value = true;
             startAvailableTimer();
             await nextTick();
-            await wait(50);
             await waitForPreview();
             await acquireWakeLock();
             return true;
@@ -483,9 +561,9 @@ export function useRecCapture(options = {}) {
             } else if (name === 'NotReadableError' || name === 'TrackStartError') {
                 error.value = 'A câmera está em uso por outro aplicativo.';
             } else if (name === 'SecurityError') {
-                error.value = 'Acesso à câmera bloqueado. Abra o site em HTTPS no navegador do sistema (não use o browser interno do Instagram/WhatsApp).';
+                error.value = 'Acesso à câmera bloqueado. Abra o site em HTTPS no Safari (não use o browser interno do Instagram/WhatsApp).';
             } else {
-                error.value = 'Não foi possível acessar a câmera.';
+                error.value = captureError?.message || 'Não foi possível acessar a câmera.';
             }
             await stop();
             return false;
@@ -493,10 +571,13 @@ export function useRecCapture(options = {}) {
     }
 
     async function startEncoding() {
-        if (!isRecording.value || !stream || encodingStarted) return true;
+        if (!isRecording.value || !cameraStream || encodingStarted) {
+            return encodingStarted;
+        }
 
         try {
-            await waitForPreview(2_000);
+            await waitForPreview(3_000);
+
             let existing = [];
             try {
                 existing = await store.getSegments(sessionUuid());
@@ -506,14 +587,26 @@ export function useRecCapture(options = {}) {
             sequence = existing.reduce((max, item) => Math.max(max, item.sequence || 0), 0);
             keepRecording = true;
 
-            // Isolate MediaRecorder start so a Safari freeze is less likely to race UI.
-            await wait(isAppleMobile() ? 1_000 : 0);
+            // Let the UI/heartbeat breathe before touching MediaRecorder.
+            await wait(apple ? 400 : 0);
+
+            // Build isolated record stream BEFORE starting MediaRecorder.
+            releaseRecordStream();
+            if (!ensureRecordStream()) {
+                throw new Error('Falha ao preparar stream de gravação.');
+            }
+
+            // Yield once more so Vue can paint buffer ticks.
+            await wait(0);
             startRecorder();
             startTimers();
             encodingStarted = true;
+            encodingReady.value = true;
             tickAvailableMs();
             return true;
         } catch (encodeError) {
+            encodingReady.value = false;
+            releaseRecordStream();
             error.value = encodeError?.message || 'Não foi possível iniciar a gravação de vídeo.';
             return false;
         }
@@ -522,15 +615,17 @@ export function useRecCapture(options = {}) {
     async function stop() {
         keepRecording = false;
         encodingStarted = false;
+        encodingReady.value = false;
         stopTimers();
         stopAvailableTimer();
         try {
             await runExclusive(async () => persistFinalized(await finalizeRecorder()));
         } catch {
-            // Best-effort finalize on stop.
+            // best-effort
         }
-        stream?.getTracks().forEach((track) => track.stop());
-        stream = null;
+        releaseRecordStream();
+        cameraStream?.getTracks?.().forEach((track) => track.stop());
+        cameraStream = null;
         mutedSince.clear();
         if (previewEl.value) previewEl.value.srcObject = null;
         await wakeLock?.release?.().catch(() => {});
@@ -590,6 +685,7 @@ export function useRecCapture(options = {}) {
         previewEl,
         hasAudio,
         availableMs,
+        encodingReady,
         attachPreview,
         getAvailableMs,
         getAvailableMsSync,

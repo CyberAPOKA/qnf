@@ -219,7 +219,7 @@ async function toggleRecMode() {
             return;
         }
 
-        // Preview first (user gesture). Do NOT force fullscreen on iOS — blank video + fixed overlay looks like a white/black crash.
+        // Preview first (user gesture). Encoding starts AFTER session is alive, without blocking UI ticks.
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
@@ -235,21 +235,26 @@ async function toggleRecMode() {
             return;
         }
 
-        // Wait until the buffer clock is visibly moving before MediaRecorder (Safari freeze risk).
-        if (isAppleMobile()) {
-            await new Promise((resolve) => setTimeout(resolve, 1_500));
-            await attachPreview?.();
-        } else {
+        if (!isAppleMobile()) {
             await enterFullscreen();
         }
 
-        const encoding = await startEncoding();
-        if (!encoding) {
-            localError.value = captureError.value
-                || 'Câmera e sessão ativas, mas a gravação de vídeo falhou neste aparelho. Mantenha a tela aberta.';
-        } else {
-            reloadWarning.value = null;
-        }
+        // Critical: do not await encoding inside the same turn that freezes iOS.
+        // Buffer clock + heartbeat must keep running while MediaRecorder warms up.
+        window.setTimeout(async () => {
+            try {
+                await attachPreview?.();
+                const encoding = await startEncoding();
+                if (!encoding) {
+                    localError.value = captureError.value
+                        || 'Câmera ativa, mas a gravação de vídeo falhou. Tente novamente ou use outro aparelho.';
+                } else {
+                    reloadWarning.value = null;
+                }
+            } catch (encodeError) {
+                localError.value = encodeError?.message || 'Falha ao iniciar a gravação de vídeo.';
+            }
+        }, isAppleMobile() ? 500 : 100);
     } catch (error) {
         localError.value = error?.response?.data?.message
             || error?.message
