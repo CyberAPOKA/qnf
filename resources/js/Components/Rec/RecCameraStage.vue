@@ -64,7 +64,7 @@ watch(() => props.recording, async (recording) => {
                 v-if="availableLabel"
                 class="bg-amber-500/90 text-black text-xs font-semibold rounded-full px-3 py-1"
             >
-                {{ bufferSec > 0 ? `${bufferSec}/${bufferTargetSec}s` : availableLabel }}
+                {{ availableLabel }}
             </span>
         </div>
         <button

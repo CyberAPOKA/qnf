@@ -1,7 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import axios from 'axios';
 import { useRecConfig } from './recConfig';
-import { createRecHeartbeatScheduler } from './recHeartbeatScheduler';
 import { useRecHealth } from './useRecHealth';
 
 function makeUuid() {
@@ -23,18 +22,15 @@ function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 }
 
+/**
+ * REC session: start/stop, plain-interval heartbeat, SAVE + ack upload.
+ * No IndexedDB and no Blob Workers on the hot path.
+ */
 export function useRecSession(props, options = {}) {
     const config = useRecConfig(props.rec_config);
-    // Avoid IndexedDB on the hot path — it hung/killed iOS Safari during REC V2.
-    const store = options.store || {
-        putSession: async () => null,
-        getSession: async () => null,
-        clearSession: async () => null,
-        wasProcessed: async () => false,
-        markProcessed: async () => null,
-    };
     const capture = options.capture;
-    const uploadQueue = options.uploadQueue;
+    const apple = isAppleMobile();
+
     const session = ref(null);
     const sessions = ref([...(props.recorders || [])]);
     const recorders = sessions;
@@ -45,12 +41,22 @@ export function useRecSession(props, options = {}) {
     const isRegistering = ref(false);
     const sessionExpired = ref(false);
     const heartbeatFailures = ref(0);
-    const availableMs = ref(0);
     const saveCooldownRemaining = ref(0);
     const scopeCooldowns = ref({ left: 0, right: 0, all: 0 });
     const scopeDeadlines = { left: 0, right: 0, all: 0 };
     let scopeCooldownTimer = null;
     const cooldownSaveUuids = new Set();
+    const processedSaves = new Set();
+
+    const gameId = props.game.id;
+    const channelName = `game.${gameId}`;
+    let heartbeatTimer = null;
+    let heartbeatInFlight = false;
+    let pollTimer = null;
+    let echoChannel = null;
+    let stopped = false;
+    let lastSaveAt = 0;
+    let activeSaveRequests = 0;
 
     function scopesLockedBy(captureScope) {
         if (captureScope === 'left') return ['left'];
@@ -108,39 +114,9 @@ export function useRecSession(props, options = {}) {
         }, 250);
     }
 
-    const gameId = props.game.id;
-    const channelName = `game.${gameId}`;
-    let heartbeatTimer = null;
-    let heartbeatInFlight = false;
-    let pollTimer = null;
-    let echoChannel = null;
-    let stopped = false;
-    let lastSaveAt = 0;
-    let activeSaveRequests = 0;
-    const heartbeatScheduler = createRecHeartbeatScheduler(() => {
-        sendHeartbeat({ scheduleNext: false });
-    });
-
-    function routeName(name, params = {}) {
-        try {
-            return window.route(name, { game: gameId, ...params });
-        } catch {
-            return null;
-        }
-    }
-
-    function sessionApiUrl(path, current = session.value) {
+    function sessionPath(path, current = session.value) {
         if (!current?.uuid) return null;
         return `/games/${gameId}/rec/sessions/${encodeURIComponent(current.uuid)}${path}`;
-    }
-
-    function resolveUrl(name, path, params = {}, current = session.value) {
-        // Ziggy has been unreliable on some iOS Safari builds; prefer concrete paths there.
-        if (isAppleMobile()) {
-            return sessionApiUrl(path, current);
-        }
-        return routeName(name, { session: current?.uuid, ...params })
-            || sessionApiUrl(path, current);
     }
 
     function authHeaders(current = session.value) {
@@ -163,7 +139,8 @@ export function useRecSession(props, options = {}) {
         for (const clip of incoming.clips || []) {
             const index = clips.findIndex((item) =>
                 item.id === clip.id
-                || (item.recorder_id && item.recorder_id === clip.recorder_id));
+                || (item.recorder_id && item.recorder_id === clip.recorder_id)
+                || (item.camera_tag && item.camera_tag === clip.camera_tag));
             if (index >= 0) clips[index] = { ...clips[index], ...clip };
             else clips.push(clip);
         }
@@ -208,13 +185,21 @@ export function useRecSession(props, options = {}) {
         return save;
     }
 
-    const processedSaves = new Set();
+    function saveTargetsThisCamera(save) {
+        const myTag = session.value?.cameraTag || session.value?.camera_tag;
+        if (!myTag) return false;
+        const tags = save.camera_tags
+            || save.cameraTags
+            || (save.targets || []).map((target) => target.camera_tag).filter(Boolean);
+        if (!tags.length) return true;
+        return tags.includes(myTag);
+    }
 
-    async function uploadSnapshotParts(parts) {
-        if (!session.value || !parts?.length) return [];
+    async function uploadSnapshotParts(snapshotParts) {
+        if (!session.value || !snapshotParts?.length) return [];
 
         const uploaded = [];
-        for (const part of parts) {
+        for (const part of snapshotParts) {
             if (!part?.blob?.size) continue;
             const sequence = capture.nextSequence?.() || uploaded.length + 1;
             const uuid = capture.makeUuid?.() || makeUuid();
@@ -228,31 +213,19 @@ export function useRecSession(props, options = {}) {
             form.append('client_ended_at', new Date(part.endedAt).toISOString());
             form.append('duration_ms', String(durationMs));
             form.append('mime_type', part.blob.type || 'video/webm');
-            form.append('segment', part.blob, `${sequence}-${uuid}.webm`);
+            const ext = (part.blob.type || '').includes('mp4') ? 'mp4' : 'webm';
+            form.append('segment', part.blob, `${sequence}-${uuid}.${ext}`);
 
-            const url = resolveUrl('games.rec.sessions.segments', '/segments');
-            await axios.post(url, form, {
+            await axios.post(sessionPath('/segments'), form, {
                 headers: {
                     ...authHeaders(),
                     'Idempotency-Key': idempotencyKey,
                 },
-                timeout: 120_000,
+                timeout: (config.upload_request_timeout_seconds || 120) * 1000,
             });
             uploaded.push({ uuid, sequence, startedAt: part.startedAt, endedAt: part.endedAt });
         }
         return uploaded;
-    }
-
-    function saveTargetsThisCamera(save) {
-        const myTag = session.value?.cameraTag || session.value?.camera_tag;
-        if (!myTag) return false;
-
-        const tags = save.camera_tags
-            || save.cameraTags
-            || (save.targets || []).map((target) => target.camera_tag).filter(Boolean);
-
-        if (!tags.length) return true;
-        return tags.includes(myTag);
     }
 
     async function acknowledgeSave(save) {
@@ -264,7 +237,7 @@ export function useRecSession(props, options = {}) {
             || Date.parse(save.triggered_at || save.triggeredAt) + config.post_roll_seconds * 1000;
         const untilMs = typeof until === 'string' ? Date.parse(until) : Number(until);
         if (Number.isFinite(untilMs) && untilMs > Date.now()) {
-            await wait(untilMs - Date.now());
+            await wait(Math.min(untilMs - Date.now(), config.post_roll_seconds * 1000 + 500));
         }
 
         pendingPatch(save.uuid, { status: 'uploading' });
@@ -275,7 +248,7 @@ export function useRecSession(props, options = {}) {
             if (!snap?.parts?.length) {
                 pendingPatch(save.uuid, {
                     status: 'failed',
-                    error: 'Buffer insuficiente nesta câmera. O SAVE segue para as outras.',
+                    error: 'Buffer vazio nesta câmera. O SAVE segue para as outras.',
                 });
                 return;
             }
@@ -288,25 +261,23 @@ export function useRecSession(props, options = {}) {
             throw error;
         }
 
-        const body = {
-            last_sequence: uploaded.at(-1)?.sequence || 0,
-            buffer_available_ms: capture.getAvailableMsSync?.() ?? 0,
-            local_segments: uploaded.map((item) => ({
-                uuid: item.uuid,
-                sequence: item.sequence,
-                started_at_ms: item.startedAt,
-                ended_at_ms: item.endedAt,
-                checksum: null,
-            })),
-            known_gaps: [],
-            capture_state: capture.isRecording.value ? 'recording' : 'stopped',
-        };
-
-        await axios.post(resolveUrl(
-            'games.rec.sessions.ack-save',
-            `/save-requests/${encodeURIComponent(save.uuid)}/ack`,
-            { saveRequest: save.uuid },
-        ), body, { headers: authHeaders() });
+        await axios.post(
+            sessionPath(`/save-requests/${encodeURIComponent(save.uuid)}/ack`),
+            {
+                last_sequence: uploaded.at(-1)?.sequence || 0,
+                buffer_available_ms: capture.getAvailableMsSync?.() ?? 0,
+                local_segments: uploaded.map((item) => ({
+                    uuid: item.uuid,
+                    sequence: item.sequence,
+                    started_at_ms: item.startedAt,
+                    ended_at_ms: item.endedAt,
+                    checksum: null,
+                })),
+                known_gaps: [],
+                capture_state: capture.isRecording.value ? 'recording' : 'stopped',
+            },
+            { headers: authHeaders() },
+        );
 
         processedSaves.add(save.uuid);
         pendingPatch(save.uuid, {
@@ -349,7 +320,6 @@ export function useRecSession(props, options = {}) {
                 error: error?.response?.data?.message || 'Não foi possível confirmar o SAVE.',
             });
         }
-        options.onSaveRequested?.(save);
     }
 
     async function register(cameraTag) {
@@ -358,10 +328,7 @@ export function useRecSession(props, options = {}) {
         stopped = false;
 
         try {
-            const startUrl = isAppleMobile()
-                ? `/games/${gameId}/rec/sessions`
-                : (routeName('games.rec.sessions.start') || `/games/${gameId}/rec/sessions`);
-            const { data } = await axios.post(startUrl, {
+            const { data } = await axios.post(`/games/${gameId}/rec/sessions`, {
                 camera_tag: cameraTag,
                 capabilities: {
                     mime_types: typeof MediaRecorder === 'undefined'
@@ -376,17 +343,15 @@ export function useRecSession(props, options = {}) {
                 client: {
                     user_agent: navigator.userAgent,
                     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-                    app_version: document.documentElement.dataset.appVersion || null,
                 },
             });
+
             const created = {
                 ...(data.session || data),
-                token: data.session?.token
-                    || data.session?.session_token
-                    || data.token
-                    || data.session_token,
+                token: data.session?.token || data.token || data.session_token,
                 gameId,
                 cameraTag: data.session?.camera_tag || cameraTag,
+                camera_tag: data.session?.camera_tag || cameraTag,
             };
             session.value = created;
             sessionExpired.value = false;
@@ -400,48 +365,19 @@ export function useRecSession(props, options = {}) {
                 },
             ];
 
-            // iOS: do not block the UI on the first heartbeat — Safari was freezing during this await.
-            if (isAppleMobile()) {
-                ensureHeartbeatLoop();
-                void sendHeartbeat({ scheduleNext: false });
-                startPolling();
-                store.putSession?.(created)?.catch?.(() => {});
-                try {
-                    sessionStorage.setItem(`qnf-rec-active:${gameId}`, created.cameraTag || cameraTag);
-                } catch {
-                    // ignore
-                }
-                return true;
-            }
-
-            const heartbeatOk = await sendHeartbeat({ scheduleNext: false });
-            if (!heartbeatOk) {
-                saveError.value = 'Sessão criada, mas o keep-alive falhou. Tente novamente.';
-                try {
-                    await unregister();
-                } catch {
-                    session.value = null;
-                }
-                return false;
-            }
-
-            ensureHeartbeatLoop();
+            startHeartbeat();
             startPolling();
-            store.putSession?.(created)?.catch?.(() => {});
+
             try {
                 sessionStorage.setItem(`qnf-rec-active:${gameId}`, created.cameraTag || cameraTag);
             } catch {
-                // sessionStorage may be blocked in private mode.
+                // ignore
             }
             return true;
         } catch (error) {
-            const message = error?.response?.data?.message
-                || (typeof error?.message === 'string' && error.message.includes('games.rec.sessions.start')
-                    ? 'Rota REC ausente. Rode o deploy do frontend/Ziggy e limpe o cache de rotas.'
-                    : null)
+            saveError.value = error?.response?.data?.message
                 || error?.message
                 || 'Não foi possível iniciar a sessão REC.';
-            saveError.value = message;
             return false;
         } finally {
             isRegistering.value = false;
@@ -457,13 +393,13 @@ export function useRecSession(props, options = {}) {
 
         try {
             const { data } = await axios.post(
-                resolveUrl('games.rec.sessions.stop', '/stop', {}, current),
+                sessionPath('/stop', current),
                 {},
                 { headers: authHeaders(current) },
             );
             sessions.value = data.sessions || data.recorders || sessions.value;
         } catch {
-            // Stop is idempotent and the local session must still be closed.
+            // ignore
         } finally {
             session.value = null;
             try {
@@ -471,27 +407,15 @@ export function useRecSession(props, options = {}) {
             } catch {
                 // ignore
             }
-            await store.clearSession?.();
         }
     }
 
-    async function sendHeartbeat({ scheduleNext = false } = {}) {
+    async function sendHeartbeat() {
         if (!session.value || stopped || heartbeatInFlight) return false;
         heartbeatInFlight = true;
 
-        // Never await IndexedDB before the keep-alive HTTP call — iOS can hang forever there.
-        availableMs.value = capture?.getAvailableMsSync?.() ?? 0;
-
-        const url = resolveUrl('games.rec.sessions.heartbeat', '/heartbeat');
-        if (!url) {
-            heartbeatFailures.value += 1;
-            saveError.value = 'Rota de heartbeat REC indisponível.';
-            heartbeatInFlight = false;
-            return false;
-        }
-
         try {
-            const response = await fetch(url, {
+            const response = await fetch(sessionPath('/heartbeat'), {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: {
@@ -503,8 +427,8 @@ export function useRecSession(props, options = {}) {
                 },
                 body: JSON.stringify({
                     last_segment_sequence: 0,
-                    buffer_available_ms: availableMs.value,
-                    queue_size: uploadQueue?.pendingCount?.value || 0,
+                    buffer_available_ms: capture?.getAvailableMsSync?.() ?? 0,
+                    queue_size: 0,
                     camera_state: capture?.isRecording?.value ? 'recording' : 'stopped',
                     client_sent_at_ms: Date.now(),
                 }),
@@ -515,6 +439,7 @@ export function useRecSession(props, options = {}) {
                     sessionExpired.value = true;
                     stopHeartbeat();
                     stopPolling();
+                    saveError.value = 'Sessão da câmera expirou. Toque em REC MODE de novo.';
                 }
                 heartbeatFailures.value += 1;
                 return false;
@@ -532,65 +457,42 @@ export function useRecSession(props, options = {}) {
             return false;
         } finally {
             heartbeatInFlight = false;
-            if (scheduleNext) ensureHeartbeatLoop();
         }
-    }
-
-    function ensureHeartbeatLoop() {
-        if (!session.value || stopped || sessionExpired.value) return;
-        const base = Math.max(5, Number(config.heartbeat_seconds) || 10);
-        const intervalMs = (isAppleMobile() ? Math.min(base, 5) : base) * 1000;
-
-        // iOS: plain setInterval — Blob Workers have crashed some Safari builds.
-        if (isAppleMobile()) {
-            heartbeatScheduler.stop();
-            clearInterval(heartbeatTimer);
-            heartbeatTimer = setInterval(() => {
-                if (!session.value || stopped || sessionExpired.value) {
-                    stopHeartbeat();
-                    return;
-                }
-                sendHeartbeat({ scheduleNext: false });
-            }, intervalMs);
-            return;
-        }
-
-        heartbeatScheduler.start(intervalMs);
-        heartbeatTimer = true;
     }
 
     function startHeartbeat() {
         stopHeartbeat();
-        sendHeartbeat({ scheduleNext: false }).finally(() => ensureHeartbeatLoop());
+        const seconds = Math.max(5, Number(config.heartbeat_seconds) || 10);
+        void sendHeartbeat();
+        heartbeatTimer = setInterval(() => {
+            if (!session.value || stopped || sessionExpired.value) {
+                stopHeartbeat();
+                return;
+            }
+            void sendHeartbeat();
+        }, seconds * 1000);
     }
 
     function stopHeartbeat() {
-        heartbeatScheduler.stop();
-        if (heartbeatTimer && heartbeatTimer !== true) {
-            clearInterval(heartbeatTimer);
-        }
+        if (heartbeatTimer) clearInterval(heartbeatTimer);
         heartbeatTimer = null;
     }
 
     async function pollPendingSaves() {
         if (!session.value || stopped || sessionExpired.value) return;
         try {
-            const { data } = await axios.get(
-                resolveUrl('games.rec.sessions.pending-saves', '/save-requests/pending'),
-                { headers: authHeaders() },
-            );
-            const candidates = data.pending_saves
-                || data.pending
-                || data.data
-                || (Array.isArray(data) ? data : []);
+            const { data } = await axios.get(sessionPath('/save-requests/pending'), {
+                headers: authHeaders(),
+            });
+            const candidates = data.pending_saves || data.pending || [];
             for (const pending of candidates) {
                 receiveSave(pending).catch(() => {});
             }
-            await Promise.all(recentSaves.value.slice(0, 10).map(async (save) => {
+
+            await Promise.all(recentSaves.value.slice(0, 8).map(async (save) => {
                 try {
                     const response = await axios.get(
-                        routeName('games.rec.save-requests.show', { saveRequest: save.uuid })
-                            || `/games/${gameId}/rec/save-requests/${encodeURIComponent(save.uuid)}`,
+                        `/games/${gameId}/rec/save-requests/${encodeURIComponent(save.uuid)}`,
                         { headers: authHeaders() },
                     );
                     const fresh = normalizeSave(response.data);
@@ -613,7 +515,7 @@ export function useRecSession(props, options = {}) {
                         status: fresh.status,
                     });
                 } catch {
-                    // A missed detail refresh is retried by the next polling cycle.
+                    // retry next cycle
                 }
             }));
         } catch (error) {
@@ -625,7 +527,7 @@ export function useRecSession(props, options = {}) {
             if (session.value && !stopped && !sessionExpired.value) {
                 pollTimer = setTimeout(
                     pollPendingSaves,
-                    config.pending_save_poll_seconds * 1000,
+                    (config.pending_save_poll_seconds || 2) * 1000,
                 );
             }
         }
@@ -633,7 +535,7 @@ export function useRecSession(props, options = {}) {
 
     function startPolling() {
         stopPolling();
-        pollTimer = setTimeout(pollPendingSaves, 2_000);
+        pollTimer = setTimeout(pollPendingSaves, 1500);
     }
 
     function stopPolling() {
@@ -652,19 +554,15 @@ export function useRecSession(props, options = {}) {
         const idempotencyKey = makeUuid();
 
         try {
-            const { data } = await axios.post(
-                routeName('games.rec.save-requests.store') || `/games/${gameId}/rec/save-requests`,
-                {
-                    capture_scope: captureScope,
-                    idempotency_key: idempotencyKey,
+            const { data } = await axios.post(`/games/${gameId}/rec/save-requests`, {
+                capture_scope: captureScope,
+                idempotency_key: idempotencyKey,
+            }, {
+                headers: {
+                    ...authHeaders(),
+                    'Idempotency-Key': idempotencyKey,
                 },
-                {
-                    headers: {
-                        ...authHeaders(),
-                        'Idempotency-Key': idempotencyKey,
-                    },
-                },
-            );
+            });
             const save = normalizeSave(data);
             save.triggered_by ||= props.current_user_name;
             mergeSave(save);
@@ -714,8 +612,7 @@ export function useRecSession(props, options = {}) {
     }
 
     function subscribe() {
-        // Echo/WebSocket has caused instability on some iOS REC sessions — skip while diagnosing.
-        if (isAppleMobile()) return;
+        if (apple) return;
         if (!window.Echo) return;
         echoChannel = window.Echo.private(channelName);
         echoChannel
@@ -733,17 +630,17 @@ export function useRecSession(props, options = {}) {
     const health = useRecHealth({
         online: computed(() => typeof navigator === 'undefined' || navigator.onLine),
         isRecording: capture?.isRecording,
-        encodingReady: capture?.isRecording,
+        encodingReady: capture?.encodingReady,
         isSupported: capture?.isSupported,
         captureError: capture?.error,
         sessionExpired,
-        availableMs: capture?.availableMs || availableMs,
+        availableMs: capture?.availableMs,
         targetBufferMs: config.buffer_seconds * 1000,
-        pendingUploads: uploadQueue?.pendingCount,
+        pendingUploads: 0,
         heartbeatFailures,
     });
 
-    onMounted(async () => {
+    onMounted(() => {
         subscribe();
     });
 
@@ -752,7 +649,13 @@ export function useRecSession(props, options = {}) {
         stopHeartbeat();
         stopPolling();
         if (scopeCooldownTimer) clearInterval(scopeCooldownTimer);
-        if (echoChannel) window.Echo.leave(`private-${channelName}`);
+        if (echoChannel) {
+            try {
+                window.Echo?.leave?.(`private-${channelName}`);
+            } catch {
+                // ignore
+            }
+        }
     });
 
     return {

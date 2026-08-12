@@ -39,14 +39,6 @@ function isAppleMobile() {
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
-function disconnectRealtime() {
-    try {
-        window.Echo?.disconnect?.();
-    } catch {
-        // ignore
-    }
-}
-
 const capture = useRecCapture({
     config: props.rec_config,
 });
@@ -65,6 +57,7 @@ const {
     stop: stopCapture,
     attachPreview,
     bufferSeconds: captureBufferSeconds,
+    hasAudio,
 } = capture;
 
 const {
@@ -86,7 +79,7 @@ const {
 } = recSession;
 
 const healthLabel = computed(() => health.label.value);
-const bufferSec = computed(() => Math.max(0, Math.round(availableMs.value / 1000)));
+const bufferSec = computed(() => Math.max(0, Math.floor(availableMs.value / 1000)));
 const bufferTargetSec = computed(() => props.buffer_seconds || captureBufferSeconds || 30);
 const activeRecorderCount = computed(() => recorders.value.length);
 const isThisDeviceRecording = computed(() => isRecording.value);
@@ -156,7 +149,7 @@ async function enterFullscreen() {
             || element?.webkitRequestFullscreen?.bind(element);
         if (request) await request();
     } catch {
-        // CSS fullscreen fallback
+        // CSS fullscreen fallback via isFullscreen
     }
     attachPreview?.();
 }
@@ -175,11 +168,11 @@ async function exitFullscreen() {
 
 function onFullscreenChange() {
     const native = !!(document.fullscreenElement || document.webkitFullscreenElement);
-    if (!native && isFullscreen.value && isAppleMobile()) {
-        return;
+    if (!native && isFullscreen.value && isAppleMobile()) return;
+    if (!native) {
+        isFullscreen.value = false;
+        unlockOrientation();
     }
-    isFullscreen.value = native || isFullscreen.value;
-    if (!isFullscreen.value) unlockOrientation();
 }
 
 async function toggleRecMode() {
@@ -207,6 +200,7 @@ async function toggleRecMode() {
             return;
         }
 
+        // Start camera first (user gesture), then register session.
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
@@ -220,7 +214,6 @@ async function toggleRecMode() {
             return;
         }
 
-        // iPhone: preview no card — fullscreen manual evita congelar com overlay CSS.
         if (!isAppleMobile()) {
             await enterFullscreen();
         }
@@ -245,9 +238,8 @@ async function toggleRecMode() {
 
 async function handleSave(scope = 'all') {
     localError.value = null;
-    // Allow early SAVE with whatever buffer is available; other cameras keep collecting.
-    if (isThisDeviceRecording.value && availableMs.value < 3000) {
-        localError.value = 'Aguarde pelo menos 3s de gravação nesta câmera.';
+    if (isThisDeviceRecording.value && availableMs.value < 2000) {
+        localError.value = 'Aguarde 2s de gravação e tente de novo.';
         return;
     }
     const save = await triggerSave(scope);
@@ -256,7 +248,6 @@ async function handleSave(scope = 'all') {
 }
 
 onMounted(() => {
-    if (isAppleMobile()) disconnectRealtime();
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 });
@@ -272,36 +263,73 @@ onBeforeUnmount(() => {
     <AppLayout :title="`REC · Rodada ${game.round || ''}`">
         <div class="py-4 pb-28">
             <div class="max-w-lg mx-auto px-4 space-y-5">
-                <div v-if="localError || captureError || saveError"
-                    class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
+                <div
+                    v-if="localError || captureError || saveError"
+                    class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3"
+                >
                     {{ localError || captureError || saveError }}
                 </div>
-                <div v-if="!isSupported"
-                    class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3">
+                <div
+                    v-if="!isSupported"
+                    class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3"
+                >
                     Seu navegador não suporta gravação. Use Chrome no Android ou Safari atualizado.
                 </div>
 
-                <RecCameraPositionSelector v-if="!isThisDeviceRecording" :selected="selectedAngle" :taken="takenAngles"
-                    :disabled="isThisDeviceRecording" @select="selectAngle" />
+                <RecCameraPositionSelector
+                    v-if="!isThisDeviceRecording"
+                    :selected="selectedAngle"
+                    :taken="takenAngles"
+                    :disabled="isThisDeviceRecording"
+                    @select="selectAngle"
+                />
 
-                <RecCameraStage ref="stageEl" :recording="isRecording" :fullscreen="isFullscreen"
-                    :camera-tag="selectedAngle" :landscape-hint="preferLandscapeHint"
-                    :can-save-left="canSaveScope('left')" :can-save-all="canSaveScope('all')"
-                    :can-save-right="canSaveScope('right')" :saving="isSaving" :available-label="healthLabel"
-                    :buffer-sec="bufferSec" :buffer-target-sec="bufferTargetSec" @preview="setPreviewElement"
-                    @enter-fullscreen="enterFullscreen" @exit-fullscreen="exitFullscreen" @save="handleSave"
-                    @stop="toggleRecMode" />
+                <RecCameraStage
+                    ref="stageEl"
+                    :recording="isRecording"
+                    :fullscreen="isFullscreen"
+                    :camera-tag="selectedAngle"
+                    :landscape-hint="preferLandscapeHint"
+                    :can-save-left="canSaveScope('left')"
+                    :can-save-all="canSaveScope('all')"
+                    :can-save-right="canSaveScope('right')"
+                    :saving="isSaving"
+                    :available-label="healthLabel"
+                    :buffer-sec="bufferSec"
+                    :buffer-target-sec="bufferTargetSec"
+                    @preview="setPreviewElement"
+                    @enter-fullscreen="enterFullscreen"
+                    @exit-fullscreen="exitFullscreen"
+                    @save="handleSave"
+                    @stop="toggleRecMode"
+                />
 
-                <RecCameraHealthCard v-if="isRecording" :status="health.status.value" :label="healthLabel"
-                    :color-class="health.colorClass.value" :available-ms="availableMs.value" :pending-uploads="0"
-                    :has-audio="capture.hasAudio.value" />
+                <RecCameraHealthCard
+                    v-if="isRecording"
+                    :status="health.status.value"
+                    :label="healthLabel"
+                    :color-class="health.colorClass.value"
+                    :available-ms="availableMs"
+                    :pending-uploads="0"
+                    :has-audio="hasAudio"
+                />
 
-                <RecSaveControls :recording="isThisDeviceRecording" :can-start="canStartRec" :toggling="isTogglingRec"
-                    :registering="isRegistering" :saving="isSaving" :cooldown="saveCooldownRemaining || 0"
-                    :cooldown-left="scopeCooldowns?.left || 0" :cooldown-right="scopeCooldowns?.right || 0"
-                    :cooldown-all="scopeCooldowns?.all || 0" :can-left="canSaveScope('left')"
-                    :can-all="canSaveScope('all')" :can-right="canSaveScope('right')" @toggle="toggleRecMode"
-                    @save="handleSave" />
+                <RecSaveControls
+                    :recording="isThisDeviceRecording"
+                    :can-start="canStartRec"
+                    :toggling="isTogglingRec"
+                    :registering="isRegistering"
+                    :saving="isSaving"
+                    :cooldown="saveCooldownRemaining || 0"
+                    :cooldown-left="scopeCooldowns?.left || 0"
+                    :cooldown-right="scopeCooldowns?.right || 0"
+                    :cooldown-all="scopeCooldowns?.all || 0"
+                    :can-left="canSaveScope('left')"
+                    :can-all="canSaveScope('all')"
+                    :can-right="canSaveScope('right')"
+                    @toggle="toggleRecMode"
+                    @save="handleSave"
+                />
 
                 <RecActiveCameras :cameras="recorders" :own-id="recorderId" />
                 <RecSaveList :saves="recentSaves" :pending="pendingSaves" />

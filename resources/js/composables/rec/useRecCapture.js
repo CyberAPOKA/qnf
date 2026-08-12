@@ -1,7 +1,6 @@
 import { nextTick, onBeforeUnmount, ref } from 'vue';
 import { useRecConfig } from './recConfig';
 
-const FLUSH_MS = 150;
 const TIMESLICE_MS = 1000;
 
 function wait(ms) {
@@ -20,27 +19,15 @@ function isAppleMobile() {
 }
 
 /**
- * V1-style buffer: one tap → camera + MediaRecorder. Upload only on SAVE (via session ack).
+ * In-memory circular buffer. Never touches IndexedDB.
+ * availableMs is wall-clock from recording start (always advances while recording).
  */
 export function useRecCapture(options = {}) {
     const config = useRecConfig(options.config);
     const apple = isAppleMobile();
     const bufferSeconds = Math.max(10, Number(config.buffer_seconds) || 30);
-    const minClipSeconds = Math.max(5, Math.min(bufferSeconds - 5, 25));
-    const segmentMs = bufferSeconds * 1000;
-
-    function pickMimeType() {
-        if (typeof MediaRecorder === 'undefined') return '';
-        // iOS: let Safari pick the container — forced mime types hang or freeze.
-        if (apple) return '';
-        const candidates = [
-            'video/webm;codecs=vp8,opus',
-            'video/webm;codecs=vp8',
-            'video/webm',
-            'video/mp4',
-        ];
-        return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || '';
-    }
+    const bufferMs = bufferSeconds * 1000;
+    const minClipSeconds = Math.max(3, Math.min(bufferSeconds - 5, 8));
 
     const isRecording = ref(false);
     const encodingReady = ref(false);
@@ -53,48 +40,76 @@ export function useRecCapture(options = {}) {
     const previewEl = ref(null);
     const hasAudio = ref(true);
     const availableMs = ref(0);
+    const bytesBuffered = ref(0);
 
     let mediaStream = null;
     let mediaRecorder = null;
     let mimeType = '';
-    const chunks = [];
-    let segmentStartedAt = 0;
     let recordingStartedAt = 0;
-    let previousSegment = null;
-    let segmentTimer = null;
-    let availableTimer = null;
-    let shouldKeepRecording = false;
-    let operationChain = Promise.resolve();
+    let ticker = null;
+    let wakeLock = null;
     let sequence = 0;
+    let shouldKeepRecording = false;
+    let usesTimeslice = !apple;
+
+    /** @type {{ blob: Blob, at: number }[]} */
+    const parts = [];
+
+    function pickMimeType() {
+        if (typeof MediaRecorder === 'undefined') return '';
+        if (apple) return '';
+        const candidates = [
+            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs=vp8',
+            'video/webm',
+            'video/mp4',
+        ];
+        return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+    }
 
     function blobType() {
-        return (mimeType || chunks[0]?.type || 'video/webm').split(';')[0];
+        return (mimeType || parts[0]?.blob?.type || 'video/webm').split(';')[0];
     }
 
-    function currentDurationMs() {
-        if (!segmentStartedAt) return 0;
-        return Math.max(0, Date.now() - segmentStartedAt);
+    function trimParts() {
+        if (!recordingStartedAt) return;
+        const cutoff = Date.now() - bufferMs - 2000;
+        while (parts.length > 2 && parts[0].at < cutoff) {
+            parts.shift();
+        }
+        bytesBuffered.value = parts.reduce((sum, part) => sum + (part.blob?.size || 0), 0);
     }
 
-    function tickAvailableMs() {
-        if (!recordingStartedAt) {
+    function tickAvailable() {
+        if (!recordingStartedAt || !shouldKeepRecording) {
             availableMs.value = 0;
             return 0;
         }
-        const ms = Math.min(bufferSeconds * 1000, Math.max(0, Date.now() - recordingStartedAt));
+        const ms = Math.min(bufferMs, Math.max(0, Date.now() - recordingStartedAt));
         availableMs.value = ms;
         return ms;
     }
 
-    function startAvailableTimer() {
-        stopAvailableTimer();
-        tickAvailableMs();
-        availableTimer = setInterval(tickAvailableMs, 500);
+    function startTicker() {
+        stopTicker();
+        tickAvailable();
+        const interval = setInterval(tickAvailable, 250);
+        let raf = 0;
+        const pulse = () => {
+            tickAvailable();
+            if (shouldKeepRecording) {
+                raf = requestAnimationFrame(pulse);
+                ticker = { raf, interval };
+            }
+        };
+        raf = requestAnimationFrame(pulse);
+        ticker = { raf, interval };
     }
 
-    function stopAvailableTimer() {
-        clearInterval(availableTimer);
-        availableTimer = null;
+    function stopTicker() {
+        if (ticker?.raf) cancelAnimationFrame(ticker.raf);
+        if (ticker?.interval) clearInterval(ticker.interval);
+        ticker = null;
     }
 
     function attachPreview(stream = mediaStream) {
@@ -108,161 +123,91 @@ export function useRecCapture(options = {}) {
         return true;
     }
 
-    function runExclusive(task) {
-        const next = operationChain.then(task, task);
-        operationChain = next.catch(() => {});
-        return next;
+    async function requestWakeLock() {
+        try {
+            wakeLock = await navigator.wakeLock?.request?.('screen');
+            wakeLock?.addEventListener?.('release', () => {
+                wakeLock = null;
+            });
+        } catch {
+            wakeLock = null;
+        }
+    }
+
+    function releaseWakeLock() {
+        try {
+            wakeLock?.release?.();
+        } catch {
+            // ignore
+        }
+        wakeLock = null;
     }
 
     async function getMediaStream() {
+        const video = {
+            facingMode: { ideal: 'environment' },
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+        };
+
         if (apple) {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                audio: false,
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                },
-            });
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
             hasAudio.value = false;
             return stream;
         }
 
-        const stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
-            video: {
-                facingMode: { ideal: 'environment' },
-                width: { ideal: 1280 },
-                height: { ideal: 720 },
-                aspectRatio: { ideal: 16 / 9 },
-                frameRate: { ideal: 24, max: 30 },
-            },
-        });
-        hasAudio.value = true;
-        return stream;
-    }
-
-    function recorderOptions() {
-        const opts = {};
-        if (mimeType) opts.mimeType = mimeType;
-        if (!apple) {
-            opts.videoBitsPerSecond = 1_200_000;
-            opts.audioBitsPerSecond = 96_000;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: true,
+                video: { ...video, frameRate: { ideal: 24, max: 30 } },
+            });
+            hasAudio.value = true;
+            return stream;
+        } catch {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+            hasAudio.value = false;
+            return stream;
         }
-        return opts;
     }
 
-    function buildBlobFromChunks() {
-        if (!chunks.length) return null;
-        return new Blob(chunks.slice(), { type: blobType() });
+    function pushChunk(blob) {
+        if (!blob?.size) return;
+        parts.push({ blob, at: Date.now() });
+        trimParts();
     }
 
     function startRecorder() {
         if (!mediaStream || !shouldKeepRecording) return;
 
-        chunks.length = 0;
-        segmentStartedAt = Date.now();
+        const opts = {};
+        if (mimeType) opts.mimeType = mimeType;
+        if (!apple) {
+            opts.videoBitsPerSecond = 1_200_000;
+            if (hasAudio.value) opts.audioBitsPerSecond = 96_000;
+        }
 
-        // iOS Safari freezes on timeslice — record continuously until SAVE.
         try {
-            mediaRecorder = apple
-                ? new MediaRecorder(mediaStream)
-                : new MediaRecorder(mediaStream, recorderOptions());
+            mediaRecorder = Object.keys(opts).length
+                ? new MediaRecorder(mediaStream, opts)
+                : new MediaRecorder(mediaStream);
         } catch {
             mediaRecorder = new MediaRecorder(mediaStream);
         }
 
         mediaRecorder.ondataavailable = (event) => {
-            if (event.data?.size) chunks.push(event.data);
+            pushChunk(event.data);
         };
         mediaRecorder.onerror = () => {
             error.value = 'Erro na gravação.';
         };
 
-        if (apple) mediaRecorder.start();
-        else mediaRecorder.start(TIMESLICE_MS);
+        if (usesTimeslice) {
+            mediaRecorder.start(TIMESLICE_MS);
+        } else {
+            mediaRecorder.start();
+        }
     }
 
-    function finalizeCurrentSegment() {
-        return new Promise((resolve) => {
-            if (!mediaRecorder || mediaRecorder.state === 'inactive') {
-                resolve({
-                    blob: buildBlobFromChunks(),
-                    durationMs: currentDurationMs(),
-                    startedAt: segmentStartedAt,
-                });
-                return;
-            }
-
-            const recorder = mediaRecorder;
-            const startedAt = segmentStartedAt;
-            let settled = false;
-
-            const finish = async () => {
-                if (settled) return;
-                settled = true;
-                await wait(FLUSH_MS);
-                const durationMs = Math.max(0, Date.now() - startedAt);
-                const blob = buildBlobFromChunks();
-                chunks.length = 0;
-                mediaRecorder = null;
-                resolve({ blob, durationMs, startedAt });
-            };
-
-            recorder.onstop = () => finish();
-            if (!apple) {
-                try {
-                    recorder.requestData();
-                } catch {
-                    // ignore
-                }
-            }
-            try {
-                recorder.stop();
-            } catch {
-                finish();
-            }
-        });
-    }
-
-    async function rotateSegment() {
-        return runExclusive(async () => {
-            if (!shouldKeepRecording || !mediaRecorder || mediaRecorder.state !== 'recording') {
-                return;
-            }
-
-            const { blob, durationMs, startedAt } = await finalizeCurrentSegment();
-            if (blob?.size && durationMs >= minClipSeconds * 1000) {
-                previousSegment = {
-                    blob,
-                    durationMs,
-                    startedAt,
-                    endedAt: Date.now(),
-                };
-            }
-
-            if (shouldKeepRecording) {
-                startRecorder();
-            }
-            tickAvailableMs();
-        });
-    }
-
-    function startSegmentTimer() {
-        stopSegmentTimer();
-        // iOS: never stop/restart MediaRecorder on a timer — freezes Safari.
-        if (apple) return;
-        segmentTimer = setInterval(() => {
-            rotateSegment().catch(() => {});
-        }, segmentMs);
-    }
-
-    function stopSegmentTimer() {
-        clearInterval(segmentTimer);
-        segmentTimer = null;
-    }
-
-    /** One tap: camera + buffer (V1). */
     async function start() {
         error.value = null;
         encodingReady.value = false;
@@ -276,24 +221,42 @@ export function useRecCapture(options = {}) {
         try {
             mediaStream = await getMediaStream();
             mimeType = pickMimeType();
-            previousSegment = null;
-            shouldKeepRecording = true;
-            operationChain = Promise.resolve();
+            parts.length = 0;
+            bytesBuffered.value = 0;
             sequence = 0;
+            shouldKeepRecording = true;
             recordingStartedAt = Date.now();
+            availableMs.value = 0;
 
-            // V1 order: preview + recorder BEFORE flipping isRecording.
             attachPreview(mediaStream);
             startRecorder();
-            startSegmentTimer();
-            startAvailableTimer();
+            startTicker();
+            void requestWakeLock();
 
             isRecording.value = true;
             encodingReady.value = true;
+            tickAvailable();
+
+            // If timeslice yields nothing on this device, fall back to continuous mode.
+            if (usesTimeslice) {
+                void (async () => {
+                    await wait(1800);
+                    if (!shouldKeepRecording) return;
+                    if (parts.length === 0 && mediaRecorder?.state === 'recording') {
+                        usesTimeslice = false;
+                        try {
+                            mediaRecorder.ondataavailable = null;
+                            mediaRecorder.stop();
+                        } catch {
+                            // ignore
+                        }
+                        startRecorder();
+                    }
+                })();
+            }
 
             await nextTick();
             attachPreview(mediaStream);
-
             return true;
         } catch (err) {
             error.value = err?.name === 'NotAllowedError'
@@ -304,101 +267,69 @@ export function useRecCapture(options = {}) {
         }
     }
 
-    async function startEncoding() {
-        return isRecording.value;
-    }
+    async function flushRecorder() {
+        if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
+        if (typeof mediaRecorder.requestData === 'function' && usesTimeslice) {
+            try {
+                mediaRecorder.requestData();
+                await wait(120);
+            } catch {
+                // ignore
+            }
+            return;
+        }
 
-    async function startWithEncoding() {
-        return start();
+        // Continuous mode (typical iOS): must stop to obtain the blob, then restart.
+        await new Promise((resolve) => {
+            const recorder = mediaRecorder;
+            let settled = false;
+            const finish = () => {
+                if (settled) return;
+                settled = true;
+                resolve();
+            };
+            const hang = setTimeout(finish, 2500);
+            recorder.onstop = () => {
+                clearTimeout(hang);
+                finish();
+            };
+            try {
+                recorder.stop();
+            } catch {
+                clearTimeout(hang);
+                finish();
+            }
+        });
+
+        mediaRecorder = null;
+        if (shouldKeepRecording) {
+            startRecorder();
+        }
     }
 
     async function snapshot() {
-        return runExclusive(async () => {
-            stopSegmentTimer();
-            try {
-                const { blob, durationMs, startedAt } = await finalizeCurrentSegment();
-                const endedAt = Date.now();
+        if (!shouldKeepRecording && !parts.length) return null;
 
-                if (shouldKeepRecording) {
-                    startRecorder();
-                    startSegmentTimer();
-                }
+        await flushRecorder();
+        trimParts();
 
-                const minMs = minClipSeconds * 1000;
-                const currentOk = !!(blob && blob.size > 0);
+        if (!parts.length) return null;
 
-                if (currentOk && durationMs >= minMs) {
-                    return {
-                        parts: [{
-                            blob,
-                            startedAt: startedAt || (endedAt - durationMs),
-                            endedAt,
-                            durationMs,
-                        }],
-                        durationSeconds: Math.round(durationMs / 1000),
-                    };
-                }
+        const blob = new Blob(parts.map((part) => part.blob), { type: blobType() });
+        if (!blob.size) return null;
 
-                if (previousSegment?.blob?.size) {
-                    const parts = [{
-                        blob: previousSegment.blob,
-                        startedAt: previousSegment.startedAt
-                            || (previousSegment.endedAt - previousSegment.durationMs),
-                        endedAt: previousSegment.endedAt,
-                        durationMs: previousSegment.durationMs,
-                    }];
-                    if (currentOk) {
-                        parts.push({
-                            blob,
-                            startedAt: startedAt || (endedAt - durationMs),
-                            endedAt,
-                            durationMs,
-                        });
-                    }
-                    return { parts, durationSeconds: bufferSeconds };
-                }
+        const endedAt = Date.now();
+        const durationMs = Math.min(bufferMs, Math.max(1000, endedAt - (parts[0]?.at || recordingStartedAt || endedAt)));
+        const startedAt = endedAt - durationMs;
 
-                if (currentOk) {
-                    return {
-                        parts: [{
-                            blob,
-                            startedAt: startedAt || (endedAt - durationMs),
-                            endedAt,
-                            durationMs,
-                        }],
-                        durationSeconds: Math.round(durationMs / 1000),
-                    };
-                }
-                return null;
-            } catch {
-                if (previousSegment?.blob?.size) {
-                    return {
-                        parts: [{
-                            blob: previousSegment.blob,
-                            startedAt: previousSegment.startedAt
-                                || (previousSegment.endedAt - previousSegment.durationMs),
-                            endedAt: previousSegment.endedAt,
-                            durationMs: previousSegment.durationMs,
-                        }],
-                        durationSeconds: Math.round(previousSegment.durationMs / 1000) || bufferSeconds,
-                    };
-                }
-                return null;
-            }
-        });
+        return {
+            parts: [{ blob, startedAt, endedAt, durationMs }],
+            durationSeconds: Math.round(durationMs / 1000),
+        };
     }
 
     function hasBuffer() {
-        const minMs = minClipSeconds * 1000;
-        if (recordingStartedAt && Date.now() - recordingStartedAt >= minMs) {
-            return true;
-        }
-        if (currentDurationMs() >= minMs) return true;
-        return !!(previousSegment?.blob?.size && previousSegment.durationMs >= minMs);
-    }
-
-    async function listLocalSegmentsInWindow() {
-        return [];
+        return availableMs.value >= minClipSeconds * 1000 || bytesBuffered.value > 0;
     }
 
     function nextSequence() {
@@ -409,9 +340,8 @@ export function useRecCapture(options = {}) {
     function stop() {
         shouldKeepRecording = false;
         encodingReady.value = false;
-        stopSegmentTimer();
-        stopAvailableTimer();
-        operationChain = Promise.resolve();
+        stopTicker();
+        releaseWakeLock();
 
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
             mediaRecorder.ondataavailable = null;
@@ -425,20 +355,19 @@ export function useRecCapture(options = {}) {
         }
 
         mediaRecorder = null;
-        chunks.length = 0;
-        previousSegment = null;
-        segmentStartedAt = 0;
+        parts.length = 0;
+        bytesBuffered.value = 0;
         recordingStartedAt = 0;
         availableMs.value = 0;
-
         mediaStream?.getTracks?.().forEach((track) => track.stop());
         mediaStream = null;
         if (previewEl.value) previewEl.value.srcObject = null;
         isRecording.value = false;
+        usesTimeslice = !apple;
     }
 
     function getAvailableMsSync() {
-        return tickAvailableMs();
+        return tickAvailable();
     }
 
     async function getAvailableMs() {
@@ -449,12 +378,12 @@ export function useRecCapture(options = {}) {
 
     return {
         start,
-        startWithEncoding,
-        startEncoding,
+        startWithEncoding: start,
+        startEncoding: async () => isRecording.value,
         stop,
         snapshot,
         hasBuffer,
-        listLocalSegmentsInWindow,
+        listLocalSegmentsInWindow: async () => [],
         nextSequence,
         makeUuid,
         isRecording,
@@ -464,6 +393,7 @@ export function useRecCapture(options = {}) {
         previewEl,
         hasAudio,
         availableMs,
+        bytesBuffered,
         attachPreview,
         getAvailableMs,
         getAvailableMsSync,
