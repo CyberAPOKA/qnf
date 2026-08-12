@@ -19,16 +19,18 @@ function isAppleMobile() {
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
-function pickMimeType() {
-    if (typeof MediaRecorder === 'undefined') return '';
-    const candidates = [
-        'video/webm;codecs=vp8,opus',
-        'video/webm;codecs=vp8',
-        'video/webm',
-        'video/mp4',
-    ];
-    return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || '';
-}
+    function pickMimeType() {
+        if (typeof MediaRecorder === 'undefined') return '';
+        // iOS: let Safari pick the container — forced mime types hang or freeze.
+        if (apple) return '';
+        const candidates = [
+            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs=vp8',
+            'video/webm',
+            'video/mp4',
+        ];
+        return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+    }
 
 /**
  * V1-style buffer: one tap → camera + MediaRecorder. Upload only on SAVE (via session ack).
@@ -161,8 +163,11 @@ export function useRecCapture(options = {}) {
         chunks.length = 0;
         segmentStartedAt = Date.now();
 
+        // iOS Safari freezes on timeslice — record continuously until SAVE.
         try {
-            mediaRecorder = new MediaRecorder(mediaStream, recorderOptions());
+            mediaRecorder = apple
+                ? new MediaRecorder(mediaStream)
+                : new MediaRecorder(mediaStream, recorderOptions());
         } catch {
             mediaRecorder = new MediaRecorder(mediaStream);
         }
@@ -174,7 +179,8 @@ export function useRecCapture(options = {}) {
             error.value = 'Erro na gravação.';
         };
 
-        mediaRecorder.start(TIMESLICE_MS);
+        if (apple) mediaRecorder.start();
+        else mediaRecorder.start(TIMESLICE_MS);
     }
 
     function finalizeCurrentSegment() {
@@ -204,10 +210,12 @@ export function useRecCapture(options = {}) {
             };
 
             recorder.onstop = () => finish();
-            try {
-                recorder.requestData();
-            } catch {
-                // ignore
+            if (!apple) {
+                try {
+                    recorder.requestData();
+                } catch {
+                    // ignore
+                }
             }
             try {
                 recorder.stop();
@@ -242,6 +250,8 @@ export function useRecCapture(options = {}) {
 
     function startSegmentTimer() {
         stopSegmentTimer();
+        // iOS: never stop/restart MediaRecorder on a timer — freezes Safari.
+        if (apple) return;
         segmentTimer = setInterval(() => {
             rotateSegment().catch(() => {});
         }, segmentMs);
@@ -380,6 +390,9 @@ export function useRecCapture(options = {}) {
 
     function hasBuffer() {
         const minMs = minClipSeconds * 1000;
+        if (recordingStartedAt && Date.now() - recordingStartedAt >= minMs) {
+            return true;
+        }
         if (currentDurationMs() >= minMs) return true;
         return !!(previousSegment?.blob?.size && previousSegment.durationMs >= minMs);
     }

@@ -26,6 +26,8 @@ const CAPTURE_SCOPE_TAGS = {
     right: ['A2', 'B2'],
 };
 
+const BUILD_STAMP = 'rec-20260812-k';
+
 const selectedAngle = ref(null);
 const localError = ref(null);
 const isTogglingRec = ref(false);
@@ -65,6 +67,7 @@ const {
     attachPreview,
     hasBuffer,
     minClipSeconds,
+    bufferSeconds: captureBufferSeconds,
 } = capture;
 
 const {
@@ -86,6 +89,8 @@ const {
 } = recSession;
 
 const healthLabel = computed(() => health.label.value);
+const bufferSec = computed(() => Math.max(0, Math.round(availableMs.value / 1000)));
+const bufferTargetSec = computed(() => props.buffer_seconds || captureBufferSeconds || 30);
 const activeRecorderCount = computed(() => recorders.value.length);
 const isThisDeviceRecording = computed(() => isRecording.value);
 const takenAngles = computed(() =>
@@ -142,6 +147,10 @@ function unlockOrientation() {
 async function enterFullscreen() {
     isFullscreen.value = true;
     preferLandscapeHint.value = window.matchMedia('(orientation: portrait)').matches;
+    if (isAppleMobile()) {
+        attachPreview?.();
+        return;
+    }
     await lockLandscape();
 
     const element = stageEl.value?.$el || stageEl.value;
@@ -150,7 +159,7 @@ async function enterFullscreen() {
             || element?.webkitRequestFullscreen?.bind(element);
         if (request) await request();
     } catch {
-        // CSS fullscreen fallback (iPhone)
+        // CSS fullscreen fallback
     }
     attachPreview?.();
 }
@@ -214,7 +223,10 @@ async function toggleRecMode() {
             return;
         }
 
-        await enterFullscreen();
+        // iPhone: preview no card — fullscreen manual evita congelar com overlay CSS.
+        if (!isAppleMobile()) {
+            await enterFullscreen();
+        }
     } catch (error) {
         localError.value = error?.response?.data?.message
             || error?.message
@@ -261,6 +273,7 @@ onBeforeUnmount(() => {
 <template>
     <div class="py-4 pb-28">
         <div class="max-w-lg mx-auto px-4 space-y-5">
+            <p class="text-[10px] text-center text-gray-400 font-mono">{{ BUILD_STAMP }}</p>
             <div v-if="localError || captureError || saveError"
                 class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
                 {{ localError || captureError || saveError }}
@@ -276,12 +289,12 @@ onBeforeUnmount(() => {
             <RecCameraStage ref="stageEl" :recording="isRecording" :fullscreen="isFullscreen"
                 :camera-tag="selectedAngle" :landscape-hint="preferLandscapeHint" :can-save-left="canSaveScope('left')"
                 :can-save-all="canSaveScope('all')" :can-save-right="canSaveScope('right')" :saving="isSaving"
-                :available-label="healthLabel"
+                :available-label="healthLabel" :buffer-sec="bufferSec" :buffer-target-sec="bufferTargetSec"
                 @preview="setPreviewElement" @enter-fullscreen="enterFullscreen" @exit-fullscreen="exitFullscreen"
                 @save="handleSave" @stop="toggleRecMode" />
 
             <RecCameraHealthCard v-if="isRecording" :status="health.status.value" :label="healthLabel"
-                :color-class="health.colorClass.value" :available-ms="availableMs"
+                :color-class="health.colorClass.value" :available-ms="availableMs.value"
                 :pending-uploads="0" :has-audio="capture.hasAudio.value" />
 
             <RecSaveControls :recording="isThisDeviceRecording" :can-start="canStartRec" :toggling="isTogglingRec"

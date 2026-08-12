@@ -11,6 +11,8 @@ const props = defineProps({
     canSaveRight: Boolean,
     saving: Boolean,
     availableLabel: { type: String, default: '' },
+    bufferSec: { type: Number, default: 0 },
+    bufferTargetSec: { type: Number, default: 30 },
 });
 
 const emit = defineEmits(['preview', 'enter-fullscreen', 'exit-fullscreen', 'save', 'stop']);
@@ -60,9 +62,9 @@ watch(() => props.recording, async (recording) => {
             </span>
             <span
                 v-if="availableLabel"
-                class="bg-amber-500/90 text-black text-xs font-semibold rounded-full px-3 py-1 max-w-[11rem] truncate"
+                class="bg-amber-500/90 text-black text-xs font-semibold rounded-full px-3 py-1"
             >
-                {{ availableLabel }}
+                {{ bufferSec > 0 ? `${bufferSec}/${bufferTargetSec}s` : availableLabel }}
             </span>
         </div>
         <button
