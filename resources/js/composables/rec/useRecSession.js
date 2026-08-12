@@ -511,7 +511,9 @@ export function useRecSession(props, options = {}) {
 
     function ensureHeartbeatLoop() {
         if (!session.value || stopped || sessionExpired.value) return;
-        const intervalMs = Math.max(5, Number(config.heartbeat_seconds) || 10) * 1000;
+        // iOS needs denser keep-alive while we delay MediaRecorder startup.
+        const base = Math.max(5, Number(config.heartbeat_seconds) || 10);
+        const intervalMs = (isAppleMobile() ? Math.min(base, 5) : base) * 1000;
         heartbeatScheduler.start(intervalMs);
         heartbeatTimer = true;
     }

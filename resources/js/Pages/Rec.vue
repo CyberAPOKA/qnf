@@ -221,13 +221,26 @@ async function toggleRecMode() {
             await enterFullscreen();
         }
 
-        // 2) Start MediaRecorder AFTER session+heartbeat are alive.
-        // On iOS this uses a canvas stream (not the live camera track).
-        await new Promise((resolve) => setTimeout(resolve, isAppleMobile() ? 400 : 50));
+        // 2) On iPhone: wait until the buffer clock proves JS is alive (must pass 1s).
+        // If it still freezes at 1/30 here, the bug is NOT MediaRecorder.
+        if (isAppleMobile()) {
+            const deadline = Date.now() + 12_000;
+            while (Date.now() < deadline && (availableMs.value || 0) < 5_000) {
+                await new Promise((resolve) => setTimeout(resolve, 250));
+            }
+            if ((availableMs.value || 0) < 3_000) {
+                localError.value = 'Buffer travou antes da gravação (JS/Safari). Build rec-20260812-e — reporte se o contador não passou de 1s.';
+                return;
+            }
+        } else {
+            await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+
+        // 3) Start MediaRecorder only after buffer is moving.
         const encoding = await startEncoding();
         if (!encoding) {
             localError.value = captureError.value
-                || 'Câmera e sessão ok, mas a gravação falhou. O keep-alive continua ativo — tente parar e iniciar de novo.';
+                || 'Câmera e sessão ok, mas a gravação falhou. Keep-alive segue ativo.';
         }
     } catch (error) {
         localError.value = error?.response?.data?.message
@@ -274,6 +287,7 @@ onBeforeUnmount(() => {
 <template>
     <div class="py-4 pb-28">
         <div class="max-w-lg mx-auto px-4 space-y-5">
+            <div class="text-[10px] text-center text-gray-400">rec-20260812-e</div>
             <div v-if="localError || captureError || saveError"
                 class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
                 {{ localError || captureError || saveError }}

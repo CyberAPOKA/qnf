@@ -66,6 +66,7 @@ export function useRecCapture(options = {}) {
     let previousSegment = null;
     let segmentTimer = null;
     let availableTimer = null;
+    let freezeWatchdog = null;
     let canvasPump = null;
     let recordCanvas = null;
     let shouldKeepRecording = false;
@@ -344,6 +345,9 @@ export function useRecCapture(options = {}) {
 
     function startSegmentTimer() {
         stopSegmentTimer();
+        // iOS: never rotate on a timer — stop/start MediaRecorder is what freezes Safari.
+        // Snapshot on SAVE finalizes the single continuous recording.
+        if (apple) return;
         segmentTimer = setInterval(() => {
             rotateSegment().catch(() => {});
         }, segmentMs);
@@ -352,6 +356,46 @@ export function useRecCapture(options = {}) {
     function stopSegmentTimer() {
         clearInterval(segmentTimer);
         segmentTimer = null;
+    }
+
+    function startFreezeWatchdog() {
+        stopFreezeWatchdog();
+        let lastMs = availableMs.value;
+        let stalled = 0;
+        freezeWatchdog = setInterval(() => {
+            if (!encodingStarted) return;
+            const nowMs = tickAvailableMs();
+            if (nowMs <= lastMs + 100) {
+                stalled += 1;
+            } else {
+                stalled = 0;
+                lastMs = nowMs;
+            }
+            // ~2.5s without buffer progress after encode → kill MediaRecorder, keep preview.
+            if (stalled >= 5) {
+                stopFreezeWatchdog();
+                try {
+                    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                        mediaRecorder.ondataavailable = null;
+                        mediaRecorder.onerror = null;
+                        mediaRecorder.onstop = null;
+                        mediaRecorder.stop();
+                    }
+                } catch {
+                    // ignore
+                }
+                mediaRecorder = null;
+                encodingStarted = false;
+                encodingReady.value = false;
+                releaseRecordStream();
+                error.value = 'Gravação travou neste iPhone. Preview e keep-alive seguem ativos — pare e tente de novo.';
+            }
+        }, 500);
+    }
+
+    function stopFreezeWatchdog() {
+        clearInterval(freezeWatchdog);
+        freezeWatchdog = null;
     }
 
     /** Preview + buffer clock only. Does NOT start MediaRecorder. */
@@ -420,6 +464,7 @@ export function useRecCapture(options = {}) {
             encodingStarted = true;
             encodingReady.value = true;
             tickAvailableMs();
+            if (apple) startFreezeWatchdog();
             return true;
         } catch (err) {
             encodingReady.value = false;
@@ -525,6 +570,7 @@ export function useRecCapture(options = {}) {
         encodingReady.value = false;
         stopSegmentTimer();
         stopAvailableTimer();
+        stopFreezeWatchdog();
         operationChain = Promise.resolve();
 
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
