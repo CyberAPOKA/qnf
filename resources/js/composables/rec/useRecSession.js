@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import axios from 'axios';
 import { useRecConfig } from './recConfig';
 import { createRecHeartbeatScheduler } from './recHeartbeatScheduler';
@@ -734,6 +734,15 @@ export function useRecSession(props, options = {}) {
         subscribe();
         // Do not revive stale sessions from storage — iOS was crashing mid-REC.
     });
+
+    watch(
+        () => capture?.encodingReady?.value,
+        (ready) => {
+            if (ready && isAppleMobile() && session.value && !stopped) {
+                startPolling();
+            }
+        },
+    );
 
     onBeforeUnmount(() => {
         stopped = true;
