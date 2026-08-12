@@ -1,7 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { Link } from '@inertiajs/vue3';
-import AppLayout from '@/Layouts/AppLayout.vue';
 import RecActiveCameras from '@/Components/Rec/RecActiveCameras.vue';
 import RecCameraHealthCard from '@/Components/Rec/RecCameraHealthCard.vue';
 import RecCameraPositionSelector from '@/Components/Rec/RecCameraPositionSelector.vue';
@@ -53,6 +52,7 @@ const {
     error: captureError,
     previewEl,
     availableMs,
+    availableSec,
     start: startCapture,
     stop: stopCapture,
     attachPreview,
@@ -79,7 +79,7 @@ const {
 } = recSession;
 
 const healthLabel = computed(() => health.label.value);
-const bufferSec = computed(() => Math.max(0, Math.floor(availableMs.value / 1000)));
+const bufferSec = computed(() => Math.max(0, Number(availableSec.value) || Math.floor((availableMs.value || 0) / 1000)));
 const bufferTargetSec = computed(() => props.buffer_seconds || captureBufferSeconds || 30);
 const activeRecorderCount = computed(() => recorders.value.length);
 const isThisDeviceRecording = computed(() => isRecording.value);
@@ -207,6 +207,11 @@ async function toggleRecMode() {
             return;
         }
 
+        // Give Safari a breath before the session HTTP call.
+        if (isAppleMobile()) {
+            await new Promise((resolve) => setTimeout(resolve, 300));
+        }
+
         const registered = await registerRecorder(selectedAngle.value);
         if (!registered) {
             stopCapture();
@@ -260,7 +265,6 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <AppLayout :title="`REC · Rodada ${game.round || ''}`">
         <div class="py-4 pb-28">
             <div class="max-w-lg mx-auto px-4 space-y-5">
                 <div
@@ -307,9 +311,9 @@ onBeforeUnmount(() => {
                 <RecCameraHealthCard
                     v-if="isRecording"
                     :status="health.status.value"
-                    :label="healthLabel"
+                    :label="`${bufferSec}/${bufferTargetSec}s`"
                     :color-class="health.colorClass.value"
-                    :available-ms="availableMs"
+                    :available-ms="bufferSec * 1000"
                     :pending-uploads="0"
                     :has-audio="hasAudio"
                 />
@@ -339,5 +343,4 @@ onBeforeUnmount(() => {
                 </Link>
             </div>
         </div>
-    </AppLayout>
 </template>

@@ -34,12 +34,14 @@ export function useRecHealth(signals = {}) {
         const targetSec = Math.max(1, Math.round(targetBufferMs / 1000));
 
         if (status.value === 'warming_up') {
-            return `Gravando buffer ${availableSec}/${targetSec}s`;
+            const sec = Number.isFinite(availableSec) ? availableSec : 0;
+            const target = Number.isFinite(targetSec) ? targetSec : 30;
+            return `Buffer ${sec}/${target}s`;
         }
 
         return ({
             idle: 'Parado',
-            healthy: `Pronto · ${availableSec}s`,
+            healthy: `Pronto · ${Number.isFinite(availableSec) ? availableSec : 0}s`,
             degraded: 'Conexão instável',
             offline: 'Offline',
             critical: 'Atenção necessária',

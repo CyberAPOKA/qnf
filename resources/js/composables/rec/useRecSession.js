@@ -462,7 +462,10 @@ export function useRecSession(props, options = {}) {
 
     function startHeartbeat() {
         stopHeartbeat();
-        const seconds = Math.max(5, Number(config.heartbeat_seconds) || 10);
+        // iPhone: keep-alive more sparse so MediaRecorder isn't starved.
+        const seconds = apple
+            ? Math.max(8, Number(config.heartbeat_seconds) || 10)
+            : Math.max(5, Number(config.heartbeat_seconds) || 10);
         void sendHeartbeat();
         heartbeatTimer = setInterval(() => {
             if (!session.value || stopped || sessionExpired.value) {
@@ -527,7 +530,9 @@ export function useRecSession(props, options = {}) {
             if (session.value && !stopped && !sessionExpired.value) {
                 pollTimer = setTimeout(
                     pollPendingSaves,
-                    (config.pending_save_poll_seconds || 2) * 1000,
+                    apple
+                        ? Math.max(4, config.pending_save_poll_seconds || 2) * 1000
+                        : (config.pending_save_poll_seconds || 2) * 1000,
                 );
             }
         }

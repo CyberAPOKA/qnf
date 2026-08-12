@@ -19,8 +19,10 @@ function isAppleMobile() {
 }
 
 /**
- * In-memory circular buffer. Never touches IndexedDB.
- * availableMs is wall-clock from recording start (always advances while recording).
+ * iPhone-safe capture:
+ * - wall-clock buffer counter updated at most 1x/segundo (never rAF)
+ * - no IndexedDB, no wake lock on iOS
+ * - MediaRecorder continuous on iOS (stop only on SAVE/stop)
  */
 export function useRecCapture(options = {}) {
     const config = useRecConfig(options.config);
@@ -38,8 +40,9 @@ export function useRecCapture(options = {}) {
     );
     const error = ref(null);
     const previewEl = ref(null);
-    const hasAudio = ref(true);
+    const hasAudio = ref(!apple);
     const availableMs = ref(0);
+    const availableSec = ref(0);
     const bytesBuffered = ref(0);
 
     let mediaStream = null;
@@ -47,17 +50,16 @@ export function useRecCapture(options = {}) {
     let mimeType = '';
     let recordingStartedAt = 0;
     let ticker = null;
-    let wakeLock = null;
     let sequence = 0;
     let shouldKeepRecording = false;
     let usesTimeslice = !apple;
+    let previewAttached = false;
 
     /** @type {{ blob: Blob, at: number }[]} */
     const parts = [];
 
     function pickMimeType() {
-        if (typeof MediaRecorder === 'undefined') return '';
-        if (apple) return '';
+        if (typeof MediaRecorder === 'undefined' || apple) return '';
         const candidates = [
             'video/webm;codecs=vp8,opus',
             'video/webm;codecs=vp8',
@@ -68,90 +70,64 @@ export function useRecCapture(options = {}) {
     }
 
     function blobType() {
-        return (mimeType || parts[0]?.blob?.type || 'video/webm').split(';')[0];
-    }
-
-    function trimParts() {
-        if (!recordingStartedAt) return;
-        const cutoff = Date.now() - bufferMs - 2000;
-        while (parts.length > 2 && parts[0].at < cutoff) {
-            parts.shift();
-        }
-        bytesBuffered.value = parts.reduce((sum, part) => sum + (part.blob?.size || 0), 0);
+        return (mimeType || parts[0]?.blob?.type || (apple ? 'video/mp4' : 'video/webm')).split(';')[0];
     }
 
     function tickAvailable() {
         if (!recordingStartedAt || !shouldKeepRecording) {
             availableMs.value = 0;
+            availableSec.value = 0;
             return 0;
         }
         const ms = Math.min(bufferMs, Math.max(0, Date.now() - recordingStartedAt));
-        availableMs.value = ms;
+        const sec = Math.floor(ms / 1000);
+        // Only touch Vue when the displayed second changes — critical on iPhone.
+        if (sec !== availableSec.value) {
+            availableSec.value = sec;
+            availableMs.value = ms;
+        } else if (ms !== availableMs.value && ms >= bufferMs) {
+            availableMs.value = ms;
+        }
         return ms;
     }
 
     function startTicker() {
         stopTicker();
+        availableSec.value = 0;
+        availableMs.value = 0;
         tickAvailable();
-        const interval = setInterval(tickAvailable, 250);
-        let raf = 0;
-        const pulse = () => {
-            tickAvailable();
-            if (shouldKeepRecording) {
-                raf = requestAnimationFrame(pulse);
-                ticker = { raf, interval };
-            }
-        };
-        raf = requestAnimationFrame(pulse);
-        ticker = { raf, interval };
+        ticker = setInterval(tickAvailable, 1000);
     }
 
     function stopTicker() {
-        if (ticker?.raf) cancelAnimationFrame(ticker.raf);
-        if (ticker?.interval) clearInterval(ticker.interval);
+        if (ticker) clearInterval(ticker);
         ticker = null;
     }
 
     function attachPreview(stream = mediaStream) {
-        if (!previewEl.value || !stream) return false;
-        previewEl.value.srcObject = stream;
-        previewEl.value.muted = true;
-        previewEl.value.playsInline = true;
-        previewEl.value.setAttribute('playsinline', 'true');
-        previewEl.value.setAttribute('webkit-playsinline', 'true');
-        previewEl.value.play().catch(() => {});
+        const el = previewEl.value;
+        if (!el || !stream) return false;
+        if (el.srcObject !== stream) {
+            el.srcObject = stream;
+        }
+        el.muted = true;
+        el.playsInline = true;
+        el.setAttribute('playsinline', 'true');
+        el.setAttribute('webkit-playsinline', 'true');
+        if (!previewAttached) {
+            previewAttached = true;
+            el.play().catch(() => {});
+        }
         return true;
     }
 
-    async function requestWakeLock() {
-        try {
-            wakeLock = await navigator.wakeLock?.request?.('screen');
-            wakeLock?.addEventListener?.('release', () => {
-                wakeLock = null;
-            });
-        } catch {
-            wakeLock = null;
-        }
-    }
-
-    function releaseWakeLock() {
-        try {
-            wakeLock?.release?.();
-        } catch {
-            // ignore
-        }
-        wakeLock = null;
-    }
-
     async function getMediaStream() {
-        const video = {
-            facingMode: { ideal: 'environment' },
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
-        };
-
+        // Keep constraints minimal on iOS — heavy constraints freeze Safari.
         if (apple) {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { facingMode: 'environment' },
+            });
             hasAudio.value = false;
             return stream;
         }
@@ -159,12 +135,20 @@ export function useRecCapture(options = {}) {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: true,
-                video: { ...video, frameRate: { ideal: 24, max: 30 } },
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                    frameRate: { ideal: 24, max: 30 },
+                },
             });
             hasAudio.value = true;
             return stream;
         } catch {
-            const stream = await navigator.mediaDevices.getUserMedia({ audio: false, video });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                audio: false,
+                video: { facingMode: { ideal: 'environment' } },
+            });
             hasAudio.value = false;
             return stream;
         }
@@ -173,25 +157,37 @@ export function useRecCapture(options = {}) {
     function pushChunk(blob) {
         if (!blob?.size) return;
         parts.push({ blob, at: Date.now() });
-        trimParts();
+        const cutoff = Date.now() - bufferMs - 2000;
+        while (parts.length > 2 && parts[0].at < cutoff) {
+            parts.shift();
+        }
+        // Avoid reactive writes on every chunk on iOS (there usually are none until stop).
+        if (!apple) {
+            bytesBuffered.value = parts.reduce((sum, part) => sum + (part.blob?.size || 0), 0);
+        }
     }
 
     function startRecorder() {
         if (!mediaStream || !shouldKeepRecording) return;
 
-        const opts = {};
-        if (mimeType) opts.mimeType = mimeType;
-        if (!apple) {
-            opts.videoBitsPerSecond = 1_200_000;
-            if (hasAudio.value) opts.audioBitsPerSecond = 96_000;
-        }
-
         try {
-            mediaRecorder = Object.keys(opts).length
-                ? new MediaRecorder(mediaStream, opts)
-                : new MediaRecorder(mediaStream);
-        } catch {
-            mediaRecorder = new MediaRecorder(mediaStream);
+            if (apple) {
+                mediaRecorder = new MediaRecorder(mediaStream);
+            } else {
+                const opts = {
+                    videoBitsPerSecond: 1_200_000,
+                };
+                if (mimeType) opts.mimeType = mimeType;
+                if (hasAudio.value) opts.audioBitsPerSecond = 96_000;
+                try {
+                    mediaRecorder = new MediaRecorder(mediaStream, opts);
+                } catch {
+                    mediaRecorder = new MediaRecorder(mediaStream);
+                }
+            }
+        } catch (err) {
+            error.value = 'MediaRecorder indisponível neste aparelho.';
+            throw err;
         }
 
         mediaRecorder.ondataavailable = (event) => {
@@ -201,16 +197,14 @@ export function useRecCapture(options = {}) {
             error.value = 'Erro na gravação.';
         };
 
-        if (usesTimeslice) {
-            mediaRecorder.start(TIMESLICE_MS);
-        } else {
-            mediaRecorder.start();
-        }
+        if (usesTimeslice) mediaRecorder.start(TIMESLICE_MS);
+        else mediaRecorder.start();
     }
 
     async function start() {
         error.value = null;
         encodingReady.value = false;
+        previewAttached = false;
 
         if (!isSupported.value) {
             error.value = 'Gravação não suportada neste navegador.';
@@ -226,37 +220,16 @@ export function useRecCapture(options = {}) {
             sequence = 0;
             shouldKeepRecording = true;
             recordingStartedAt = Date.now();
-            availableMs.value = 0;
 
+            // Show UI first so <video> exists, then attach stream once.
+            isRecording.value = true;
+            await nextTick();
             attachPreview(mediaStream);
             startRecorder();
             startTicker();
-            void requestWakeLock();
-
-            isRecording.value = true;
             encodingReady.value = true;
             tickAvailable();
 
-            // If timeslice yields nothing on this device, fall back to continuous mode.
-            if (usesTimeslice) {
-                void (async () => {
-                    await wait(1800);
-                    if (!shouldKeepRecording) return;
-                    if (parts.length === 0 && mediaRecorder?.state === 'recording') {
-                        usesTimeslice = false;
-                        try {
-                            mediaRecorder.ondataavailable = null;
-                            mediaRecorder.stop();
-                        } catch {
-                            // ignore
-                        }
-                        startRecorder();
-                    }
-                })();
-            }
-
-            await nextTick();
-            attachPreview(mediaStream);
             return true;
         } catch (err) {
             error.value = err?.name === 'NotAllowedError'
@@ -269,17 +242,17 @@ export function useRecCapture(options = {}) {
 
     async function flushRecorder() {
         if (!mediaRecorder || mediaRecorder.state !== 'recording') return;
-        if (typeof mediaRecorder.requestData === 'function' && usesTimeslice) {
+
+        if (usesTimeslice && typeof mediaRecorder.requestData === 'function') {
             try {
                 mediaRecorder.requestData();
-                await wait(120);
+                await wait(150);
             } catch {
                 // ignore
             }
             return;
         }
 
-        // Continuous mode (typical iOS): must stop to obtain the blob, then restart.
         await new Promise((resolve) => {
             const recorder = mediaRecorder;
             let settled = false;
@@ -288,7 +261,7 @@ export function useRecCapture(options = {}) {
                 settled = true;
                 resolve();
             };
-            const hang = setTimeout(finish, 2500);
+            const hang = setTimeout(finish, 3000);
             recorder.onstop = () => {
                 clearTimeout(hang);
                 finish();
@@ -302,16 +275,17 @@ export function useRecCapture(options = {}) {
         });
 
         mediaRecorder = null;
-        if (shouldKeepRecording) {
-            startRecorder();
-        }
+        if (shouldKeepRecording) startRecorder();
     }
 
     async function snapshot() {
         if (!shouldKeepRecording && !parts.length) return null;
 
         await flushRecorder();
-        trimParts();
+
+        if (apple) {
+            bytesBuffered.value = parts.reduce((sum, part) => sum + (part.blob?.size || 0), 0);
+        }
 
         if (!parts.length) return null;
 
@@ -319,17 +293,24 @@ export function useRecCapture(options = {}) {
         if (!blob.size) return null;
 
         const endedAt = Date.now();
-        const durationMs = Math.min(bufferMs, Math.max(1000, endedAt - (parts[0]?.at || recordingStartedAt || endedAt)));
-        const startedAt = endedAt - durationMs;
+        const durationMs = Math.min(
+            bufferMs,
+            Math.max(1000, endedAt - (parts[0]?.at || recordingStartedAt || endedAt)),
+        );
 
         return {
-            parts: [{ blob, startedAt, endedAt, durationMs }],
+            parts: [{
+                blob,
+                startedAt: endedAt - durationMs,
+                endedAt,
+                durationMs,
+            }],
             durationSeconds: Math.round(durationMs / 1000),
         };
     }
 
     function hasBuffer() {
-        return availableMs.value >= minClipSeconds * 1000 || bytesBuffered.value > 0;
+        return availableSec.value >= minClipSeconds || parts.length > 0;
     }
 
     function nextSequence() {
@@ -341,7 +322,6 @@ export function useRecCapture(options = {}) {
         shouldKeepRecording = false;
         encodingReady.value = false;
         stopTicker();
-        releaseWakeLock();
 
         if (mediaRecorder && mediaRecorder.state !== 'inactive') {
             mediaRecorder.ondataavailable = null;
@@ -359,6 +339,8 @@ export function useRecCapture(options = {}) {
         bytesBuffered.value = 0;
         recordingStartedAt = 0;
         availableMs.value = 0;
+        availableSec.value = 0;
+        previewAttached = false;
         mediaStream?.getTracks?.().forEach((track) => track.stop());
         mediaStream = null;
         if (previewEl.value) previewEl.value.srcObject = null;
@@ -367,7 +349,8 @@ export function useRecCapture(options = {}) {
     }
 
     function getAvailableMsSync() {
-        return tickAvailable();
+        if (!recordingStartedAt || !shouldKeepRecording) return 0;
+        return Math.min(bufferMs, Math.max(0, Date.now() - recordingStartedAt));
     }
 
     async function getAvailableMs() {
@@ -393,6 +376,7 @@ export function useRecCapture(options = {}) {
         previewEl,
         hasAudio,
         availableMs,
+        availableSec,
         bytesBuffered,
         attachPreview,
         getAvailableMs,

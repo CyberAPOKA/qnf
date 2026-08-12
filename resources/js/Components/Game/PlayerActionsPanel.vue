@@ -85,7 +85,7 @@ defineEmits(['join', 'join-waitlist', 'quit']);
             Ir para Draft
         </Link>
 
-        <Link
+        <!-- <Link
             v-if="game?.status === 'drafted' && isCurrentRound"
             :href="route('games.rec', game.id)"
             class="block w-full overflow-hidden rounded-md shadow transition-opacity hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
@@ -98,6 +98,6 @@ defineEmits(['join', 'join-waitlist', 'quit']);
             aria-label="Modo REC"
         >
             <span class="sr-only">Modo REC</span>
-        </Link>
+        </Link> -->
     </div>
 </template>
