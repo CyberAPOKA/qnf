@@ -50,7 +50,7 @@ export function useRecSession(props, options = {}) {
     let stopped = false;
     let lastSaveAt = 0;
     let activeSaveRequests = 0;
-    let saveQueue = Promise.resolve();
+    let networkStarted = false;
 
     function queueSaveWork(task) {
         const next = saveQueue.then(task, task);
@@ -368,8 +368,9 @@ export function useRecSession(props, options = {}) {
                 },
             ];
 
-            scheduleHeartbeatStart();
-            startPolling();
+            if (!apple) {
+                beginNetwork();
+            }
 
             try {
                 sessionStorage.setItem(`qnf-rec-active:${gameId}`, created.cameraTag || cameraTag);
@@ -389,6 +390,7 @@ export function useRecSession(props, options = {}) {
 
     async function unregister() {
         stopped = true;
+        networkStarted = false;
         stopHeartbeat();
         stopPolling();
         const current = session.value;
@@ -468,12 +470,20 @@ export function useRecSession(props, options = {}) {
         }
     }
 
+    function beginNetwork() {
+        if (networkStarted || stopped || !session.value) return;
+        networkStarted = true;
+        recDiag('REC_NETWORK_START', { apple });
+        scheduleHeartbeatStart();
+        startPolling();
+    }
+
     function scheduleHeartbeatStart() {
         stopHeartbeat();
         const seconds = apple
             ? Math.max(12, Number(config.heartbeat_seconds) || 10)
             : Math.max(8, Number(config.heartbeat_seconds) || 10);
-        const deferMs = apple ? 4000 : 1500;
+        const deferMs = apple ? 8000 : 1500;
 
         heartbeatDeferredTimer = setTimeout(() => {
             heartbeatDeferredTimer = null;
@@ -720,6 +730,7 @@ export function useRecSession(props, options = {}) {
         recorderId: computed(() => session.value?.uuid || null),
         registerRecorder: register,
         unregisterRecorder: unregister,
+        beginNetwork,
         receiveSave,
     };
 }

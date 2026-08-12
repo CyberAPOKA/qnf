@@ -12,32 +12,25 @@ function installRecSwGuard() {
     navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (!isRecPage()) return;
         recDiag('REC_SW_CONTROLLER_CHANGE', {});
-        // Never reload REC while recording — Safari would kill the camera session.
     });
-}
 
-async function quietServiceWorkersOnRec() {
-    if (!isRecPage() || !('serviceWorker' in navigator)) return;
-
-    installRecSwGuard();
-
-    try {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(registrations.map((registration) => registration.unregister()));
-        recDiag('REC_SW_UNREGISTERED', { count: registrations.length });
-    } catch {
-        // Best-effort only; do not wipe caches (Safari white-screen risk).
+    // Block a waiting worker from taking control during REC (would reload the page).
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then((registration) => {
+            if (!registration.waiting) return;
+            registration.waiting.postMessage({ type: 'REC_SKIP_WAITING' });
+        }).catch(() => {});
     }
 }
 
 if (isRecPage()) {
     installRecSwGuard();
-    void quietServiceWorkersOnRec();
+    // Do NOT unregister SW here — iOS Safari/PWA can reload or white-screen mid-navigation.
 } else {
     registerSW({
         immediate: true,
         onNeedRefresh() {
-            // Never auto-reload; user stays on current page until they choose to refresh.
+            // Never auto-reload.
         },
         onRegisteredSW(_swUrl, registration) {
             if (!registration) return;

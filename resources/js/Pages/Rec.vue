@@ -72,6 +72,7 @@ const {
     recorderId,
     registerRecorder,
     unregisterRecorder,
+    beginNetwork,
     triggerSave,
     isScopeCoolingDown,
     health,
@@ -187,14 +188,28 @@ async function toggleRecMode() {
             return;
         }
 
+        if (isAppleMobile()) {
+            const registered = await registerRecorder(selectedAngle.value);
+            if (!registered) {
+                localError.value = saveError.value || 'Não foi possível registrar esta câmera.';
+                return;
+            }
+
+            const started = await startCapture();
+            if (!started) {
+                localError.value = captureError.value || 'Não foi possível acessar a câmera.';
+                await unregisterRecorder();
+                return;
+            }
+
+            setTimeout(() => beginNetwork(), 12000);
+            return;
+        }
+
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
             return;
-        }
-
-        if (isAppleMobile()) {
-            await new Promise((resolve) => setTimeout(resolve, 500));
         }
 
         const registered = await registerRecorder(selectedAngle.value);
@@ -204,9 +219,7 @@ async function toggleRecMode() {
             return;
         }
 
-        if (!isAppleMobile()) {
-            await enterFullscreen();
-        }
+        await enterFullscreen();
     } catch (error) {
         localError.value = error?.response?.data?.message
             || error?.message
@@ -326,7 +339,7 @@ onBeforeUnmount(() => {
             />
 
             <RecActiveCameras :cameras="recorders" :own-id="recorderId" />
-            <RecSaveList :saves="recentSaves" :pending="pendingSaves" />
+            <RecSaveList v-if="!isAppleMobile() || !isThisDeviceRecording" :saves="recentSaves" :pending="pendingSaves" />
 
             <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
                 Voltar ao Dashboard

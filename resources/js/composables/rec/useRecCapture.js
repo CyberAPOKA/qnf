@@ -39,11 +39,15 @@ export function useRecCapture(options = {}) {
     const config = useRecConfig(options.config);
     const apple = isAppleMobile();
     const bufferSeconds = Math.max(10, Number(config.buffer_seconds) || 30);
-    const segmentSeconds = Math.max(4, Math.min(6, Number(config.segment_seconds) || 5));
+    const segmentSeconds = apple
+        ? 8
+        : Math.max(4, Math.min(6, Number(config.segment_seconds) || 5));
     const bufferMs = bufferSeconds * 1000;
     const segmentMs = segmentSeconds * 1000;
     const maxSegments = Math.ceil(bufferMs / segmentMs) + 1;
-    const minClipSeconds = Math.max(3, Math.min(segmentSeconds * 2, 8));
+    const minClipSeconds = Math.max(3, Math.min(segmentSeconds, 8));
+    const previewWarmupMs = apple ? 2500 : 0;
+    const firstRotationMs = apple ? segmentMs + 6000 : segmentMs;
 
     const isRecording = ref(false);
     const encodingReady = ref(false);
@@ -107,11 +111,16 @@ export function useRecCapture(options = {}) {
         availableSec.value = 0;
         availableMs.value = 0;
         tickClock();
-        clockTimer = setInterval(tickClock, 1000);
+        const tick = () => {
+            if (!shouldKeepRecording) return;
+            tickClock();
+            clockTimer = setTimeout(tick, 1000);
+        };
+        clockTimer = setTimeout(tick, 1000);
     }
 
     function stopClock() {
-        if (clockTimer) clearInterval(clockTimer);
+        if (clockTimer) clearTimeout(clockTimer);
         clockTimer = null;
     }
 
@@ -131,18 +140,19 @@ export function useRecCapture(options = {}) {
         segmentCount.value = segments.length;
     }
 
-    function scheduleRotation() {
+    function scheduleRotation(first = false) {
         clearRotationTimer();
         if (!shouldKeepRecording) return;
+        const delay = first ? firstRotationMs : segmentMs;
         rotationTimer = setTimeout(() => {
             rotateSegment()
                 .catch((err) => {
                     recDiag('REC_SEGMENT_ROTATION_FAILED', { message: err?.message });
                 })
                 .finally(() => {
-                    if (shouldKeepRecording) scheduleRotation();
+                    if (shouldKeepRecording) scheduleRotation(false);
                 });
-        }, segmentMs);
+        }, delay);
     }
 
     function attachPreview(stream = mediaStream) {
@@ -364,7 +374,6 @@ export function useRecCapture(options = {}) {
             uploadSequence = 0;
             segmentCount.value = 0;
             shouldKeepRecording = true;
-            recordingStartedAt = Date.now();
 
             bindTrackListeners(mediaStream);
 
@@ -372,11 +381,21 @@ export function useRecCapture(options = {}) {
             await nextTick();
             attachPreview(mediaStream);
 
-            startNewRecorder();
+            if (previewWarmupMs > 0) {
+                recDiag('REC_PREVIEW_WARMUP', { ms: previewWarmupMs });
+                await wait(previewWarmupMs);
+                if (myGen !== generation || !shouldKeepRecording) {
+                    stop();
+                    return false;
+                }
+            }
+
+            recordingStartedAt = Date.now();
             startClock();
-            scheduleRotation();
-            encodingReady.value = true;
             tickClock();
+            startNewRecorder();
+            scheduleRotation(true);
+            encodingReady.value = true;
 
             recDiag('REC_CAPTURE_STARTED', {
                 bufferSeconds,
@@ -429,7 +448,7 @@ export function useRecCapture(options = {}) {
 
             if (shouldKeepRecording) {
                 startNewRecorder();
-                scheduleRotation();
+                scheduleRotation(false);
             }
 
             if (!parts.length) return null;
