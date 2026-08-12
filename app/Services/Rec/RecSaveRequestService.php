@@ -243,6 +243,28 @@ class RecSaveRequestService
             $saveRequest->increment('acknowledged_count');
         }
 
+        // Re-pin after the camera uploads the snapshot (V1-style buffer uploads on SAVE).
+        $captureFrom = $target->expected_from ?? $saveRequest->capture_from;
+        $captureUntil = $target->expected_until ?? $saveRequest->capture_until;
+        if ($captureFrom && $captureUntil) {
+            $pinned = $this->pinSegmentsForTarget($target, $session, $captureFrom, $captureUntil);
+            if ($pinned > 0) {
+                $ready = $captureUntil->lessThanOrEqualTo(now());
+                $target->update([
+                    'segments_expected' => max((int) $target->segments_expected, $pinned),
+                    'segments_received' => $pinned,
+                    'segments_missing' => 0,
+                    'status' => $ready ? RecSaveTargetStatus::RawReady : RecSaveTargetStatus::Collecting,
+                    'raw_ready_at' => $ready ? ($target->raw_ready_at ?? now()) : $target->raw_ready_at,
+                ]);
+
+                if ($ready) {
+                    FinalizeRecSaveTarget::dispatch($target->id)
+                        ->onQueue(config('rec.processing_queue'));
+                }
+            }
+        }
+
         return $target->fresh();
     }
 

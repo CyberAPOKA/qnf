@@ -3,7 +3,6 @@ import axios from 'axios';
 import { useRecConfig } from './recConfig';
 import { createRecHeartbeatScheduler } from './recHeartbeatScheduler';
 import { useRecHealth } from './useRecHealth';
-import { useRecSegmentStore } from './useRecSegmentStore';
 
 function makeUuid() {
     return globalThis.crypto?.randomUUID?.()
@@ -26,7 +25,14 @@ function csrfToken() {
 
 export function useRecSession(props, options = {}) {
     const config = useRecConfig(props.rec_config);
-    const store = options.store || useRecSegmentStore();
+    // Avoid IndexedDB on the hot path — it hung/killed iOS Safari during REC V2.
+    const store = options.store || {
+        putSession: async () => null,
+        getSession: async () => null,
+        clearSession: async () => null,
+        wasProcessed: async () => false,
+        markProcessed: async () => null,
+    };
     const capture = options.capture;
     const uploadQueue = options.uploadQueue;
     const session = ref(null);
@@ -202,8 +208,44 @@ export function useRecSession(props, options = {}) {
         return save;
     }
 
+    const processedSaves = new Set();
+
+    async function uploadSnapshotParts(parts) {
+        if (!session.value || !parts?.length) return [];
+
+        const uploaded = [];
+        for (const part of parts) {
+            if (!part?.blob?.size) continue;
+            const sequence = capture.nextSequence?.() || uploaded.length + 1;
+            const uuid = capture.makeUuid?.() || makeUuid();
+            const durationMs = Math.max(1, Math.min(180_000, Number(part.durationMs) || 1));
+            const idempotencyKey = `rec-snap:${session.value.uuid}:${uuid}`;
+            const form = new FormData();
+            form.append('uuid', uuid);
+            form.append('sequence', String(sequence));
+            form.append('idempotency_key', idempotencyKey);
+            form.append('client_started_at', new Date(part.startedAt).toISOString());
+            form.append('client_ended_at', new Date(part.endedAt).toISOString());
+            form.append('duration_ms', String(durationMs));
+            form.append('mime_type', part.blob.type || 'video/webm');
+            form.append('segment', part.blob, `${sequence}-${uuid}.webm`);
+
+            const url = resolveUrl('games.rec.sessions.segments', '/segments');
+            await axios.post(url, form, {
+                headers: {
+                    ...authHeaders(),
+                    'Idempotency-Key': idempotencyKey,
+                },
+                timeout: 120_000,
+            });
+            uploaded.push({ uuid, sequence, startedAt: part.startedAt, endedAt: part.endedAt });
+        }
+        return uploaded;
+    }
+
     async function acknowledgeSave(save) {
-        if (!session.value || !capture || await store.wasProcessed(`save:${save.uuid}`)) return;
+        if (!session.value || !capture) return;
+        if (processedSaves.has(save.uuid)) return;
 
         const from = save.capture_from || save.captureFrom
             || Date.parse(save.triggered_at || save.triggeredAt) - config.buffer_seconds * 1000;
@@ -213,18 +255,37 @@ export function useRecSession(props, options = {}) {
         if (Number.isFinite(untilMs) && untilMs > Date.now()) {
             await wait(untilMs - Date.now());
         }
-        const segments = await capture.listLocalSegmentsInWindow(from, until);
-        await uploadQueue?.prioritizeSave(save.uuid, segments);
+
+        pendingPatch(save.uuid, { status: 'uploading' });
+
+        let uploaded = [];
+        try {
+            const snap = await capture.snapshot?.();
+            if (!snap?.parts?.length) {
+                pendingPatch(save.uuid, {
+                    status: 'failed',
+                    error: `Buffer insuficiente. Aguarde cerca de ${capture.minClipSeconds || 25}s e tente de novo.`,
+                });
+                return;
+            }
+            uploaded = await uploadSnapshotParts(snap.parts);
+        } catch (error) {
+            pendingPatch(save.uuid, {
+                status: 'failed',
+                error: error?.response?.data?.message || 'Falha no upload do clip.',
+            });
+            throw error;
+        }
 
         const body = {
-            last_sequence: segments.at(-1)?.sequence || 0,
-            buffer_available_ms: capture.getAvailableMsSync?.() ?? await capture.getAvailableMs(),
-            local_segments: segments.map((item) => ({
+            last_sequence: uploaded.at(-1)?.sequence || 0,
+            buffer_available_ms: capture.getAvailableMsSync?.() ?? 0,
+            local_segments: uploaded.map((item) => ({
                 uuid: item.uuid,
                 sequence: item.sequence,
                 started_at_ms: item.startedAt,
                 ended_at_ms: item.endedAt,
-                checksum: item.checksum || null,
+                checksum: null,
             })),
             known_gaps: [],
             capture_state: capture.isRecording.value ? 'recording' : 'stopped',
@@ -235,10 +296,11 @@ export function useRecSession(props, options = {}) {
             `/save-requests/${encodeURIComponent(save.uuid)}/ack`,
             { saveRequest: save.uuid },
         ), body, { headers: authHeaders() });
-        await store.markProcessed(`save:${save.uuid}`, { saveRequestUuid: save.uuid });
+
+        processedSaves.add(save.uuid);
         pendingPatch(save.uuid, {
-            status: segments.length ? 'uploading' : 'waiting',
-            localSegments: segments.length,
+            status: uploaded.length ? 'done' : 'waiting',
+            localSegments: uploaded.length,
         });
     }
 
@@ -338,8 +400,7 @@ export function useRecSession(props, options = {}) {
 
             ensureHeartbeatLoop();
             startPolling();
-            setTimeout(() => uploadQueue?.processNow(), 1_500);
-            store.putSession(created).catch(() => {});
+            store.putSession?.(created)?.catch?.(() => {});
             try {
                 sessionStorage.setItem(`qnf-rec-active:${gameId}`, created.cameraTag || cameraTag);
             } catch {
@@ -383,7 +444,7 @@ export function useRecSession(props, options = {}) {
             } catch {
                 // ignore
             }
-            await store.clearSession();
+            await store.clearSession?.();
         }
     }
 
@@ -635,20 +696,7 @@ export function useRecSession(props, options = {}) {
 
     onMounted(async () => {
         subscribe();
-        // Memory-mode / iOS: do not revive a previous tab session after Safari killed the page.
-        if (isAppleMobile()) return;
-        try {
-            const stored = await store.getSession();
-            if (stored?.gameId === gameId && stored.uuid && stored.token) {
-                session.value = stored;
-                stopped = false;
-                startHeartbeat();
-                startPolling();
-                uploadQueue?.processNow();
-            }
-        } catch {
-            // IndexedDB restore is optional; a fresh REC MODE still works.
-        }
+        // Do not revive stale sessions from storage — iOS was crashing mid-REC.
     });
 
     onBeforeUnmount(() => {

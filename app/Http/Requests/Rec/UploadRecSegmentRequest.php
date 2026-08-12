@@ -22,7 +22,7 @@ class UploadRecSegmentRequest extends FormRequest
             'client_ended_at' => ['nullable', 'date'],
             'estimated_server_started_at' => ['nullable', 'date'],
             'estimated_server_ended_at' => ['nullable', 'date'],
-            'duration_ms' => ['nullable', 'integer', 'min:1', 'max:60000'],
+            'duration_ms' => ['nullable', 'integer', 'min:1', 'max:180000'],
             'mime_type' => ['nullable', 'string', 'max:128'],
             'container' => ['nullable', 'string', 'max:32'],
             'video_codec' => ['nullable', 'string', 'max:64'],

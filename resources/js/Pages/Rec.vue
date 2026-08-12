@@ -5,13 +5,10 @@ import RecActiveCameras from '@/Components/Rec/RecActiveCameras.vue';
 import RecCameraHealthCard from '@/Components/Rec/RecCameraHealthCard.vue';
 import RecCameraPositionSelector from '@/Components/Rec/RecCameraPositionSelector.vue';
 import RecCameraStage from '@/Components/Rec/RecCameraStage.vue';
-import RecPendingUploads from '@/Components/Rec/RecPendingUploads.vue';
 import RecSaveControls from '@/Components/Rec/RecSaveControls.vue';
 import RecSaveList from '@/Components/Rec/RecSaveList.vue';
 import { useRecCapture } from '@/composables/rec/useRecCapture';
-import { useRecSegmentStore } from '@/composables/rec/useRecSegmentStore';
 import { useRecSession } from '@/composables/rec/useRecSession';
-import { useRecUploadQueue } from '@/composables/rec/useRecUploadQueue';
 
 const props = defineProps({
     game: Object,
@@ -31,7 +28,6 @@ const CAPTURE_SCOPE_TAGS = {
 
 const selectedAngle = ref(null);
 const localError = ref(null);
-const reloadWarning = ref(null);
 const isTogglingRec = ref(false);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
@@ -42,27 +38,14 @@ function isAppleMobile() {
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
-const segmentStore = useRecSegmentStore({ memoryOnly: isAppleMobile() });
 let recSession = null;
-
-const uploadQueue = useRecUploadQueue({
-    config: props.rec_config,
-    store: segmentStore,
-    gameId: props.game.id,
-});
 
 const capture = useRecCapture({
     config: props.rec_config,
-    store: segmentStore,
-    sessionUuid: () => recSession?.session?.value?.uuid || null,
-    cameraTag: () => selectedAngle.value,
-    onSegment: (segment) => uploadQueue?.enqueueSegment(segment),
 });
 
 recSession = useRecSession(props, {
-    store: segmentStore,
     capture,
-    uploadQueue,
 });
 
 const {
@@ -72,9 +55,10 @@ const {
     previewEl,
     availableMs,
     start: startCapture,
-    startEncoding,
     stop: stopCapture,
     attachPreview,
+    hasBuffer,
+    minClipSeconds,
 } = capture;
 
 const {
@@ -133,9 +117,7 @@ function selectAngle(tag) {
 
 async function setPreviewElement(element) {
     previewEl.value = element;
-    if (isRecording.value) {
-        await attachPreview?.();
-    }
+    if (isRecording.value) attachPreview?.();
 }
 
 async function lockLandscape() {
@@ -144,7 +126,7 @@ async function lockLandscape() {
     try {
         await screen.orientation?.lock?.('landscape');
     } catch {
-        // Orientation lock is not available on every mobile browser.
+        // unsupported
     }
 }
 
@@ -152,7 +134,7 @@ function unlockOrientation() {
     try {
         screen.orientation?.unlock?.();
     } catch {
-        // Ignore unsupported orientation APIs.
+        // ignore
     }
     preferLandscapeHint.value = false;
 }
@@ -161,10 +143,9 @@ async function enterFullscreen() {
     isFullscreen.value = true;
     preferLandscapeHint.value = window.matchMedia('(orientation: portrait)').matches;
     if (isAppleMobile()) {
-        await attachPreview?.();
+        attachPreview?.();
         return;
     }
-
     await lockLandscape();
     const element = stageEl.value?.$el || stageEl.value;
     try {
@@ -172,7 +153,7 @@ async function enterFullscreen() {
             || element?.webkitRequestFullscreen?.bind(element);
         if (request) await request();
     } catch {
-        // CSS fullscreen already active; native API is best-effort.
+        // CSS fullscreen fallback
     }
 }
 
@@ -182,7 +163,7 @@ async function exitFullscreen() {
             await (document.exitFullscreen?.() || document.webkitExitFullscreen?.());
         }
     } catch {
-        // Fullscreen may already have been closed by the browser.
+        // ignore
     }
     isFullscreen.value = false;
     unlockOrientation();
@@ -215,18 +196,18 @@ async function toggleRecMode() {
             return;
         }
         if (!isSupported.value) {
-            localError.value = 'Gravação não suportada neste navegador. Use Chrome no Android ou Safari atualizado.';
+            localError.value = 'Gravação não suportada neste navegador.';
             return;
         }
 
-        // Preview first (user gesture). Encoding starts AFTER session is alive, without blocking UI ticks.
+        // V1 flow: camera + MediaRecorder together, then register session/heartbeat.
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
             return;
         }
 
-        await attachPreview?.();
+        attachPreview?.();
 
         const registered = await registerRecorder(selectedAngle.value);
         if (!registered) {
@@ -238,23 +219,6 @@ async function toggleRecMode() {
         if (!isAppleMobile()) {
             await enterFullscreen();
         }
-
-        // Critical: do not await encoding inside the same turn that freezes iOS.
-        // Buffer clock + heartbeat must keep running while MediaRecorder warms up.
-        window.setTimeout(async () => {
-            try {
-                await attachPreview?.();
-                const encoding = await startEncoding();
-                if (!encoding) {
-                    localError.value = captureError.value
-                        || 'Câmera ativa, mas a gravação de vídeo falhou. Tente novamente ou use outro aparelho.';
-                } else {
-                    reloadWarning.value = null;
-                }
-            } catch (encodeError) {
-                localError.value = encodeError?.message || 'Falha ao iniciar a gravação de vídeo.';
-            }
-        }, isAppleMobile() ? 500 : 100);
     } catch (error) {
         localError.value = error?.response?.data?.message
             || error?.message
@@ -262,12 +226,12 @@ async function toggleRecMode() {
         try {
             await stopCapture();
         } catch {
-            // Best-effort cleanup.
+            // ignore
         }
         try {
             await unregisterRecorder();
         } catch {
-            // Session may never have been created.
+            // ignore
         }
     } finally {
         isTogglingRec.value = false;
@@ -276,6 +240,10 @@ async function toggleRecMode() {
 
 async function handleSave(scope = 'all') {
     localError.value = null;
+    if (isThisDeviceRecording.value && !hasBuffer?.()) {
+        localError.value = `Buffer insuficiente. Aguarde cerca de ${minClipSeconds || 25}s e tente de novo.`;
+        return;
+    }
     const save = await triggerSave(scope);
     if (!save) return;
     await receiveSave(save);
@@ -284,16 +252,6 @@ async function handleSave(scope = 'all') {
 onMounted(() => {
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
-
-    try {
-        const key = `qnf-rec-active:${props.game.id}`;
-        if (sessionStorage.getItem(key)) {
-            reloadWarning.value = 'O navegador reiniciou a página do REC. Toque em REC MODE de novo.';
-            sessionStorage.removeItem(key);
-        }
-    } catch {
-        // sessionStorage may be unavailable.
-    }
 });
 
 onBeforeUnmount(() => {
@@ -306,17 +264,13 @@ onBeforeUnmount(() => {
 <template>
     <div class="py-4 pb-28">
         <div class="max-w-lg mx-auto px-4 space-y-5">
-            <div v-if="reloadWarning"
-                class="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm px-4 py-3">
-                {{ reloadWarning }}
-            </div>
             <div v-if="localError || captureError || saveError"
                 class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
                 {{ localError || captureError || saveError }}
             </div>
             <div v-if="!isSupported"
                 class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3">
-                Seu navegador não suporta gravação. Use Chrome no Android para melhor resultado.
+                Seu navegador não suporta gravação. Use Chrome no Android ou Safari atualizado.
             </div>
 
             <RecCameraPositionSelector v-if="!isThisDeviceRecording" :selected="selectedAngle" :taken="takenAngles"
@@ -331,7 +285,7 @@ onBeforeUnmount(() => {
 
             <RecCameraHealthCard v-if="isRecording" :status="health.status.value" :label="healthLabel"
                 :color-class="health.colorClass.value" :available-ms="availableMs"
-                :pending-uploads="uploadQueue.pendingCount.value" :has-audio="capture.hasAudio.value" />
+                :pending-uploads="0" :has-audio="capture.hasAudio.value" />
 
             <RecSaveControls :recording="isThisDeviceRecording" :can-start="canStartRec" :toggling="isTogglingRec"
                 :registering="isRegistering" :saving="isSaving" :cooldown="saveCooldownRemaining || 0"
@@ -340,7 +294,6 @@ onBeforeUnmount(() => {
                 :can-right="canSaveScope('right')" @toggle="toggleRecMode" @save="handleSave" />
 
             <RecActiveCameras :cameras="recorders" :own-id="recorderId" />
-            <RecPendingUploads :jobs="uploadQueue.jobs.value" :processing="uploadQueue.isProcessing.value" />
             <RecSaveList :saves="recentSaves" :pending="pendingSaves" />
 
             <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
