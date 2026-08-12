@@ -1,36 +1,40 @@
 import { registerSW } from 'virtual:pwa-register';
-import { isRecPage } from './composables/rec/recPage';
-import { recDiag } from './composables/rec/recDiag';
+import { isAppleMobile, isRecPage } from '@/composables/rec/recUtils';
 
 const CHECK_INTERVAL_MS = 60 * 1000;
-let recSwGuardInstalled = false;
 
-function installRecSwGuard() {
-    if (recSwGuardInstalled || !('serviceWorker' in navigator)) return;
-    recSwGuardInstalled = true;
+async function disableServiceWorkersOnRec() {
+    if (!isRecPage() || !('serviceWorker' in navigator)) return;
 
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (!isRecPage()) return;
-        recDiag('REC_SW_CONTROLLER_CHANGE', {});
-    });
+    try {
+        const registrations = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(registrations.map((registration) => registration.unregister()));
+    } catch {
+        // Best-effort.
+    }
+    // Do NOT clear caches here — wiping caches on iOS mid-navigation can white-screen the tab.
+}
 
-    // Block a waiting worker from taking control during REC (would reload the page).
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.ready.then((registration) => {
-            if (!registration.waiting) return;
-            registration.waiting.postMessage({ type: 'REC_SKIP_WAITING' });
-        }).catch(() => {});
+function quietRealtimeOnRec() {
+    if (!isRecPage() || !isAppleMobile()) return;
+    try {
+        window.Echo?.disconnect?.();
+    } catch {
+        // ignore
     }
 }
 
 if (isRecPage()) {
-    installRecSwGuard();
-    // Do NOT unregister SW here — iOS Safari/PWA can reload or white-screen mid-navigation.
+    disableServiceWorkersOnRec();
+    quietRealtimeOnRec();
+    // Echo may connect after bootstrap; disconnect again shortly.
+    setTimeout(quietRealtimeOnRec, 0);
+    setTimeout(quietRealtimeOnRec, 500);
 } else {
     registerSW({
         immediate: true,
         onNeedRefresh() {
-            // Never auto-reload.
+            // Never reload automatically.
         },
         onRegisteredSW(_swUrl, registration) {
             if (!registration) return;

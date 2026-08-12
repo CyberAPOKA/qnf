@@ -5,12 +5,12 @@ import RecActiveCameras from '@/Components/Rec/RecActiveCameras.vue';
 import RecCameraHealthCard from '@/Components/Rec/RecCameraHealthCard.vue';
 import RecCameraPositionSelector from '@/Components/Rec/RecCameraPositionSelector.vue';
 import RecCameraStage from '@/Components/Rec/RecCameraStage.vue';
+import RecPendingUploads from '@/Components/Rec/RecPendingUploads.vue';
 import RecSaveControls from '@/Components/Rec/RecSaveControls.vue';
 import RecSaveList from '@/Components/Rec/RecSaveList.vue';
 import { useRecCapture } from '@/composables/rec/useRecCapture';
 import { useRecSession } from '@/composables/rec/useRecSession';
-import { isAppleMobile } from '@/composables/rec/recPage';
-import { recDiag } from '@/composables/rec/recDiag';
+import { isAppleMobile, recLog } from '@/composables/rec/recUtils';
 
 const props = defineProps({
     game: Object,
@@ -28,12 +28,13 @@ const CAPTURE_SCOPE_TAGS = {
     right: ['A2', 'B2'],
 };
 
+const apple = isAppleMobile();
+
 const selectedAngle = ref(null);
 const localError = ref(null);
 const isTogglingRec = ref(false);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
-const preferLandscapeHint = ref(false);
 
 const capture = useRecCapture({
     config: props.rec_config,
@@ -77,6 +78,7 @@ const {
     isScopeCoolingDown,
     health,
     receiveSave,
+    uploadQueue,
 } = recSession;
 
 const healthLabel = computed(() => health.label.value);
@@ -96,6 +98,9 @@ const canStartRec = computed(() =>
     && !isRegistering.value,
 );
 const canSave = computed(() => activeRecorderCount.value > 0 && !isSaving.value);
+const uploadJobs = computed(() => uploadQueue?.jobs?.value || []);
+const uploadProcessing = computed(() => uploadQueue?.isProcessing?.value || false);
+const pendingUploadCount = computed(() => uploadQueue?.pendingCount?.value || 0);
 
 function canSaveScope(scope) {
     if (!canSave.value) return false;
@@ -120,7 +125,7 @@ function setPreviewElement(element) {
 }
 
 async function enterFullscreen() {
-    if (isAppleMobile()) {
+    if (apple) {
         isFullscreen.value = true;
         attachPreview?.();
         return;
@@ -149,7 +154,7 @@ async function exitFullscreen() {
 }
 
 function onFullscreenChange() {
-    if (isAppleMobile()) return;
+    if (apple) return;
     const native = !!(document.fullscreenElement || document.webkitFullscreenElement);
     if (!native) isFullscreen.value = false;
 }
@@ -159,7 +164,7 @@ function onVisibilityReturn() {
     const result = checkVisibility?.();
     if (result && !result.ok && isRecording.value) {
         localError.value = 'A câmera foi interrompida. Toque em REC MODE novamente.';
-        recDiag('REC_VISIBILITY_CHECK', { ok: false, reason: result.reason });
+        recLog('VISIBILITY_CHECK', { ok: false, reason: result.reason });
     }
 }
 
@@ -188,7 +193,7 @@ async function toggleRecMode() {
             return;
         }
 
-        if (isAppleMobile()) {
+        if (apple) {
             const registered = await registerRecorder(selectedAngle.value);
             if (!registered) {
                 localError.value = saveError.value || 'Não foi possível registrar esta câmera.';
@@ -302,6 +307,7 @@ onBeforeUnmount(() => {
                 :can-save-all="canSaveScope('all')"
                 :can-save-right="canSaveScope('right')"
                 :saving="isSaving"
+                :available-label="healthLabel"
                 :buffer-sec="bufferSec"
                 :buffer-target-sec="bufferTargetSec"
                 @preview="setPreviewElement"
@@ -317,8 +323,14 @@ onBeforeUnmount(() => {
                 :label="healthLabel"
                 :color-class="health.colorClass.value"
                 :available-ms="bufferSec * 1000"
-                :pending-uploads="0"
+                :pending-uploads="pendingUploadCount"
                 :has-audio="hasAudio"
+            />
+
+            <RecPendingUploads
+                v-if="isRecording && !apple"
+                :jobs="uploadJobs"
+                :processing="uploadProcessing"
             />
 
             <RecSaveControls
@@ -339,7 +351,11 @@ onBeforeUnmount(() => {
             />
 
             <RecActiveCameras :cameras="recorders" :own-id="recorderId" />
-            <RecSaveList v-if="!isAppleMobile() || !isThisDeviceRecording" :saves="recentSaves" :pending="pendingSaves" />
+            <RecSaveList
+                v-if="!apple || !isThisDeviceRecording"
+                :saves="recentSaves"
+                :pending="pendingSaves"
+            />
 
             <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
                 Voltar ao Dashboard

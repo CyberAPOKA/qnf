@@ -1,7 +1,6 @@
 import { nextTick, onBeforeUnmount, ref } from 'vue';
 import { useRecConfig } from './recConfig';
-import { isAppleMobile } from './recPage';
-import { recDiag } from './recDiag';
+import { isAppleMobile, recLog } from './recUtils';
 
 const FLUSH_MS = 150;
 
@@ -78,10 +77,15 @@ export function useRecCapture(options = {}) {
     let shouldKeepRecording = false;
     let previewAttached = false;
     let operationChain = Promise.resolve();
+    let onSegmentClosed = options.onSegmentClosed || null;
     /** @type {Blob[]} */
     let pendingChunks = [];
     /** @type {{ blob: Blob, startedAt: number, endedAt: number, durationMs: number, sequence: number }[]} */
     let segments = [];
+
+    function setOnSegmentClosed(handler) {
+        onSegmentClosed = handler;
+    }
 
     function enqueue(task) {
         const next = operationChain.then(task, task);
@@ -146,9 +150,7 @@ export function useRecCapture(options = {}) {
         const delay = first ? firstRotationMs : segmentMs;
         rotationTimer = setTimeout(() => {
             rotateSegment()
-                .catch((err) => {
-                    recDiag('REC_SEGMENT_ROTATION_FAILED', { message: err?.message });
-                })
+                .catch((err) => recLog('SEGMENT_ROTATION_FAILED', { message: err?.message }))
                 .finally(() => {
                     if (shouldKeepRecording) scheduleRotation(false);
                 });
@@ -178,7 +180,7 @@ export function useRecCapture(options = {}) {
             track.onended = () => {
                 trackEnded.value = true;
                 recorderActive.value = false;
-                recDiag('REC_TRACK_ENDED', { kind: track.kind, state: track.readyState });
+                recLog('TRACK_ENDED', { kind: track.kind, state: track.readyState });
             };
         }
     }
@@ -266,12 +268,12 @@ export function useRecCapture(options = {}) {
         mediaRecorder.onerror = () => {
             error.value = 'Erro na gravação.';
             recorderActive.value = false;
-            recDiag('REC_RECORDER_ERROR', { state: mediaRecorder?.state });
+            recLog('RECORDER_ERROR', { state: mediaRecorder?.state });
         };
 
         mediaRecorder.start();
         recorderActive.value = true;
-        recDiag('REC_SEGMENT_STARTED', {
+        recLog('SEGMENT_STARTED', {
             segmentCount: segments.length,
             mime: mimeType || mediaRecorder.mimeType || '',
         });
@@ -333,11 +335,18 @@ export function useRecCapture(options = {}) {
             if (closed?.blob?.size) {
                 segments.push(closed);
                 trimSegments();
-                recDiag('REC_SEGMENT_FINISHED', {
+                recLog('SEGMENT_FINISHED', {
                     bytes: closed.blob.size,
                     segmentCount: segments.length,
                     durationMs: closed.durationMs,
                 });
+                if (onSegmentClosed) {
+                    try {
+                        await onSegmentClosed(closed);
+                    } catch {
+                        // Upload failures are retried by the queue.
+                    }
+                }
             }
             if (shouldKeepRecording) {
                 startNewRecorder();
@@ -382,7 +391,7 @@ export function useRecCapture(options = {}) {
             attachPreview(mediaStream);
 
             if (previewWarmupMs > 0) {
-                recDiag('REC_PREVIEW_WARMUP', { ms: previewWarmupMs });
+                recLog('PREVIEW_WARMUP', { ms: previewWarmupMs });
                 await wait(previewWarmupMs);
                 if (myGen !== generation || !shouldKeepRecording) {
                     stop();
@@ -397,7 +406,7 @@ export function useRecCapture(options = {}) {
             scheduleRotation(true);
             encodingReady.value = true;
 
-            recDiag('REC_CAPTURE_STARTED', {
+            recLog('CAPTURE_STARTED', {
                 bufferSeconds,
                 segmentSeconds,
                 maxSegments,
@@ -432,7 +441,7 @@ export function useRecCapture(options = {}) {
             if (closed?.blob?.size) {
                 segments.push(closed);
                 trimSegments();
-                recDiag('REC_SEGMENT_FINISHED', {
+                recLog('SEGMENT_FINISHED', {
                     bytes: closed.blob.size,
                     reason: 'snapshot',
                     segmentCount: segments.length,
@@ -444,6 +453,7 @@ export function useRecCapture(options = {}) {
                 startedAt: s.startedAt,
                 endedAt: s.endedAt,
                 durationMs: s.durationMs,
+                sequence: s.sequence,
             }));
 
             if (shouldKeepRecording) {
@@ -480,7 +490,7 @@ export function useRecCapture(options = {}) {
         if (!trackLive) {
             trackEnded.value = true;
             recorderActive.value = false;
-            recDiag('REC_VISIBILITY_CHECK', {
+            recLog('VISIBILITY_CHECK', {
                 visibility: document.visibilityState,
                 trackState: videoTrack?.readyState,
                 recorderState: mediaRecorder?.state,
@@ -489,7 +499,7 @@ export function useRecCapture(options = {}) {
         }
 
         if (!recorderOk && shouldKeepRecording) {
-            recDiag('REC_VISIBILITY_CHECK', {
+            recLog('VISIBILITY_CHECK', {
                 visibility: document.visibilityState,
                 trackState: videoTrack?.readyState,
                 recorderState: mediaRecorder?.state,
@@ -498,6 +508,10 @@ export function useRecCapture(options = {}) {
         }
 
         return { ok: true };
+    }
+
+    async function listLocalSegmentsInWindow() {
+        return segmentsInWindow();
     }
 
     function stop() {
@@ -535,7 +549,7 @@ export function useRecCapture(options = {}) {
         if (previewEl.value) previewEl.value.srcObject = null;
         isRecording.value = false;
 
-        recDiag('REC_STOPPED', {});
+        recLog('STOPPED', {});
     }
 
     function getAvailableMsSync() {
@@ -561,7 +575,8 @@ export function useRecCapture(options = {}) {
         snapshot,
         hasBuffer,
         checkVisibility,
-        listLocalSegmentsInWindow: async () => segmentsInWindow(),
+        listLocalSegmentsInWindow,
+        setOnSegmentClosed,
         nextSequence,
         makeUuid,
         blobExtension: () => blobExtension(mimeType),

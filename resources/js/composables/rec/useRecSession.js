@@ -2,8 +2,9 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import axios from 'axios';
 import { useRecConfig } from './recConfig';
 import { useRecHealth } from './useRecHealth';
-import { isAppleMobile } from './recPage';
-import { recDiag } from './recDiag';
+import { useRecSegmentStore } from './useRecSegmentStore';
+import { useRecUploadQueue } from './useRecUploadQueue';
+import { isAppleMobile, recLog } from './recUtils';
 
 function makeUuid() {
     return globalThis.crypto?.randomUUID?.()
@@ -22,6 +23,7 @@ export function useRecSession(props, options = {}) {
     const config = useRecConfig(props.rec_config);
     const capture = options.capture;
     const apple = isAppleMobile();
+    const store = options.store || useRecSegmentStore();
 
     const session = ref(null);
     const sessions = ref([...(props.recorders || [])]);
@@ -39,6 +41,7 @@ export function useRecSession(props, options = {}) {
     let scopeCooldownTimer = null;
     const cooldownSaveUuids = new Set();
     const processedSaves = new Set();
+    let saveQueue = Promise.resolve();
 
     const gameId = props.game.id;
     const channelName = `game.${gameId}`;
@@ -51,6 +54,19 @@ export function useRecSession(props, options = {}) {
     let lastSaveAt = 0;
     let activeSaveRequests = 0;
     let networkStarted = false;
+
+    const uploadQueue = options.uploadQueue || useRecUploadQueue({
+        config: props.rec_config,
+        store,
+        gameId,
+        getSession: () => session.value,
+        onSessionExpired: () => {
+            sessionExpired.value = true;
+            saveError.value = 'Sessão da câmera expirou. Toque em REC MODE de novo.';
+            stopHeartbeat();
+            stopPolling();
+        },
+    });
 
     function queueSaveWork(task) {
         const next = saveQueue.then(task, task);
@@ -195,6 +211,30 @@ export function useRecSession(props, options = {}) {
         return tags.includes(myTag);
     }
 
+    async function persistSegmentForUpload(closed) {
+        if (!session.value || apple || !closed?.blob?.size) return null;
+
+        const uuid = makeUuid();
+        const stored = await store.putSegment({
+            uuid,
+            sessionUuid: session.value.uuid,
+            sequence: closed.sequence,
+            blob: closed.blob,
+            startedAt: closed.startedAt,
+            endedAt: closed.endedAt,
+            durationMs: closed.durationMs,
+            mimeType: closed.blob.type,
+            bytes: closed.blob.size,
+        });
+        await uploadQueue.enqueueSegment(stored);
+        return stored;
+    }
+
+    function wireSegmentUpload() {
+        if (apple || !capture?.setOnSegmentClosed) return;
+        capture.setOnSegmentClosed(persistSegmentForUpload);
+    }
+
     async function uploadSnapshotParts(snapshotParts) {
         if (!session.value || !snapshotParts?.length) return [];
 
@@ -203,7 +243,7 @@ export function useRecSession(props, options = {}) {
 
         for (const part of snapshotParts) {
             if (!part?.blob?.size) continue;
-            const sequence = capture.nextSequence?.() || uploaded.length + 1;
+            const sequence = part.sequence || capture.nextSequence?.() || uploaded.length + 1;
             const uuid = capture.makeUuid?.() || makeUuid();
             const durationMs = Math.max(1, Math.min(180_000, Number(part.durationMs) || 1));
             const idempotencyKey = `rec-snap:${session.value.uuid}:${uuid}`;
@@ -253,6 +293,19 @@ export function useRecSession(props, options = {}) {
                 });
                 return;
             }
+
+            if (!apple) {
+                const localSegments = await store.getSegments(session.value.uuid);
+                const windowParts = snap.parts;
+                const windowStart = windowParts[0]?.startedAt || 0;
+                const windowEnd = windowParts.at(-1)?.endedAt || Date.now();
+                const inWindow = localSegments.filter((s) =>
+                    s.endedAt >= windowStart && s.startedAt <= windowEnd);
+                if (inWindow.length) {
+                    await uploadQueue.prioritizeSave(save.uuid, inWindow);
+                }
+            }
+
             uploaded = await uploadSnapshotParts(snap.parts);
         } catch (error) {
             pendingPatch(save.uuid, {
@@ -368,6 +421,9 @@ export function useRecSession(props, options = {}) {
                 },
             ];
 
+            wireSegmentUpload();
+            await store.putSession(created);
+
             if (!apple) {
                 beginNetwork();
             }
@@ -377,6 +433,8 @@ export function useRecSession(props, options = {}) {
             } catch {
                 // ignore
             }
+
+            recLog('SESSION_REGISTERED', { cameraTag: created.cameraTag });
             return true;
         } catch (error) {
             saveError.value = error?.response?.data?.message
@@ -393,6 +451,8 @@ export function useRecSession(props, options = {}) {
         networkStarted = false;
         stopHeartbeat();
         stopPolling();
+        uploadQueue.stop?.();
+
         const current = session.value;
         if (!current) return;
 
@@ -404,14 +464,16 @@ export function useRecSession(props, options = {}) {
             );
             sessions.value = data.sessions || data.recorders || sessions.value;
         } catch {
-            // ignore
+            // Stop is idempotent.
         } finally {
             session.value = null;
+            capture?.setOnSegmentClosed?.(null);
             try {
                 sessionStorage.removeItem(`qnf-rec-active:${gameId}`);
             } catch {
                 // ignore
             }
+            await store.clearSession?.();
         }
     }
 
@@ -437,7 +499,7 @@ export function useRecSession(props, options = {}) {
                 body: JSON.stringify({
                     last_segment_sequence: capture?.getLastSegmentSequence?.() ?? 0,
                     buffer_available_ms: capture?.getAvailableMsSync?.() ?? 0,
-                    queue_size: 0,
+                    queue_size: uploadQueue.pendingCount?.value || 0,
                     camera_state: capture?.isRecording?.value ? 'recording' : 'stopped',
                     client_sent_at_ms: Date.now(),
                 }),
@@ -446,10 +508,10 @@ export function useRecSession(props, options = {}) {
             if (!response.ok) {
                 if ([403, 409, 422].includes(response.status)) {
                     sessionExpired.value = true;
+                    saveError.value = 'Sessão da câmera expirou. Toque em REC MODE de novo.';
+                    recLog('SESSION_EXPIRED', { status: response.status });
                     stopHeartbeat();
                     stopPolling();
-                    saveError.value = 'Sessão da câmera expirou. Toque em REC MODE de novo.';
-                    recDiag('REC_SESSION_EXPIRED', { status: response.status });
                 }
                 heartbeatFailures.value += 1;
                 return false;
@@ -473,7 +535,8 @@ export function useRecSession(props, options = {}) {
     function beginNetwork() {
         if (networkStarted || stopped || !session.value) return;
         networkStarted = true;
-        recDiag('REC_NETWORK_START', { apple });
+        recLog('NETWORK_START', { apple });
+        uploadQueue.start?.();
         scheduleHeartbeatStart();
         startPolling();
     }
@@ -496,10 +559,6 @@ export function useRecSession(props, options = {}) {
                 void sendHeartbeat();
             }, seconds * 1000);
         }, deferMs);
-    }
-
-    function startHeartbeat() {
-        scheduleHeartbeatStart();
     }
 
     function stopHeartbeat() {
@@ -663,10 +722,10 @@ export function useRecSession(props, options = {}) {
     }
 
     function onVisibilityChange() {
-        recDiag('REC_VISIBILITY_CHANGED', { state: document.visibilityState });
+        recLog('VISIBILITY_CHANGED', { state: document.visibilityState });
         if (document.visibilityState === 'visible' && capture?.checkVisibility) {
             const result = capture.checkVisibility();
-            if (!result.ok && isRecording.value) {
+            if (!result.ok && capture.isRecording?.value) {
                 saveError.value = 'A câmera foi interrompida. Toque em REC MODE novamente.';
             }
         }
@@ -681,7 +740,7 @@ export function useRecSession(props, options = {}) {
         sessionExpired,
         availableMs: capture?.availableMs,
         targetBufferMs: config.buffer_seconds * 1000,
-        pendingUploads: 0,
+        pendingUploads: uploadQueue.pendingCount,
         heartbeatFailures,
         trackEnded: capture?.trackEnded,
         recorderActive: capture?.recorderActive,
@@ -697,6 +756,7 @@ export function useRecSession(props, options = {}) {
         stopped = true;
         stopHeartbeat();
         stopPolling();
+        uploadQueue.stop?.();
         document.removeEventListener('visibilitychange', onVisibilityChange);
         window.removeEventListener('pageshow', onVisibilityChange);
         if (scopeCooldownTimer) clearInterval(scopeCooldownTimer);
@@ -727,6 +787,7 @@ export function useRecSession(props, options = {}) {
         saveCooldownRemaining,
         scopeCooldowns,
         isScopeCoolingDown,
+        uploadQueue,
         recorderId: computed(() => session.value?.uuid || null),
         registerRecorder: register,
         unregisterRecorder: unregister,

@@ -16,42 +16,35 @@ export function useRecHealth(signals = {}) {
         const targetBufferMs = Math.max(1, Number(value(signals.targetBufferMs, 30_000)));
         const pendingUploads = Number(value(signals.pendingUploads, 0));
         const heartbeatFailures = Number(value(signals.heartbeatFailures, 0));
+        const storageCritical = value(signals.storageCritical, false);
         const trackEnded = value(signals.trackEnded, false);
-        const recorderActive = value(signals.recorderActive, false);
 
-        if (!supported || sessionExpired || trackEnded) return 'critical';
+        if (!supported || sessionExpired || storageCritical || trackEnded) return 'critical';
         if (!online) return 'offline';
         if (captureError || heartbeatFailures >= 3 || pendingUploads >= 12) return 'degraded';
-        if (!recording) return 'idle';
-        if (recording && !recorderActive && availableMs < 3000) return 'critical';
-        if (availableMs < targetBufferMs) return 'warming_up';
+        if (!recording || availableMs < targetBufferMs) return 'warming_up';
         return 'healthy';
     });
 
     const label = computed(() => {
         const availableMs = Number(value(signals.availableMs, 0));
         const targetBufferMs = Math.max(1, Number(value(signals.targetBufferMs, 30_000)));
-        const availableSec = Math.min(
-            Math.max(0, Math.round(targetBufferMs / 1000)),
-            Math.max(0, Math.round(availableMs / 1000)),
-        );
+        const availableSec = Math.max(0, Math.round(availableMs / 1000));
         const targetSec = Math.max(1, Math.round(targetBufferMs / 1000));
 
         if (status.value === 'warming_up') {
-            return `${availableSec}/${targetSec}s`;
+            return `Aquecendo buffer (${availableSec}/${targetSec}s)`;
         }
 
         return ({
-            idle: 'Parado',
-            healthy: `${targetSec}/${targetSec}s`,
+            healthy: 'Saudável',
             degraded: 'Conexão instável',
             offline: 'Offline',
-            critical: 'Câmera interrompida',
-        })[status.value] || status.value;
+            critical: 'Atenção necessária',
+        })[status.value];
     });
 
     const colorClass = computed(() => ({
-        idle: 'bg-gray-100 text-gray-700 border-gray-200',
         healthy: 'bg-emerald-100 text-emerald-700 border-emerald-200',
         warming_up: 'bg-amber-100 text-amber-700 border-amber-200',
         degraded: 'bg-orange-100 text-orange-700 border-orange-200',

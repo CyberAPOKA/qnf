@@ -30,7 +30,9 @@ onMounted(async () => {
 watch(() => props.recording, async (recording) => {
     await nextTick();
     publishPreview();
-    // Do not call play() here on every toggle — iPhone freezes if play() races srcObject.
+    if (recording && videoEl.value) {
+        videoEl.value.play().catch(() => {});
+    }
 });
 </script>
 
@@ -53,19 +55,16 @@ watch(() => props.recording, async (recording) => {
         />
         <div class="absolute top-3 left-3 flex items-center gap-2 z-10">
             <span class="flex items-center gap-2 bg-black/60 rounded-full px-3 py-1 text-white text-xs font-semibold">
-                <span class="w-2.5 h-2.5 rounded-full bg-red-500" /> REC
+                <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" /> REC
             </span>
             <span v-if="cameraTag" class="bg-red-600 text-white text-xs font-bold rounded-md px-2.5 py-1">
                 {{ cameraTag }}
             </span>
             <span
-                v-if="bufferTargetSec"
-                class="text-xs font-semibold rounded-full px-3 py-1 tabular-nums"
-                :class="bufferSec >= bufferTargetSec
-                    ? 'bg-emerald-500/90 text-white'
-                    : 'bg-amber-500/90 text-black'"
+                v-if="availableLabel"
+                class="bg-amber-500/90 text-black text-xs font-semibold rounded-full px-3 py-1"
             >
-                {{ bufferSec }}/{{ bufferTargetSec }}s
+                {{ bufferSec > 0 ? `${bufferSec}/${bufferTargetSec}s` : availableLabel }}
             </span>
         </div>
         <button
