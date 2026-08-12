@@ -14,14 +14,22 @@ function makeUuid() {
         || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
 }
 
+function isAppleMobile() {
+    if (typeof navigator === 'undefined') return false;
+    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 function pickMimeType() {
-    const types = [
-        'video/webm;codecs=vp8,opus',
-        'video/webm;codecs=vp8',
-        'video/webm',
-        'video/mp4',
-    ];
-    return types.find((type) => MediaRecorder.isTypeSupported(type)) || '';
+    const types = isAppleMobile()
+        ? ['video/mp4', 'video/mp4;codecs=avc1', 'video/mp4;codecs=mp4a.40.2']
+        : [
+            'video/webm;codecs=vp8,opus',
+            'video/webm;codecs=vp8',
+            'video/webm',
+            'video/mp4',
+        ];
+    return types.find((type) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) || '';
 }
 
 export function useRecCapture(options = {}) {
@@ -90,10 +98,23 @@ export function useRecCapture(options = {}) {
     }
 
     function recorderOptions(mimeType) {
+        if (isAppleMobile()) {
+            return mimeType ? { mimeType } : {};
+        }
+
         return {
             ...(mimeType ? { mimeType } : {}),
             videoBitsPerSecond: 1_200_000,
             ...(hasAudio.value ? { audioBitsPerSecond: 96_000 } : {}),
+        };
+    }
+
+    function bindRecorder(activeRecorder) {
+        activeRecorder.ondataavailable = (event) => {
+            if (event.data?.size) chunks.push(event.data);
+        };
+        activeRecorder.onerror = () => {
+            error.value = 'A gravação da câmera foi interrompida.';
         };
     }
 
@@ -103,14 +124,36 @@ export function useRecCapture(options = {}) {
         chunks = [];
         segmentStartedAt = Date.now();
         const mimeType = pickMimeType();
-        recorder = new MediaRecorder(stream, recorderOptions(mimeType));
-        recorder.ondataavailable = (event) => {
-            if (event.data?.size) chunks.push(event.data);
-        };
-        recorder.onerror = () => {
-            error.value = 'A gravação da câmera foi interrompida.';
-        };
-        recorder.start(1_000);
+        const attempts = [
+            () => new MediaRecorder(stream, recorderOptions(mimeType)),
+            () => new MediaRecorder(stream, mimeType ? { mimeType } : {}),
+            () => new MediaRecorder(stream),
+        ];
+
+        let created = null;
+        let lastError = null;
+        for (const attempt of attempts) {
+            try {
+                created = attempt();
+                break;
+            } catch (recorderError) {
+                lastError = recorderError;
+            }
+        }
+
+        if (!created) {
+            error.value = 'Este navegador não consegue gravar o vídeo da câmera.';
+            throw lastError || new Error('MediaRecorder failed');
+        }
+
+        recorder = created;
+        bindRecorder(recorder);
+        // iOS Safari often crashes or never emits data when start(timeslice) is used.
+        if (isAppleMobile()) {
+            recorder.start();
+        } else {
+            recorder.start(1_000);
+        }
     }
 
     function finalizeRecorder() {
@@ -123,10 +166,12 @@ export function useRecCapture(options = {}) {
             const activeRecorder = recorder;
             const startedAt = segmentStartedAt;
             let settled = false;
+            let hangTimer = null;
 
             const finish = async () => {
                 if (settled) return;
                 settled = true;
+                clearTimeout(hangTimer);
                 await wait(FLUSH_MS);
                 const endedAt = Date.now();
                 const blob = chunks.length
@@ -139,11 +184,14 @@ export function useRecCapture(options = {}) {
                 resolve(blob?.size ? { blob, startedAt, endedAt } : null);
             };
 
+            hangTimer = setTimeout(() => finish(), 3_000);
             activeRecorder.onstop = finish;
-            try {
-                activeRecorder.requestData();
-            } catch {
-                // Some MediaRecorder implementations do not support requestData here.
+            if (!isAppleMobile()) {
+                try {
+                    activeRecorder.requestData();
+                } catch {
+                    // Some MediaRecorder implementations do not support requestData here.
+                }
             }
             try {
                 activeRecorder.stop();
@@ -157,21 +205,26 @@ export function useRecCapture(options = {}) {
         if (!finalized?.blob?.size) return null;
 
         sequence += 1;
-        const segment = await store.putSegment({
-            uuid: makeUuid(),
-            sessionUuid: sessionUuid(),
-            cameraTag: cameraTag(),
-            sequence,
-            startedAt: finalized.startedAt,
-            endedAt: finalized.endedAt,
-            durationMs: Math.max(1, finalized.endedAt - finalized.startedAt),
-            mimeType: finalized.blob.type,
-            bytes: finalized.blob.size,
-            blob: finalized.blob,
-            uploadVerified: false,
-        });
-        await options.onSegment?.(segment);
-        return segment;
+        try {
+            const segment = await store.putSegment({
+                uuid: makeUuid(),
+                sessionUuid: sessionUuid(),
+                cameraTag: cameraTag(),
+                sequence,
+                startedAt: finalized.startedAt,
+                endedAt: finalized.endedAt,
+                durationMs: Math.max(1, finalized.endedAt - finalized.startedAt),
+                mimeType: finalized.blob.type,
+                bytes: finalized.blob.size,
+                blob: finalized.blob,
+                uploadVerified: false,
+            });
+            await options.onSegment?.(segment);
+            return segment;
+        } catch {
+            error.value = 'Não foi possível guardar o segmento localmente. O SAVE pode falhar neste aparelho.';
+            return null;
+        }
     }
 
     async function rotate() {
@@ -214,30 +267,36 @@ export function useRecCapture(options = {}) {
     }
 
     async function getMediaStream() {
-        const attempts = [
-            {
-                audio: true,
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    aspectRatio: { ideal: 16 / 9 },
-                    frameRate: { ideal: 24, max: 30 },
+        const attempts = isAppleMobile()
+            ? [
+                { audio: false, video: { facingMode: { ideal: 'environment' } } },
+                { audio: true, video: { facingMode: { ideal: 'environment' } } },
+                { audio: false, video: true },
+            ]
+            : [
+                {
+                    audio: true,
+                    video: {
+                        facingMode: { ideal: 'environment' },
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 },
+                        aspectRatio: { ideal: 16 / 9 },
+                        frameRate: { ideal: 24, max: 30 },
+                    },
                 },
-            },
-            {
-                audio: true,
-                video: { facingMode: { ideal: 'environment' } },
-            },
-            {
-                audio: false,
-                video: { facingMode: { ideal: 'environment' } },
-            },
-            {
-                audio: false,
-                video: true,
-            },
-        ];
+                {
+                    audio: true,
+                    video: { facingMode: { ideal: 'environment' } },
+                },
+                {
+                    audio: false,
+                    video: { facingMode: { ideal: 'environment' } },
+                },
+                {
+                    audio: false,
+                    video: true,
+                },
+            ];
 
         let lastError = null;
 
@@ -263,7 +322,12 @@ export function useRecCapture(options = {}) {
 
         try {
             stream = await getMediaStream();
-            const existing = await store.getSegments(sessionUuid());
+            let existing = [];
+            try {
+                existing = await store.getSegments(sessionUuid());
+            } catch {
+                existing = [];
+            }
             sequence = existing.reduce((max, item) => Math.max(max, item.sequence || 0), 0);
             keepRecording = true;
             recordingStartedAt = Date.now();

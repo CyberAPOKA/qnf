@@ -28,6 +28,8 @@ class RecRecorderSessionService
      */
     public function start(Game $game, User $user, string $cameraTag, array $capabilities = [], array $client = []): array
     {
+        $this->releaseReusableSessions($game, $user, $cameraTag);
+
         $leaseSeconds = (int) config('rec.recorder_lease_seconds');
         $uuid = (string) Str::uuid();
         $token = Str::random(64);
@@ -226,6 +228,42 @@ class RecRecorderSessionService
             'pending_save_poll_seconds' => (int) config('rec.pending_save_poll_seconds'),
             'upload_max_concurrency' => (int) config('rec.upload_max_concurrency'),
         ];
+    }
+
+    private function releaseReusableSessions(Game $game, User $user, string $cameraTag): void
+    {
+        $sessions = RecRecorderSession::query()
+            ->where('game_id', $game->id)
+            ->where('camera_tag', $cameraTag)
+            ->whereIn('status', [
+                RecRecorderSessionStatus::Starting->value,
+                RecRecorderSessionStatus::Recording->value,
+                RecRecorderSessionStatus::Degraded->value,
+                RecRecorderSessionStatus::Reconnecting->value,
+            ])
+            ->get();
+
+        foreach ($sessions as $session) {
+            $expired = $session->lease_expires_at && $session->lease_expires_at->lt(now());
+            $own = (int) $session->user_id === (int) $user->id;
+
+            if (! $expired && ! $own) {
+                continue;
+            }
+
+            $this->leases->release($session->game_id, $session->camera_tag, $session->uuid);
+            $session->update([
+                'status' => $expired
+                    ? RecRecorderSessionStatus::Expired
+                    : RecRecorderSessionStatus::Stopped,
+                'stopped_at' => now(),
+                'lease_expires_at' => now(),
+                'failure_code' => $expired ? 'lease_expired' : 'replaced',
+                'failure_message' => $expired
+                    ? 'Recorder lease expired.'
+                    : 'Replaced by a new session from the same user.',
+            ]);
+        }
     }
 
     public function expireStaleSessions(): int

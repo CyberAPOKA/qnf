@@ -253,7 +253,7 @@ export function useRecSession(props, options = {}) {
                 capabilities: {
                     mime_types: typeof MediaRecorder === 'undefined'
                         ? []
-                        : ['video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm']
+                        : ['video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm']
                             .filter((type) => MediaRecorder.isTypeSupported(type)),
                     width: 1280,
                     height: 720,
@@ -277,7 +277,6 @@ export function useRecSession(props, options = {}) {
             };
             session.value = created;
             sessionExpired.value = false;
-            await store.putSession(created);
             sessions.value = data.sessions || data.recorders || [
                 ...sessions.value.filter((item) =>
                     item.camera_tag !== created.cameraTag && item.uuid !== created.uuid),
@@ -290,6 +289,7 @@ export function useRecSession(props, options = {}) {
             startHeartbeat();
             startPolling();
             uploadQueue?.processNow();
+            store.putSession(created).catch(() => {});
             return true;
         } catch (error) {
             const message = error?.response?.data?.message
@@ -328,12 +328,24 @@ export function useRecSession(props, options = {}) {
     async function sendHeartbeat() {
         if (!session.value || stopped) return;
         try {
-            availableMs.value = await capture?.getAvailableMs?.() || 0;
-            const localSegments = await store.getSegments(session.value.uuid);
+            try {
+                availableMs.value = await capture?.getAvailableMs?.() || 0;
+            } catch {
+                availableMs.value = availableMs.value || 0;
+            }
+
+            let lastSequence = 0;
+            try {
+                const localSegments = await store.getSegments(session.value.uuid);
+                lastSequence = localSegments.at(-1)?.sequence || 0;
+            } catch {
+                lastSequence = 0;
+            }
+
             const { data } = await axios.post(routeName('games.rec.sessions.heartbeat', {
                 session: session.value.uuid,
             }), {
-                last_segment_sequence: localSegments.at(-1)?.sequence || 0,
+                last_segment_sequence: lastSequence,
                 buffer_available_ms: availableMs.value,
                 queue_size: uploadQueue?.pendingCount?.value || 0,
                 camera_state: capture?.isRecording?.value ? 'recording' : 'stopped',
@@ -361,7 +373,7 @@ export function useRecSession(props, options = {}) {
 
     function startHeartbeat() {
         stopHeartbeat();
-        heartbeatTimer = setTimeout(sendHeartbeat, config.heartbeat_seconds * 1000);
+        sendHeartbeat();
     }
 
     function stopHeartbeat() {
@@ -532,13 +544,17 @@ export function useRecSession(props, options = {}) {
 
     onMounted(async () => {
         subscribe();
-        const stored = await store.getSession();
-        if (stored?.gameId === gameId && stored.uuid && stored.token) {
-            session.value = stored;
-            stopped = false;
-            startHeartbeat();
-            startPolling();
-            uploadQueue?.processNow();
+        try {
+            const stored = await store.getSession();
+            if (stored?.gameId === gameId && stored.uuid && stored.token) {
+                session.value = stored;
+                stopped = false;
+                startHeartbeat();
+                startPolling();
+                uploadQueue?.processNow();
+            }
+        } catch {
+            // IndexedDB restore is optional; a fresh REC MODE still works.
         }
     });
 

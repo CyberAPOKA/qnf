@@ -121,8 +121,14 @@ function setPreviewElement(element) {
     previewEl.value = element;
 }
 
+function isAppleMobile() {
+    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 async function lockLandscape() {
     preferLandscapeHint.value = window.matchMedia('(orientation: portrait)').matches;
+    if (isAppleMobile()) return;
     try {
         await screen.orientation?.lock?.('landscape');
     } catch {
@@ -140,19 +146,18 @@ function unlockOrientation() {
 }
 
 async function enterFullscreen() {
-    const element = stageEl.value?.$el || stageEl.value;
-    // Always apply CSS fullscreen so iOS works even when Fullscreen API rejects.
     isFullscreen.value = true;
-    await lockLandscape();
+    preferLandscapeHint.value = window.matchMedia('(orientation: portrait)').matches;
+    if (isAppleMobile()) return;
 
+    await lockLandscape();
+    const element = stageEl.value?.$el || stageEl.value;
     try {
         const request = element?.requestFullscreen?.bind(element)
             || element?.webkitRequestFullscreen?.bind(element);
-        if (request) {
-            await request();
-        }
+        if (request) await request();
     } catch {
-        // CSS fullscreen already active; native API is best-effort on iPhone.
+        // CSS fullscreen already active; native API is best-effort.
     }
 }
 
@@ -169,12 +174,8 @@ async function exitFullscreen() {
 }
 
 function onFullscreenChange() {
-    const nativeFullscreen = !!(document.fullscreenElement || document.webkitFullscreenElement);
-    if (!nativeFullscreen && isFullscreen.value) {
-        // Keep CSS fullscreen unless the user explicitly exited via our UI.
-        return;
-    }
-    isFullscreen.value = nativeFullscreen;
+    if (isAppleMobile()) return;
+    isFullscreen.value = !!(document.fullscreenElement || document.webkitFullscreenElement);
     if (!isFullscreen.value) unlockOrientation();
 }
 
@@ -245,10 +246,14 @@ async function handleSave(scope = 'all') {
 }
 
 async function updateAvailableMs() {
-    const ms = await capture.getAvailableMs();
-    availableMs.value = ms;
-    if (recSession?.availableMs) {
-        recSession.availableMs.value = ms;
+    try {
+        const ms = await capture.getAvailableMs();
+        availableMs.value = ms;
+        if (recSession?.availableMs) {
+            recSession.availableMs.value = ms;
+        }
+    } catch {
+        // IndexedDB must never block the recording UI.
     }
 }
 
