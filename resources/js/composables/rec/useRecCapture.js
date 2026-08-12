@@ -21,15 +21,24 @@ function isAppleMobile() {
 }
 
 function pickMimeType() {
-    const types = isAppleMobile()
-        ? ['video/mp4', 'video/mp4;codecs=avc1', 'video/mp4;codecs=mp4a.40.2']
-        : [
-            'video/webm;codecs=vp8,opus',
-            'video/webm;codecs=vp8',
-            'video/webm',
-            'video/mp4',
-        ];
-    return types.find((type) => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(type)) || '';
+    if (typeof MediaRecorder === 'undefined') return '';
+
+    // On iOS, an empty mimeType (browser default) is often more stable than forcing mp4.
+    if (isAppleMobile()) {
+        const types = ['', 'video/mp4'];
+        for (const type of types) {
+            if (!type || MediaRecorder.isTypeSupported(type)) return type;
+        }
+        return '';
+    }
+
+    const types = [
+        'video/webm;codecs=vp8,opus',
+        'video/webm;codecs=vp8',
+        'video/webm',
+        'video/mp4',
+    ];
+    return types.find((type) => MediaRecorder.isTypeSupported(type)) || '';
 }
 
 export function useRecCapture(options = {}) {
@@ -44,6 +53,7 @@ export function useRecCapture(options = {}) {
     const error = ref(null);
     const previewEl = ref(null);
     const hasAudio = ref(true);
+    const availableMs = ref(0);
 
     let stream = null;
     let recorder = null;
@@ -53,17 +63,16 @@ export function useRecCapture(options = {}) {
     let recordingStartedAt = 0;
     let segmentTimer = null;
     let watchdogTimer = null;
+    let availableTimer = null;
     let wakeLock = null;
     let keepRecording = false;
     let operationChain = Promise.resolve();
     const mutedSince = new Map();
-    // iOS Safari often kills the tab when MediaRecorder rotates + IndexedDB write often.
-    // Prefer long segments and in-memory retention; rotate less.
     const segmentMs = Math.max(
         config.segment_seconds * 1000,
-        isAppleMobile() ? 45_000 : config.segment_seconds * 1000,
+        isAppleMobile() ? 60_000 : config.segment_seconds * 1000,
     );
-    const maxLocalSegments = isAppleMobile() ? 4 : 24;
+    const maxLocalSegments = isAppleMobile() ? 3 : 24;
     let encodingStarted = false;
     let rotating = false;
 
@@ -85,15 +94,63 @@ export function useRecCapture(options = {}) {
         return next;
     }
 
-    function attachPreview() {
-        if (!previewEl.value || !stream) return;
-        previewEl.value.srcObject = stream;
-        previewEl.value.muted = true;
-        previewEl.value.playsInline = true;
-        previewEl.value.play().catch(() => {});
+    function tickAvailableMs() {
+        if (!recordingStartedAt) {
+            availableMs.value = 0;
+            return 0;
+        }
+        const ms = Math.min(
+            Math.max(1, Number(config.local_retention_seconds) || 180) * 1000,
+            Math.max(0, Date.now() - recordingStartedAt),
+        );
+        availableMs.value = ms;
+        return ms;
+    }
+
+    function startAvailableTimer() {
+        stopAvailableTimer();
+        tickAvailableMs();
+        availableTimer = setInterval(tickAvailableMs, 500);
+    }
+
+    function stopAvailableTimer() {
+        clearInterval(availableTimer);
+        availableTimer = null;
+    }
+
+    async function attachPreview() {
+        const video = previewEl.value;
+        if (!video || !stream) return false;
+
+        try {
+            video.setAttribute('playsinline', 'true');
+            video.setAttribute('webkit-playsinline', 'true');
+            video.muted = true;
+            video.autoplay = true;
+            if (video.srcObject !== stream) {
+                video.srcObject = stream;
+            }
+            const playResult = video.play();
+            if (playResult?.then) await playResult.catch(() => {});
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    async function waitForPreview(timeoutMs = 4_000) {
+        const started = Date.now();
+        while (Date.now() - started < timeoutMs) {
+            await attachPreview();
+            const video = previewEl.value;
+            if (video && video.srcObject && video.readyState >= 2) return true;
+            await wait(200);
+        }
+        return !!(previewEl.value?.srcObject);
     }
 
     async function acquireWakeLock() {
+        if (isAppleMobile()) return;
         if (!navigator.wakeLock?.request || document.visibilityState !== 'visible') return;
         try {
             wakeLock = await navigator.wakeLock.request('screen');
@@ -106,11 +163,9 @@ export function useRecCapture(options = {}) {
     }
 
     function recorderOptions(mimeType) {
+        // Bitrate hints crash or freeze some iOS Safari builds — keep options minimal.
         if (isAppleMobile()) {
-            return {
-                ...(mimeType ? { mimeType } : {}),
-                videoBitsPerSecond: 700_000,
-            };
+            return mimeType ? { mimeType } : {};
         }
 
         return {
@@ -148,11 +203,16 @@ export function useRecCapture(options = {}) {
         chunks = [];
         segmentStartedAt = Date.now();
         const mimeType = pickMimeType();
-        const attempts = [
-            () => new MediaRecorder(stream, recorderOptions(mimeType)),
-            () => new MediaRecorder(stream, mimeType ? { mimeType } : {}),
-            () => new MediaRecorder(stream),
-        ];
+        const attempts = isAppleMobile()
+            ? [
+                () => new MediaRecorder(stream),
+                () => new MediaRecorder(stream, mimeType ? { mimeType } : {}),
+            ]
+            : [
+                () => new MediaRecorder(stream, recorderOptions(mimeType)),
+                () => new MediaRecorder(stream, mimeType ? { mimeType } : {}),
+                () => new MediaRecorder(stream),
+            ];
 
         let created = null;
         let lastError = null;
@@ -172,7 +232,7 @@ export function useRecCapture(options = {}) {
 
         recorder = created;
         bindRecorder(recorder);
-        // iOS Safari often crashes or never emits data when start(timeslice) is used.
+        // Never use timeslice on iOS — it commonly freezes Safari.
         if (isAppleMobile()) {
             recorder.start();
         } else {
@@ -200,7 +260,7 @@ export function useRecCapture(options = {}) {
                 const endedAt = Date.now();
                 const blob = chunks.length
                     ? new Blob(chunks, {
-                        type: (activeRecorder.mimeType || chunks[0]?.type || 'video/webm').split(';')[0],
+                        type: (activeRecorder.mimeType || chunks[0]?.type || 'video/mp4').split(';')[0],
                     })
                     : null;
                 recorder = null;
@@ -244,7 +304,6 @@ export function useRecCapture(options = {}) {
                 uploadVerified: false,
             });
             await pruneOldSegments();
-            // Upload asynchronously so rotate/heartbeat are never blocked by network.
             Promise.resolve(options.onSegment?.(segment)).catch(() => {});
             return segment;
         } catch {
@@ -270,6 +329,7 @@ export function useRecCapture(options = {}) {
     }
 
     function startTimers() {
+        stopTimers();
         segmentTimer = setInterval(() => {
             if (document.visibilityState === 'hidden') return;
             rotate().catch(() => {});
@@ -291,6 +351,7 @@ export function useRecCapture(options = {}) {
                     mutedSince.delete(track);
                 }
             });
+            attachPreview();
         }, WATCHDOG_MS);
     }
 
@@ -304,17 +365,9 @@ export function useRecCapture(options = {}) {
     async function getMediaStream() {
         const attempts = isAppleMobile()
             ? [
-                {
-                    audio: false,
-                    video: {
-                        facingMode: { ideal: 'environment' },
-                        width: { ideal: 640 },
-                        height: { ideal: 360 },
-                        frameRate: { ideal: 15, max: 24 },
-                    },
-                },
-                { audio: false, video: { facingMode: { ideal: 'environment' } } },
                 { audio: false, video: true },
+                { audio: false, video: { facingMode: 'environment' } },
+                { audio: false, video: { facingMode: { ideal: 'environment' } } },
             ]
             : [
                 {
@@ -370,9 +423,10 @@ export function useRecCapture(options = {}) {
             recordingStartedAt = Date.now();
             operationChain = Promise.resolve();
             isRecording.value = true;
-            attachPreview();
+            startAvailableTimer();
             await nextTick();
-            attachPreview();
+            await wait(50);
+            await waitForPreview();
             await acquireWakeLock();
             return true;
         } catch (captureError) {
@@ -397,6 +451,7 @@ export function useRecCapture(options = {}) {
         if (!isRecording.value || !stream || encodingStarted) return true;
 
         try {
+            await waitForPreview(2_000);
             let existing = [];
             try {
                 existing = await store.getSegments(sessionUuid());
@@ -405,9 +460,13 @@ export function useRecCapture(options = {}) {
             }
             sequence = existing.reduce((max, item) => Math.max(max, item.sequence || 0), 0);
             keepRecording = true;
+
+            // Isolate MediaRecorder start so a Safari freeze is less likely to race UI.
+            await wait(isAppleMobile() ? 1_000 : 0);
             startRecorder();
             startTimers();
             encodingStarted = true;
+            tickAvailableMs();
             return true;
         } catch (encodeError) {
             error.value = encodeError?.message || 'Não foi possível iniciar a gravação de vídeo.';
@@ -419,6 +478,7 @@ export function useRecCapture(options = {}) {
         keepRecording = false;
         encodingStarted = false;
         stopTimers();
+        stopAvailableTimer();
         try {
             await runExclusive(async () => persistFinalized(await finalizeRecorder()));
         } catch {
@@ -432,6 +492,7 @@ export function useRecCapture(options = {}) {
         wakeLock = null;
         isRecording.value = false;
         recordingStartedAt = 0;
+        availableMs.value = 0;
     }
 
     async function listLocalSegmentsInWindow(from, until = Date.now()) {
@@ -451,13 +512,7 @@ export function useRecCapture(options = {}) {
     }
 
     function getAvailableMsSync() {
-        if (recordingStartedAt) {
-            return Math.min(
-                config.local_retention_seconds * 1000,
-                Math.max(0, Date.now() - recordingStartedAt),
-            );
-        }
-        return 0;
+        return tickAvailableMs();
     }
 
     async function getAvailableMs() {
@@ -465,8 +520,9 @@ export function useRecCapture(options = {}) {
     }
 
     async function handleVisibilityChange() {
-        if (isRecording.value && document.visibilityState === 'visible' && !wakeLock) {
-            await acquireWakeLock();
+        if (isRecording.value && document.visibilityState === 'visible') {
+            await attachPreview();
+            if (!wakeLock) await acquireWakeLock();
         }
     }
 
@@ -488,6 +544,8 @@ export function useRecCapture(options = {}) {
         error,
         previewEl,
         hasAudio,
+        availableMs,
+        attachPreview,
         getAvailableMs,
         getAvailableMsSync,
         listLocalSegmentsInWindow,

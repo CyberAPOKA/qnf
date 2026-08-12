@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { Link } from '@inertiajs/vue3';
 import RecActiveCameras from '@/Components/Rec/RecActiveCameras.vue';
 import RecCameraHealthCard from '@/Components/Rec/RecCameraHealthCard.vue';
@@ -36,7 +36,6 @@ const isTogglingRec = ref(false);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
 const preferLandscapeHint = ref(false);
-const availableMs = ref(0);
 
 function isAppleMobile() {
     return /iPad|iPhone|iPod/i.test(navigator.userAgent)
@@ -71,9 +70,11 @@ const {
     isSupported,
     error: captureError,
     previewEl,
+    availableMs,
     start: startCapture,
     startEncoding,
     stop: stopCapture,
+    attachPreview,
 } = capture;
 
 const {
@@ -92,8 +93,10 @@ const {
     isScopeCoolingDown,
     health,
     receiveSave,
+    availableMs: sessionAvailableMs,
 } = recSession;
 
+const healthLabel = computed(() => health.label.value);
 const activeRecorderCount = computed(() => recorders.value.length);
 const isThisDeviceRecording = computed(() => isRecording.value);
 const takenAngles = computed(() =>
@@ -106,6 +109,10 @@ const canStartRec = computed(() =>
     && !isRegistering.value,
 );
 const canSave = computed(() => activeRecorderCount.value > 0 && !isSaving.value);
+
+watch(availableMs, (ms) => {
+    if (sessionAvailableMs) sessionAvailableMs.value = ms;
+}, { immediate: true });
 
 function canSaveScope(scope) {
     if (!canSave.value) return false;
@@ -124,8 +131,11 @@ function selectAngle(tag) {
     selectedAngle.value = tag;
 }
 
-function setPreviewElement(element) {
+async function setPreviewElement(element) {
     previewEl.value = element;
+    if (isRecording.value) {
+        await attachPreview?.();
+    }
 }
 
 async function lockLandscape() {
@@ -150,7 +160,10 @@ function unlockOrientation() {
 async function enterFullscreen() {
     isFullscreen.value = true;
     preferLandscapeHint.value = window.matchMedia('(orientation: portrait)').matches;
-    if (isAppleMobile()) return;
+    if (isAppleMobile()) {
+        await attachPreview?.();
+        return;
+    }
 
     await lockLandscape();
     const element = stageEl.value?.$el || stageEl.value;
@@ -206,12 +219,14 @@ async function toggleRecMode() {
             return;
         }
 
-        // Camera preview first (user gesture). Encoding starts after the session is alive.
+        // Preview first (user gesture). Do NOT force fullscreen on iOS — blank video + fixed overlay looks like a white/black crash.
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
             return;
         }
+
+        await attachPreview?.();
 
         const registered = await registerRecorder(selectedAngle.value);
         if (!registered) {
@@ -220,19 +235,18 @@ async function toggleRecMode() {
             return;
         }
 
-        await enterFullscreen();
-
-        // Give iOS a short breathing room after getUserMedia + session before MediaRecorder.
+        // Wait until the buffer clock is visibly moving before MediaRecorder (Safari freeze risk).
         if (isAppleMobile()) {
-            await new Promise((resolve) => setTimeout(resolve, 750));
+            await new Promise((resolve) => setTimeout(resolve, 1_500));
+            await attachPreview?.();
+        } else {
+            await enterFullscreen();
         }
 
-        // Keep preview + session alive if encoding fails (common on some iOS builds).
-        // Heartbeats must continue so the lease does not expire and reload the page.
         const encoding = await startEncoding();
         if (!encoding) {
             localError.value = captureError.value
-                || 'Câmera e sessão ativas, mas a gravação de vídeo falhou neste aparelho. Mantenha a tela aberta e tente novamente.';
+                || 'Câmera e sessão ativas, mas a gravação de vídeo falhou neste aparelho. Mantenha a tela aberta.';
         } else {
             reloadWarning.value = null;
         }
@@ -262,13 +276,6 @@ async function handleSave(scope = 'all') {
     await receiveSave(save);
 }
 
-async function updateAvailableMs() {
-    availableMs.value = capture.getAvailableMsSync?.() || await capture.getAvailableMs();
-    if (recSession?.availableMs) {
-        recSession.availableMs.value = availableMs.value;
-    }
-}
-
 onMounted(() => {
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
@@ -276,7 +283,7 @@ onMounted(() => {
     try {
         const key = `qnf-rec-active:${props.game.id}`;
         if (sessionStorage.getItem(key)) {
-            reloadWarning.value = 'O navegador recarregou a página durante o REC (comum no Safari/iPhone por memória). Toque em REC MODE de novo e mantenha a tela ligada.';
+            reloadWarning.value = 'O navegador reiniciou a página do REC. Toque em REC MODE de novo.';
             sessionStorage.removeItem(key);
         }
     } catch {
@@ -284,14 +291,9 @@ onMounted(() => {
     }
 });
 
-const availabilityTimer = typeof window !== 'undefined'
-    ? setInterval(updateAvailableMs, 1_000)
-    : null;
-
 onBeforeUnmount(() => {
     document.removeEventListener('fullscreenchange', onFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
-    clearInterval(availabilityTimer);
     unlockOrientation();
 });
 </script>
@@ -318,10 +320,11 @@ onBeforeUnmount(() => {
             <RecCameraStage ref="stageEl" :recording="isRecording" :fullscreen="isFullscreen"
                 :camera-tag="selectedAngle" :landscape-hint="preferLandscapeHint" :can-save-left="canSaveScope('left')"
                 :can-save-all="canSaveScope('all')" :can-save-right="canSaveScope('right')" :saving="isSaving"
+                :available-label="healthLabel"
                 @preview="setPreviewElement" @enter-fullscreen="enterFullscreen" @exit-fullscreen="exitFullscreen"
                 @save="handleSave" @stop="toggleRecMode" />
 
-            <RecCameraHealthCard v-if="isRecording" :status="health.status.value" :label="health.label.value"
+            <RecCameraHealthCard v-if="isRecording" :status="health.status.value" :label="healthLabel"
                 :color-class="health.colorClass.value" :available-ms="availableMs"
                 :pending-uploads="uploadQueue.pendingCount.value" :has-audio="capture.hasAudio.value" />
 

@@ -388,7 +388,7 @@ export function useRecSession(props, options = {}) {
         heartbeatInFlight = true;
 
         // Never await IndexedDB before the keep-alive HTTP call — iOS can hang forever there.
-        availableMs.value = capture?.getAvailableMsSync?.() || 0;
+        availableMs.value = capture?.getAvailableMsSync?.() ?? 0;
 
         const url = resolveUrl('games.rec.sessions.heartbeat', '/heartbeat');
         if (!url) {
@@ -402,7 +402,6 @@ export function useRecSession(props, options = {}) {
             const response = await fetch(url, {
                 method: 'POST',
                 credentials: 'same-origin',
-                keepalive: true,
                 headers: {
                     Accept: 'application/json',
                     'Content-Type': 'application/json',
@@ -417,7 +416,6 @@ export function useRecSession(props, options = {}) {
                     camera_state: capture?.isRecording?.value ? 'recording' : 'stopped',
                     client_sent_at_ms: Date.now(),
                 }),
-                signal: AbortSignal.timeout ? AbortSignal.timeout(12_000) : undefined,
             });
 
             if (!response.ok) {
@@ -631,7 +629,7 @@ export function useRecSession(props, options = {}) {
         isSupported: capture?.isSupported,
         captureError: capture?.error,
         sessionExpired,
-        availableMs,
+        availableMs: capture?.availableMs || availableMs,
         targetBufferMs: config.buffer_seconds * 1000,
         pendingUploads: uploadQueue?.pendingCount,
         heartbeatFailures,
