@@ -1,5 +1,3 @@
-# PROMPT PARA O CURSOR IA — REESTRUTURAÇÃO COMPLETA DO MÓDULO REC DE FUTSAL
-
 ## PAPEL
 
 Você é um engenheiro de software sênior responsável por transformar o módulo de gravação de partidas de futsal em um sistema altamente confiável, resiliente, rápido, auditável e seguro.
