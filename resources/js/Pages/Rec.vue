@@ -1,7 +1,6 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { Link } from '@inertiajs/vue3';
-import AppLayout from '@/Layouts/AppLayout.vue';
 import RecActiveCameras from '@/Components/Rec/RecActiveCameras.vue';
 import RecCameraHealthCard from '@/Components/Rec/RecCameraHealthCard.vue';
 import RecCameraPositionSelector from '@/Components/Rec/RecCameraPositionSelector.vue';
@@ -271,82 +270,43 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-    <AppLayout title="REC">
-        <div class="py-4 pb-28">
-            <div class="max-w-lg mx-auto px-4 space-y-5">
-                <div
-                    v-if="localError || captureError || saveError"
-                    class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3"
-                >
-                    {{ localError || captureError || saveError }}
-                </div>
-                <div v-if="!isSupported" class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3">
-                    Seu navegador não suporta gravação. Use Chrome no Android para melhor resultado.
-                </div>
-
-                <RecCameraPositionSelector
-                    v-if="!isThisDeviceRecording"
-                    :selected="selectedAngle"
-                    :taken="takenAngles"
-                    :disabled="isThisDeviceRecording"
-                    @select="selectAngle"
-                />
-
-                <RecCameraStage
-                    ref="stageEl"
-                    :recording="isRecording"
-                    :fullscreen="isFullscreen"
-                    :camera-tag="selectedAngle"
-                    :landscape-hint="preferLandscapeHint"
-                    :can-save-left="canSaveScope('left')"
-                    :can-save-all="canSaveScope('all')"
-                    :can-save-right="canSaveScope('right')"
-                    :saving="isSaving"
-                    @preview="setPreviewElement"
-                    @enter-fullscreen="enterFullscreen"
-                    @exit-fullscreen="exitFullscreen"
-                    @save="handleSave"
-                    @stop="toggleRecMode"
-                />
-
-                <RecCameraHealthCard
-                    v-if="isRecording"
-                    :status="health.status.value"
-                    :label="health.label.value"
-                    :color-class="health.colorClass.value"
-                    :available-ms="availableMs"
-                    :pending-uploads="uploadQueue.pendingCount.value"
-                    :has-audio="capture.hasAudio.value"
-                />
-
-                <RecSaveControls
-                    :recording="isThisDeviceRecording"
-                    :can-start="canStartRec"
-                    :toggling="isTogglingRec"
-                    :registering="isRegistering"
-                    :saving="isSaving"
-                    :cooldown="saveCooldownRemaining || 0"
-                    :cooldown-left="scopeCooldowns?.left || 0"
-                    :cooldown-right="scopeCooldowns?.right || 0"
-                    :cooldown-all="scopeCooldowns?.all || 0"
-                    :can-left="canSaveScope('left')"
-                    :can-all="canSaveScope('all')"
-                    :can-right="canSaveScope('right')"
-                    @toggle="toggleRecMode"
-                    @save="handleSave"
-                />
-
-                <RecActiveCameras :cameras="recorders" :own-id="recorderId" />
-                <RecPendingUploads
-                    :jobs="uploadQueue.jobs.value"
-                    :processing="uploadQueue.isProcessing.value"
-                />
-                <RecSaveList :saves="recentSaves" :pending="pendingSaves" />
-
-                <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
-                    Voltar ao Dashboard
-                </Link>
+    <div class="py-4 pb-28">
+        <div class="max-w-lg mx-auto px-4 space-y-5">
+            <div v-if="localError || captureError || saveError"
+                class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
+                {{ localError || captureError || saveError }}
             </div>
+            <div v-if="!isSupported"
+                class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3">
+                Seu navegador não suporta gravação. Use Chrome no Android para melhor resultado.
+            </div>
+
+            <RecCameraPositionSelector v-if="!isThisDeviceRecording" :selected="selectedAngle" :taken="takenAngles"
+                :disabled="isThisDeviceRecording" @select="selectAngle" />
+
+            <RecCameraStage ref="stageEl" :recording="isRecording" :fullscreen="isFullscreen"
+                :camera-tag="selectedAngle" :landscape-hint="preferLandscapeHint" :can-save-left="canSaveScope('left')"
+                :can-save-all="canSaveScope('all')" :can-save-right="canSaveScope('right')" :saving="isSaving"
+                @preview="setPreviewElement" @enter-fullscreen="enterFullscreen" @exit-fullscreen="exitFullscreen"
+                @save="handleSave" @stop="toggleRecMode" />
+
+            <RecCameraHealthCard v-if="isRecording" :status="health.status.value" :label="health.label.value"
+                :color-class="health.colorClass.value" :available-ms="availableMs"
+                :pending-uploads="uploadQueue.pendingCount.value" :has-audio="capture.hasAudio.value" />
+
+            <RecSaveControls :recording="isThisDeviceRecording" :can-start="canStartRec" :toggling="isTogglingRec"
+                :registering="isRegistering" :saving="isSaving" :cooldown="saveCooldownRemaining || 0"
+                :cooldown-left="scopeCooldowns?.left || 0" :cooldown-right="scopeCooldowns?.right || 0"
+                :cooldown-all="scopeCooldowns?.all || 0" :can-left="canSaveScope('left')" :can-all="canSaveScope('all')"
+                :can-right="canSaveScope('right')" @toggle="toggleRecMode" @save="handleSave" />
+
+            <RecActiveCameras :cameras="recorders" :own-id="recorderId" />
+            <RecPendingUploads :jobs="uploadQueue.jobs.value" :processing="uploadQueue.isProcessing.value" />
+            <RecSaveList :saves="recentSaves" :pending="pendingSaves" />
+
+            <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
+                Voltar ao Dashboard
+            </Link>
         </div>
-    </AppLayout>
+    </div>
 </template>

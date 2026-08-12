@@ -54,11 +54,11 @@ const streakPhrase = computed(() => {
     }
 
     if (streakType.value === 'skulls') {
-        return 'CAVEIRA'
+        return 'O JUSTICEIRO'
     }
 
     if (streakType.value === 'dragon') {
-        return 'O DRAGÃO'
+        return ''
     }
 
     return null

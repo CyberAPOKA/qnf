@@ -309,7 +309,7 @@ const isPodium = computed(() =>
 }
 
 .ranking-card--streak-skulls {
-    --streak-color: #94a3b8;
+    --streak-color: #dbdbdb;
     --streak-rgb: 148, 163, 184;
 }
 
