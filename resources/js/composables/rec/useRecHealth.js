@@ -16,13 +16,14 @@ export function useRecHealth(signals = {}) {
         const targetBufferMs = Math.max(1, Number(value(signals.targetBufferMs, 30_000)));
         const pendingUploads = Number(value(signals.pendingUploads, 0));
         const heartbeatFailures = Number(value(signals.heartbeatFailures, 0));
-        const storageCritical = value(signals.storageCritical, false);
         const trackEnded = value(signals.trackEnded, false);
+        const recorderActive = value(signals.recorderActive, false);
 
-        if (!supported || sessionExpired || storageCritical || trackEnded) return 'critical';
+        if (!supported || sessionExpired || trackEnded) return 'critical';
         if (!online) return 'offline';
         if (captureError || heartbeatFailures >= 3 || pendingUploads >= 12) return 'degraded';
         if (!recording) return 'idle';
+        if (recording && !recorderActive && availableMs < 3000) return 'critical';
         if (availableMs < targetBufferMs) return 'warming_up';
         return 'healthy';
     });
@@ -30,21 +31,22 @@ export function useRecHealth(signals = {}) {
     const label = computed(() => {
         const availableMs = Number(value(signals.availableMs, 0));
         const targetBufferMs = Math.max(1, Number(value(signals.targetBufferMs, 30_000)));
-        const availableSec = Math.max(0, Math.round(availableMs / 1000));
+        const availableSec = Math.min(
+            Math.max(0, Math.round(targetBufferMs / 1000)),
+            Math.max(0, Math.round(availableMs / 1000)),
+        );
         const targetSec = Math.max(1, Math.round(targetBufferMs / 1000));
 
         if (status.value === 'warming_up') {
-            const sec = Number.isFinite(availableSec) ? availableSec : 0;
-            const target = Number.isFinite(targetSec) ? targetSec : 30;
-            return `Buffer ${sec}/${target}s`;
+            return `${availableSec}/${targetSec}s`;
         }
 
         return ({
             idle: 'Parado',
-            healthy: `Pronto · ${Number.isFinite(availableSec) ? availableSec : 0}s`,
+            healthy: `${targetSec}/${targetSec}s`,
             degraded: 'Conexão instável',
             offline: 'Offline',
-            critical: 'Atenção necessária',
+            critical: 'Câmera interrompida',
         })[status.value] || status.value;
     });
 

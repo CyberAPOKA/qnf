@@ -9,6 +9,8 @@ import RecSaveControls from '@/Components/Rec/RecSaveControls.vue';
 import RecSaveList from '@/Components/Rec/RecSaveList.vue';
 import { useRecCapture } from '@/composables/rec/useRecCapture';
 import { useRecSession } from '@/composables/rec/useRecSession';
+import { isAppleMobile } from '@/composables/rec/recPage';
+import { recDiag } from '@/composables/rec/recDiag';
 
 const props = defineProps({
     game: Object,
@@ -33,11 +35,6 @@ const isFullscreen = ref(false);
 const stageEl = ref(null);
 const preferLandscapeHint = ref(false);
 
-function isAppleMobile() {
-    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
 const capture = useRecCapture({
     config: props.rec_config,
 });
@@ -53,9 +50,12 @@ const {
     previewEl,
     availableMs,
     availableSec,
+    trackEnded,
     start: startCapture,
     stop: stopCapture,
     attachPreview,
+    hasBuffer,
+    checkVisibility,
     bufferSeconds: captureBufferSeconds,
     hasAudio,
 } = capture;
@@ -79,7 +79,9 @@ const {
 } = recSession;
 
 const healthLabel = computed(() => health.label.value);
-const bufferSec = computed(() => Math.max(0, Number(availableSec.value) || Math.floor((availableMs.value || 0) / 1000)));
+const bufferSec = computed(() =>
+    Math.max(0, Number(availableSec.value) || Math.floor((availableMs.value || 0) / 1000)),
+);
 const bufferTargetSec = computed(() => props.buffer_seconds || captureBufferSeconds || 30);
 const activeRecorderCount = computed(() => recorders.value.length);
 const isThisDeviceRecording = computed(() => isRecording.value);
@@ -116,40 +118,20 @@ function setPreviewElement(element) {
     if (isRecording.value) attachPreview?.();
 }
 
-async function lockLandscape() {
-    preferLandscapeHint.value = window.matchMedia('(orientation: portrait)').matches;
-    try {
-        await screen.orientation?.lock?.('landscape');
-    } catch {
-        // unsupported
-    }
-}
-
-function unlockOrientation() {
-    try {
-        screen.orientation?.unlock?.();
-    } catch {
-        // ignore
-    }
-    preferLandscapeHint.value = false;
-}
-
 async function enterFullscreen() {
-    isFullscreen.value = true;
-    preferLandscapeHint.value = window.matchMedia('(orientation: portrait)').matches;
     if (isAppleMobile()) {
+        isFullscreen.value = true;
         attachPreview?.();
         return;
     }
-    await lockLandscape();
-
+    isFullscreen.value = true;
     const element = stageEl.value?.$el || stageEl.value;
     try {
         const request = element?.requestFullscreen?.bind(element)
             || element?.webkitRequestFullscreen?.bind(element);
         if (request) await request();
     } catch {
-        // CSS fullscreen fallback via isFullscreen
+        // CSS fullscreen fallback
     }
     attachPreview?.();
 }
@@ -163,15 +145,20 @@ async function exitFullscreen() {
         // ignore
     }
     isFullscreen.value = false;
-    unlockOrientation();
 }
 
 function onFullscreenChange() {
+    if (isAppleMobile()) return;
     const native = !!(document.fullscreenElement || document.webkitFullscreenElement);
-    if (!native && isFullscreen.value && isAppleMobile()) return;
-    if (!native) {
-        isFullscreen.value = false;
-        unlockOrientation();
+    if (!native) isFullscreen.value = false;
+}
+
+function onVisibilityReturn() {
+    if (document.visibilityState !== 'visible') return;
+    const result = checkVisibility?.();
+    if (result && !result.ok && isRecording.value) {
+        localError.value = 'A câmera foi interrompida. Toque em REC MODE novamente.';
+        recDiag('REC_VISIBILITY_CHECK', { ok: false, reason: result.reason });
     }
 }
 
@@ -200,16 +187,14 @@ async function toggleRecMode() {
             return;
         }
 
-        // Start camera first (user gesture), then register session.
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
             return;
         }
 
-        // Give Safari a breath before the session HTTP call.
         if (isAppleMobile()) {
-            await new Promise((resolve) => setTimeout(resolve, 300));
+            await new Promise((resolve) => setTimeout(resolve, 500));
         }
 
         const registered = await registerRecorder(selectedAngle.value);
@@ -243,8 +228,8 @@ async function toggleRecMode() {
 
 async function handleSave(scope = 'all') {
     localError.value = null;
-    if (isThisDeviceRecording.value && availableMs.value < 2000) {
-        localError.value = 'Aguarde 2s de gravação e tente de novo.';
+    if (isThisDeviceRecording.value && !hasBuffer?.()) {
+        localError.value = 'Aguarde o buffer encher um pouco e tente de novo.';
         return;
     }
     const save = await triggerSave(scope);
@@ -255,92 +240,97 @@ async function handleSave(scope = 'all') {
 onMounted(() => {
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    document.addEventListener('visibilitychange', onVisibilityReturn);
+    window.addEventListener('pageshow', onVisibilityReturn);
 });
 
 onBeforeUnmount(() => {
     document.removeEventListener('fullscreenchange', onFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
-    unlockOrientation();
+    document.removeEventListener('visibilitychange', onVisibilityReturn);
+    window.removeEventListener('pageshow', onVisibilityReturn);
+    if (isRecording.value) {
+        stopCapture();
+    }
 });
 </script>
 
 <template>
-        <div class="py-4 pb-28">
-            <div class="max-w-lg mx-auto px-4 space-y-5">
-                <div
-                    v-if="localError || captureError || saveError"
-                    class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3"
-                >
-                    {{ localError || captureError || saveError }}
-                </div>
-                <div
-                    v-if="!isSupported"
-                    class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3"
-                >
-                    Seu navegador não suporta gravação. Use Chrome no Android ou Safari atualizado.
-                </div>
-
-                <RecCameraPositionSelector
-                    v-if="!isThisDeviceRecording"
-                    :selected="selectedAngle"
-                    :taken="takenAngles"
-                    :disabled="isThisDeviceRecording"
-                    @select="selectAngle"
-                />
-
-                <RecCameraStage
-                    ref="stageEl"
-                    :recording="isRecording"
-                    :fullscreen="isFullscreen"
-                    :camera-tag="selectedAngle"
-                    :landscape-hint="preferLandscapeHint"
-                    :can-save-left="canSaveScope('left')"
-                    :can-save-all="canSaveScope('all')"
-                    :can-save-right="canSaveScope('right')"
-                    :saving="isSaving"
-                    :available-label="healthLabel"
-                    :buffer-sec="bufferSec"
-                    :buffer-target-sec="bufferTargetSec"
-                    @preview="setPreviewElement"
-                    @enter-fullscreen="enterFullscreen"
-                    @exit-fullscreen="exitFullscreen"
-                    @save="handleSave"
-                    @stop="toggleRecMode"
-                />
-
-                <RecCameraHealthCard
-                    v-if="isRecording"
-                    :status="health.status.value"
-                    :label="`${bufferSec}/${bufferTargetSec}s`"
-                    :color-class="health.colorClass.value"
-                    :available-ms="bufferSec * 1000"
-                    :pending-uploads="0"
-                    :has-audio="hasAudio"
-                />
-
-                <RecSaveControls
-                    :recording="isThisDeviceRecording"
-                    :can-start="canStartRec"
-                    :toggling="isTogglingRec"
-                    :registering="isRegistering"
-                    :saving="isSaving"
-                    :cooldown="saveCooldownRemaining || 0"
-                    :cooldown-left="scopeCooldowns?.left || 0"
-                    :cooldown-right="scopeCooldowns?.right || 0"
-                    :cooldown-all="scopeCooldowns?.all || 0"
-                    :can-left="canSaveScope('left')"
-                    :can-all="canSaveScope('all')"
-                    :can-right="canSaveScope('right')"
-                    @toggle="toggleRecMode"
-                    @save="handleSave"
-                />
-
-                <RecActiveCameras :cameras="recorders" :own-id="recorderId" />
-                <RecSaveList :saves="recentSaves" :pending="pendingSaves" />
-
-                <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
-                    Voltar ao Dashboard
-                </Link>
+    <div class="py-4 pb-28">
+        <div class="max-w-lg mx-auto px-4 space-y-5">
+            <div
+                v-if="localError || captureError || saveError || trackEnded"
+                class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3"
+            >
+                {{ localError || captureError || saveError || (trackEnded ? 'Câmera interrompida.' : '') }}
             </div>
+            <div
+                v-if="!isSupported"
+                class="rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-sm px-4 py-3"
+            >
+                Seu navegador não suporta gravação. Use Chrome no Android ou Safari atualizado.
+            </div>
+
+            <RecCameraPositionSelector
+                v-if="!isThisDeviceRecording"
+                :selected="selectedAngle"
+                :taken="takenAngles"
+                :disabled="isThisDeviceRecording"
+                @select="selectAngle"
+            />
+
+            <RecCameraStage
+                ref="stageEl"
+                :recording="isRecording"
+                :fullscreen="isFullscreen"
+                :camera-tag="selectedAngle"
+                :landscape-hint="false"
+                :can-save-left="canSaveScope('left')"
+                :can-save-all="canSaveScope('all')"
+                :can-save-right="canSaveScope('right')"
+                :saving="isSaving"
+                :buffer-sec="bufferSec"
+                :buffer-target-sec="bufferTargetSec"
+                @preview="setPreviewElement"
+                @enter-fullscreen="enterFullscreen"
+                @exit-fullscreen="exitFullscreen"
+                @save="handleSave"
+                @stop="toggleRecMode"
+            />
+
+            <RecCameraHealthCard
+                v-if="isRecording"
+                :status="health.status.value"
+                :label="healthLabel"
+                :color-class="health.colorClass.value"
+                :available-ms="bufferSec * 1000"
+                :pending-uploads="0"
+                :has-audio="hasAudio"
+            />
+
+            <RecSaveControls
+                :recording="isThisDeviceRecording"
+                :can-start="canStartRec"
+                :toggling="isTogglingRec"
+                :registering="isRegistering"
+                :saving="isSaving"
+                :cooldown="saveCooldownRemaining || 0"
+                :cooldown-left="scopeCooldowns?.left || 0"
+                :cooldown-right="scopeCooldowns?.right || 0"
+                :cooldown-all="scopeCooldowns?.all || 0"
+                :can-left="canSaveScope('left')"
+                :can-all="canSaveScope('all')"
+                :can-right="canSaveScope('right')"
+                @toggle="toggleRecMode"
+                @save="handleSave"
+            />
+
+            <RecActiveCameras :cameras="recorders" :own-id="recorderId" />
+            <RecSaveList :saves="recentSaves" :pending="pendingSaves" />
+
+            <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
+                Voltar ao Dashboard
+            </Link>
         </div>
+    </div>
 </template>

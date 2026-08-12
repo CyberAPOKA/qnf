@@ -1,49 +1,43 @@
 import { registerSW } from 'virtual:pwa-register';
+import { isRecPage } from './composables/rec/recPage';
+import { recDiag } from './composables/rec/recDiag';
 
 const CHECK_INTERVAL_MS = 60 * 1000;
+let recSwGuardInstalled = false;
 
-function isRecPage() {
-    return typeof window !== 'undefined' && /\/games\/\d+\/rec(?:\/|$|\?)/.test(window.location.pathname);
+function installRecSwGuard() {
+    if (recSwGuardInstalled || !('serviceWorker' in navigator)) return;
+    recSwGuardInstalled = true;
+
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (!isRecPage()) return;
+        recDiag('REC_SW_CONTROLLER_CHANGE', {});
+        // Never reload REC while recording — Safari would kill the camera session.
+    });
 }
 
-function isAppleMobile() {
-    if (typeof navigator === 'undefined') return false;
-    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
-async function disableServiceWorkersOnRec() {
+async function quietServiceWorkersOnRec() {
     if (!isRecPage() || !('serviceWorker' in navigator)) return;
+
+    installRecSwGuard();
 
     try {
         const registrations = await navigator.serviceWorker.getRegistrations();
         await Promise.all(registrations.map((registration) => registration.unregister()));
+        recDiag('REC_SW_UNREGISTERED', { count: registrations.length });
     } catch {
-        // Best-effort.
-    }
-    // Do NOT clear caches here — wiping caches on iOS mid-navigation can white-screen the tab.
-}
-
-function quietRealtimeOnRec() {
-    if (!isRecPage() || !isAppleMobile()) return;
-    try {
-        window.Echo?.disconnect?.();
-    } catch {
-        // ignore
+        // Best-effort only; do not wipe caches (Safari white-screen risk).
     }
 }
 
 if (isRecPage()) {
-    disableServiceWorkersOnRec();
-    quietRealtimeOnRec();
-    // Echo may connect after bootstrap; disconnect again shortly.
-    setTimeout(quietRealtimeOnRec, 0);
-    setTimeout(quietRealtimeOnRec, 500);
+    installRecSwGuard();
+    void quietServiceWorkersOnRec();
 } else {
     registerSW({
         immediate: true,
         onNeedRefresh() {
-            // Never reload automatically.
+            // Never auto-reload; user stays on current page until they choose to refresh.
         },
         onRegisteredSW(_swUrl, registration) {
             if (!registration) return;

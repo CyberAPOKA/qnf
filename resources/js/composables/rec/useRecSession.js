@@ -2,6 +2,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import axios from 'axios';
 import { useRecConfig } from './recConfig';
 import { useRecHealth } from './useRecHealth';
+import { isAppleMobile } from './recPage';
+import { recDiag } from './recDiag';
 
 function makeUuid() {
     return globalThis.crypto?.randomUUID?.()
@@ -12,20 +14,10 @@ function wait(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-function isAppleMobile() {
-    if (typeof navigator === 'undefined') return false;
-    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
 function csrfToken() {
     return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
 }
 
-/**
- * REC session: start/stop, plain-interval heartbeat, SAVE + ack upload.
- * No IndexedDB and no Blob Workers on the hot path.
- */
 export function useRecSession(props, options = {}) {
     const config = useRecConfig(props.rec_config);
     const capture = options.capture;
@@ -51,12 +43,20 @@ export function useRecSession(props, options = {}) {
     const gameId = props.game.id;
     const channelName = `game.${gameId}`;
     let heartbeatTimer = null;
+    let heartbeatDeferredTimer = null;
     let heartbeatInFlight = false;
     let pollTimer = null;
     let echoChannel = null;
     let stopped = false;
     let lastSaveAt = 0;
     let activeSaveRequests = 0;
+    let saveQueue = Promise.resolve();
+
+    function queueSaveWork(task) {
+        const next = saveQueue.then(task, task);
+        saveQueue = next.catch(() => {});
+        return next;
+    }
 
     function scopesLockedBy(captureScope) {
         if (captureScope === 'left') return ['left'];
@@ -199,6 +199,8 @@ export function useRecSession(props, options = {}) {
         if (!session.value || !snapshotParts?.length) return [];
 
         const uploaded = [];
+        const ext = capture.blobExtension?.() || 'mp4';
+
         for (const part of snapshotParts) {
             if (!part?.blob?.size) continue;
             const sequence = capture.nextSequence?.() || uploaded.length + 1;
@@ -212,8 +214,7 @@ export function useRecSession(props, options = {}) {
             form.append('client_started_at', new Date(part.startedAt).toISOString());
             form.append('client_ended_at', new Date(part.endedAt).toISOString());
             form.append('duration_ms', String(durationMs));
-            form.append('mime_type', part.blob.type || 'video/webm');
-            const ext = (part.blob.type || '').includes('mp4') ? 'mp4' : 'webm';
+            form.append('mime_type', part.blob.type || (ext === 'mp4' ? 'video/mp4' : 'video/webm'));
             form.append('segment', part.blob, `${sequence}-${uuid}.${ext}`);
 
             await axios.post(sessionPath('/segments'), form, {
@@ -264,7 +265,7 @@ export function useRecSession(props, options = {}) {
         await axios.post(
             sessionPath(`/save-requests/${encodeURIComponent(save.uuid)}/ack`),
             {
-                last_sequence: uploaded.at(-1)?.sequence || 0,
+                last_sequence: uploaded.at(-1)?.sequence || capture.getLastSegmentSequence?.() || 0,
                 buffer_available_ms: capture.getAvailableMsSync?.() ?? 0,
                 local_segments: uploaded.map((item) => ({
                     uuid: item.uuid,
@@ -286,40 +287,42 @@ export function useRecSession(props, options = {}) {
         });
     }
 
-    async function receiveSave(rawPayload) {
-        const save = normalizeSave(rawPayload);
-        if (!save?.uuid) return;
+    function receiveSave(rawPayload) {
+        return queueSaveWork(async () => {
+            const save = normalizeSave(rawPayload);
+            if (!save?.uuid) return;
 
-        mergeSave(save);
-        const targets = save.targets || rawPayload?.targets || [];
-        pendingPatch(save.uuid, {
-            targets,
-            expected: targets.length
-                || rawPayload?.expected_recorders
-                || rawPayload?.expectedRecorders
-                || 0,
-            received: save.clips?.length || 0,
-            status: save.status || 'waiting',
-        });
-
-        startScopeCooldown(
-            rawPayload?.cooldownSeconds
-                ?? rawPayload?.cooldown_seconds
-                ?? config.save_scope_cooldown_seconds
-                ?? 10,
-            save.uuid,
-            rawPayload?.lockedScopes || rawPayload?.locked_scopes,
-            save.capture_scope || rawPayload?.captureScope || 'all',
-        );
-
-        try {
-            await acknowledgeSave(save);
-        } catch (error) {
+            mergeSave(save);
+            const targets = save.targets || rawPayload?.targets || [];
             pendingPatch(save.uuid, {
-                status: 'failed',
-                error: error?.response?.data?.message || 'Não foi possível confirmar o SAVE.',
+                targets,
+                expected: targets.length
+                    || rawPayload?.expected_recorders
+                    || rawPayload?.expectedRecorders
+                    || 0,
+                received: save.clips?.length || 0,
+                status: save.status || 'waiting',
             });
-        }
+
+            startScopeCooldown(
+                rawPayload?.cooldownSeconds
+                    ?? rawPayload?.cooldown_seconds
+                    ?? config.save_scope_cooldown_seconds
+                    ?? 10,
+                save.uuid,
+                rawPayload?.lockedScopes || rawPayload?.locked_scopes,
+                save.capture_scope || rawPayload?.captureScope || 'all',
+            );
+
+            try {
+                await acknowledgeSave(save);
+            } catch (error) {
+                pendingPatch(save.uuid, {
+                    status: 'failed',
+                    error: error?.response?.data?.message || 'Não foi possível confirmar o SAVE.',
+                });
+            }
+        });
     }
 
     async function register(cameraTag) {
@@ -333,12 +336,12 @@ export function useRecSession(props, options = {}) {
                 capabilities: {
                     mime_types: typeof MediaRecorder === 'undefined'
                         ? []
-                        : ['video/mp4', 'video/webm;codecs=vp8,opus', 'video/webm;codecs=vp8', 'video/webm']
+                        : ['video/mp4', 'video/mp4;codecs=avc1', 'video/webm;codecs=vp8', 'video/webm']
                             .filter((type) => MediaRecorder.isTypeSupported(type)),
                     width: 1280,
                     height: 720,
                     fps: 24,
-                    has_audio: capture?.hasAudio?.value ?? true,
+                    has_audio: capture?.hasAudio?.value ?? false,
                 },
                 client: {
                     user_agent: navigator.userAgent,
@@ -365,7 +368,7 @@ export function useRecSession(props, options = {}) {
                 },
             ];
 
-            startHeartbeat();
+            scheduleHeartbeatStart();
             startPolling();
 
             try {
@@ -412,6 +415,10 @@ export function useRecSession(props, options = {}) {
 
     async function sendHeartbeat() {
         if (!session.value || stopped || heartbeatInFlight) return false;
+        if (document.visibilityState === 'hidden' && apple) {
+            return false;
+        }
+
         heartbeatInFlight = true;
 
         try {
@@ -426,7 +433,7 @@ export function useRecSession(props, options = {}) {
                     ...authHeaders(),
                 },
                 body: JSON.stringify({
-                    last_segment_sequence: 0,
+                    last_segment_sequence: capture?.getLastSegmentSequence?.() ?? 0,
                     buffer_available_ms: capture?.getAvailableMsSync?.() ?? 0,
                     queue_size: 0,
                     camera_state: capture?.isRecording?.value ? 'recording' : 'stopped',
@@ -440,6 +447,7 @@ export function useRecSession(props, options = {}) {
                     stopHeartbeat();
                     stopPolling();
                     saveError.value = 'Sessão da câmera expirou. Toque em REC MODE de novo.';
+                    recDiag('REC_SESSION_EXPIRED', { status: response.status });
                 }
                 heartbeatFailures.value += 1;
                 return false;
@@ -449,7 +457,7 @@ export function useRecSession(props, options = {}) {
             heartbeatFailures.value = 0;
             sessions.value = data.sessions || data.recorders || sessions.value;
             for (const pending of data.pending_saves || data.pendingSaves || []) {
-                receiveSave(pending).catch(() => {});
+                receiveSave(pending);
             }
             return true;
         } catch {
@@ -460,23 +468,33 @@ export function useRecSession(props, options = {}) {
         }
     }
 
-    function startHeartbeat() {
+    function scheduleHeartbeatStart() {
         stopHeartbeat();
-        // iPhone: keep-alive more sparse so MediaRecorder isn't starved.
         const seconds = apple
-            ? Math.max(8, Number(config.heartbeat_seconds) || 10)
-            : Math.max(5, Number(config.heartbeat_seconds) || 10);
-        void sendHeartbeat();
-        heartbeatTimer = setInterval(() => {
-            if (!session.value || stopped || sessionExpired.value) {
-                stopHeartbeat();
-                return;
-            }
+            ? Math.max(12, Number(config.heartbeat_seconds) || 10)
+            : Math.max(8, Number(config.heartbeat_seconds) || 10);
+        const deferMs = apple ? 4000 : 1500;
+
+        heartbeatDeferredTimer = setTimeout(() => {
+            heartbeatDeferredTimer = null;
             void sendHeartbeat();
-        }, seconds * 1000);
+            heartbeatTimer = setInterval(() => {
+                if (!session.value || stopped || sessionExpired.value) {
+                    stopHeartbeat();
+                    return;
+                }
+                void sendHeartbeat();
+            }, seconds * 1000);
+        }, deferMs);
+    }
+
+    function startHeartbeat() {
+        scheduleHeartbeatStart();
     }
 
     function stopHeartbeat() {
+        if (heartbeatDeferredTimer) clearTimeout(heartbeatDeferredTimer);
+        heartbeatDeferredTimer = null;
         if (heartbeatTimer) clearInterval(heartbeatTimer);
         heartbeatTimer = null;
     }
@@ -489,13 +507,18 @@ export function useRecSession(props, options = {}) {
             });
             const candidates = data.pending_saves || data.pending || [];
             for (const pending of candidates) {
-                receiveSave(pending).catch(() => {});
+                receiveSave(pending);
             }
 
-            await Promise.all(recentSaves.value.slice(0, 8).map(async (save) => {
+            const activeUuids = Object.entries(pendingSaves.value)
+                .filter(([, item]) => ['waiting', 'uploading', 'partial'].includes(item.status))
+                .map(([uuid]) => uuid)
+                .slice(0, 3);
+
+            for (const uuid of activeUuids) {
                 try {
                     const response = await axios.get(
-                        `/games/${gameId}/rec/save-requests/${encodeURIComponent(save.uuid)}`,
+                        `/games/${gameId}/rec/save-requests/${encodeURIComponent(uuid)}`,
                         { headers: authHeaders() },
                     );
                     const fresh = normalizeSave(response.data);
@@ -520,7 +543,7 @@ export function useRecSession(props, options = {}) {
                 } catch {
                     // retry next cycle
                 }
-            }));
+            }
         } catch (error) {
             if ([403, 409].includes(error?.response?.status)) {
                 sessionExpired.value = true;
@@ -528,19 +551,17 @@ export function useRecSession(props, options = {}) {
             }
         } finally {
             if (session.value && !stopped && !sessionExpired.value) {
-                pollTimer = setTimeout(
-                    pollPendingSaves,
-                    apple
-                        ? Math.max(4, config.pending_save_poll_seconds || 2) * 1000
-                        : (config.pending_save_poll_seconds || 2) * 1000,
-                );
+                const intervalMs = apple
+                    ? Math.max(4000, (config.pending_save_poll_seconds || 2) * 1000)
+                    : Math.max(2000, (config.pending_save_poll_seconds || 2) * 1000);
+                pollTimer = setTimeout(pollPendingSaves, intervalMs);
             }
         }
     }
 
     function startPolling() {
         stopPolling();
-        pollTimer = setTimeout(pollPendingSaves, 1500);
+        pollTimer = setTimeout(pollPendingSaves, apple ? 5000 : 2500);
     }
 
     function stopPolling() {
@@ -617,11 +638,10 @@ export function useRecSession(props, options = {}) {
     }
 
     function subscribe() {
-        if (apple) return;
-        if (!window.Echo) return;
+        if (apple || !window.Echo) return;
         echoChannel = window.Echo.private(channelName);
         echoChannel
-            .listen('.SaveClipRequested', receiveSave)
+            .listen('.SaveClipRequested', (payload) => receiveSave(payload))
             .listen('.ClipReady', handleClipReady)
             .listen('.ClipPreviewReady', handleClipReady)
             .listen('.RecorderJoined', (data) => {
@@ -630,6 +650,16 @@ export function useRecSession(props, options = {}) {
             .listen('.RecorderLeft', (data) => {
                 sessions.value = data.sessions || data.recorders || sessions.value;
             });
+    }
+
+    function onVisibilityChange() {
+        recDiag('REC_VISIBILITY_CHANGED', { state: document.visibilityState });
+        if (document.visibilityState === 'visible' && capture?.checkVisibility) {
+            const result = capture.checkVisibility();
+            if (!result.ok && isRecording.value) {
+                saveError.value = 'A câmera foi interrompida. Toque em REC MODE novamente.';
+            }
+        }
     }
 
     const health = useRecHealth({
@@ -643,16 +673,22 @@ export function useRecSession(props, options = {}) {
         targetBufferMs: config.buffer_seconds * 1000,
         pendingUploads: 0,
         heartbeatFailures,
+        trackEnded: capture?.trackEnded,
+        recorderActive: capture?.recorderActive,
     });
 
     onMounted(() => {
         subscribe();
+        document.addEventListener('visibilitychange', onVisibilityChange);
+        window.addEventListener('pageshow', onVisibilityChange);
     });
 
     onBeforeUnmount(() => {
         stopped = true;
         stopHeartbeat();
         stopPolling();
+        document.removeEventListener('visibilitychange', onVisibilityChange);
+        window.removeEventListener('pageshow', onVisibilityChange);
         if (scopeCooldownTimer) clearInterval(scopeCooldownTimer);
         if (echoChannel) {
             try {

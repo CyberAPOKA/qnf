@@ -60,9 +60,12 @@ watch(() => props.recording, async (recording) => {
             </span>
             <span
                 v-if="bufferTargetSec"
-                class="bg-amber-500/90 text-black text-xs font-semibold rounded-full px-3 py-1 tabular-nums"
+                class="text-xs font-semibold rounded-full px-3 py-1 tabular-nums"
+                :class="bufferSec >= bufferTargetSec
+                    ? 'bg-emerald-500/90 text-white'
+                    : 'bg-amber-500/90 text-black'"
             >
-                {{ Number(bufferSec) || 0 }}/{{ Number(bufferTargetSec) || 30 }}s
+                {{ bufferSec }}/{{ bufferTargetSec }}s
             </span>
         </div>
         <button
