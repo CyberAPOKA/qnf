@@ -2,6 +2,12 @@ const DB_NAME = 'qnf-rec';
 const DB_VERSION = 1;
 const IDB_TIMEOUT_MS = 2_500;
 
+function isAppleMobile() {
+    if (typeof navigator === 'undefined') return false;
+    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 function withTimeout(promise, label = 'IndexedDB') {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -78,17 +84,93 @@ function openDatabase() {
     }), 'IndexedDB open');
 }
 
-export function useRecSegmentStore() {
+function createMemoryBackend() {
+    const segments = new Map();
+    const jobs = new Map();
+    const sessions = new Map();
+    const processed = new Map();
+
+    return {
+        async putSegment(segment) {
+            const value = {
+                createdAt: Date.now(),
+                ...segment,
+                uuid: segment.uuid || crypto.randomUUID(),
+            };
+            segments.set(value.uuid, value);
+            return value;
+        },
+        async getSegments(sessionUuid = null) {
+            const values = [...segments.values()]
+                .filter((item) => !sessionUuid || item.sessionUuid === sessionUuid)
+                .sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+            return values;
+        },
+        async deleteSegment(uuid) {
+            segments.delete(uuid);
+        },
+        async enqueueJob(job) {
+            const value = {
+                attempts: 0,
+                createdAt: Date.now(),
+                nextAttemptAt: 0,
+                status: 'queued',
+                ...job,
+                id: job.id || crypto.randomUUID(),
+                updatedAt: Date.now(),
+            };
+            jobs.set(value.id, value);
+            return value;
+        },
+        async listJobs(status = null) {
+            return [...jobs.values()]
+                .filter((item) => !status || item.status === status)
+                .sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+        },
+        async updateJob(id, patch) {
+            const current = jobs.get(id);
+            if (!current) return null;
+            const value = { ...current, ...patch, id, updatedAt: Date.now() };
+            jobs.set(id, value);
+            return value;
+        },
+        async getSession(id = 'current') {
+            return sessions.get(id) || null;
+        },
+        async putSession(session, id = 'current') {
+            const value = { ...session, id, updatedAt: Date.now() };
+            sessions.set(id, value);
+            return value;
+        },
+        async clearSession(id = 'current') {
+            sessions.delete(id);
+        },
+        async markProcessed(key, metadata = {}) {
+            const value = { ...metadata, key, processedAt: Date.now() };
+            processed.set(key, value);
+            return value;
+        },
+        async wasProcessed(key) {
+            return processed.has(key);
+        },
+    };
+}
+
+export function useRecSegmentStore(options = {}) {
+    const preferMemory = options.memoryOnly === true
+        || (options.memoryOnly !== false && isAppleMobile());
+
+    const memory = createMemoryBackend();
     let databasePromise;
-    let databaseFailed = false;
+    let useMemory = preferMemory;
 
     function database() {
-        if (databaseFailed) {
-            return Promise.reject(new Error('IndexedDB unavailable'));
+        if (useMemory) {
+            return Promise.reject(new Error('IndexedDB skipped (memory mode)'));
         }
 
         databasePromise ||= openDatabase().catch((error) => {
-            databaseFailed = true;
+            useMemory = true;
             databasePromise = null;
             throw error;
         });
@@ -104,91 +186,144 @@ export function useRecSegmentStore() {
         return result;
     }
 
+    async function withFallback(memoryFn, idbFn) {
+        if (useMemory) return memoryFn();
+        try {
+            return await idbFn();
+        } catch {
+            useMemory = true;
+            return memoryFn();
+        }
+    }
+
     async function putSegment(segment) {
-        const value = {
-            createdAt: Date.now(),
-            ...segment,
-            uuid: segment.uuid || crypto.randomUUID(),
-        };
-        await useStore('segments', 'readwrite', (store) => requestAsPromise(store.put(value)));
-        return value;
+        return withFallback(
+            () => memory.putSegment(segment),
+            async () => {
+                const value = {
+                    createdAt: Date.now(),
+                    ...segment,
+                    uuid: segment.uuid || crypto.randomUUID(),
+                };
+                await useStore('segments', 'readwrite', (store) => requestAsPromise(store.put(value)));
+                return value;
+            },
+        );
     }
 
     async function getSegments(sessionUuid = null) {
-        return useStore('segments', 'readonly', async (store) => {
-            const values = sessionUuid
-                ? await requestAsPromise(store.index('sessionUuid').getAll(sessionUuid))
-                : await requestAsPromise(store.getAll());
+        return withFallback(
+            () => memory.getSegments(sessionUuid),
+            () => useStore('segments', 'readonly', async (store) => {
+                const values = sessionUuid
+                    ? await requestAsPromise(store.index('sessionUuid').getAll(sessionUuid))
+                    : await requestAsPromise(store.getAll());
 
-            return values.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
-        });
+                return values.sort((a, b) => (a.sequence ?? 0) - (b.sequence ?? 0));
+            }),
+        );
     }
 
     async function deleteSegment(uuid) {
-        await useStore('segments', 'readwrite', (store) => requestAsPromise(store.delete(uuid)));
+        return withFallback(
+            () => memory.deleteSegment(uuid),
+            () => useStore('segments', 'readwrite', (store) => requestAsPromise(store.delete(uuid))),
+        );
     }
 
     async function enqueueJob(job) {
-        const value = {
-            attempts: 0,
-            createdAt: Date.now(),
-            nextAttemptAt: 0,
-            status: 'queued',
-            ...job,
-            id: job.id || crypto.randomUUID(),
-            updatedAt: Date.now(),
-        };
-        await useStore('uploadJobs', 'readwrite', (store) => requestAsPromise(store.put(value)));
-        return value;
+        return withFallback(
+            () => memory.enqueueJob(job),
+            async () => {
+                const value = {
+                    attempts: 0,
+                    createdAt: Date.now(),
+                    nextAttemptAt: 0,
+                    status: 'queued',
+                    ...job,
+                    id: job.id || crypto.randomUUID(),
+                    updatedAt: Date.now(),
+                };
+                await useStore('uploadJobs', 'readwrite', (store) => requestAsPromise(store.put(value)));
+                return value;
+            },
+        );
     }
 
     async function listJobs(status = null) {
-        return useStore('uploadJobs', 'readonly', async (store) => {
-            const values = status
-                ? await requestAsPromise(store.index('status').getAll(status))
-                : await requestAsPromise(store.getAll());
-            return values.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-        });
+        return withFallback(
+            () => memory.listJobs(status),
+            () => useStore('uploadJobs', 'readonly', async (store) => {
+                const values = status
+                    ? await requestAsPromise(store.index('status').getAll(status))
+                    : await requestAsPromise(store.getAll());
+                return values.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+            }),
+        );
     }
 
     async function updateJob(id, patch) {
-        return useStore('uploadJobs', 'readwrite', async (store) => {
-            const current = await requestAsPromise(store.get(id));
-            if (!current) return null;
+        return withFallback(
+            () => memory.updateJob(id, patch),
+            () => useStore('uploadJobs', 'readwrite', async (store) => {
+                const current = await requestAsPromise(store.get(id));
+                if (!current) return null;
 
-            const value = { ...current, ...patch, id, updatedAt: Date.now() };
-            await requestAsPromise(store.put(value));
-            return value;
-        });
+                const value = { ...current, ...patch, id, updatedAt: Date.now() };
+                await requestAsPromise(store.put(value));
+                return value;
+            }),
+        );
     }
 
     async function getSession(id = 'current') {
-        return useStore('sessionMeta', 'readonly', (store) => requestAsPromise(store.get(id)));
+        return withFallback(
+            () => memory.getSession(id),
+            () => useStore('sessionMeta', 'readonly', (store) => requestAsPromise(store.get(id))),
+        );
     }
 
     async function putSession(session, id = 'current') {
-        const value = { ...session, id, updatedAt: Date.now() };
-        await useStore('sessionMeta', 'readwrite', (store) => requestAsPromise(store.put(value)));
-        return value;
+        return withFallback(
+            () => memory.putSession(session, id),
+            async () => {
+                const value = { ...session, id, updatedAt: Date.now() };
+                await useStore('sessionMeta', 'readwrite', (store) => requestAsPromise(store.put(value)));
+                return value;
+            },
+        );
     }
 
     async function clearSession(id = 'current') {
-        await useStore('sessionMeta', 'readwrite', (store) => requestAsPromise(store.delete(id)));
+        return withFallback(
+            () => memory.clearSession(id),
+            () => useStore('sessionMeta', 'readwrite', (store) => requestAsPromise(store.delete(id))),
+        );
     }
 
     async function markProcessed(key, metadata = {}) {
-        const value = { ...metadata, key, processedAt: Date.now() };
-        await useStore('processedKeys', 'readwrite', (store) => requestAsPromise(store.put(value)));
-        return value;
+        return withFallback(
+            () => memory.markProcessed(key, metadata),
+            async () => {
+                const value = { ...metadata, key, processedAt: Date.now() };
+                await useStore('processedKeys', 'readwrite', (store) => requestAsPromise(store.put(value)));
+                return value;
+            },
+        );
     }
 
     async function wasProcessed(key) {
-        const value = await useStore(
-            'processedKeys',
-            'readonly',
-            (store) => requestAsPromise(store.get(key)),
+        return withFallback(
+            () => memory.wasProcessed(key),
+            async () => {
+                const value = await useStore(
+                    'processedKeys',
+                    'readonly',
+                    (store) => requestAsPromise(store.get(key)),
+                );
+                return !!value;
+            },
         );
-        return !!value;
     }
 
     return {
@@ -203,5 +338,6 @@ export function useRecSegmentStore() {
         clearSession,
         markProcessed,
         wasProcessed,
+        isMemoryMode: () => useMemory,
     };
 }

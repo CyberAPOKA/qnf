@@ -31,13 +31,19 @@ const CAPTURE_SCOPE_TAGS = {
 
 const selectedAngle = ref(null);
 const localError = ref(null);
+const reloadWarning = ref(null);
 const isTogglingRec = ref(false);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
 const preferLandscapeHint = ref(false);
 const availableMs = ref(0);
 
-const segmentStore = useRecSegmentStore();
+function isAppleMobile() {
+    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+const segmentStore = useRecSegmentStore({ memoryOnly: isAppleMobile() });
 let recSession = null;
 
 const uploadQueue = useRecUploadQueue({
@@ -120,11 +126,6 @@ function selectAngle(tag) {
 
 function setPreviewElement(element) {
     previewEl.value = element;
-}
-
-function isAppleMobile() {
-    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
 async function lockLandscape() {
@@ -221,12 +222,19 @@ async function toggleRecMode() {
 
         await enterFullscreen();
 
+        // Give iOS a short breathing room after getUserMedia + session before MediaRecorder.
+        if (isAppleMobile()) {
+            await new Promise((resolve) => setTimeout(resolve, 750));
+        }
+
         // Keep preview + session alive if encoding fails (common on some iOS builds).
         // Heartbeats must continue so the lease does not expire and reload the page.
         const encoding = await startEncoding();
         if (!encoding) {
             localError.value = captureError.value
                 || 'Câmera e sessão ativas, mas a gravação de vídeo falhou neste aparelho. Mantenha a tela aberta e tente novamente.';
+        } else {
+            reloadWarning.value = null;
         }
     } catch (error) {
         localError.value = error?.response?.data?.message
@@ -264,10 +272,20 @@ async function updateAvailableMs() {
 onMounted(() => {
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
+    try {
+        const key = `qnf-rec-active:${props.game.id}`;
+        if (sessionStorage.getItem(key)) {
+            reloadWarning.value = 'O navegador recarregou a página durante o REC (comum no Safari/iPhone por memória). Toque em REC MODE de novo e mantenha a tela ligada.';
+            sessionStorage.removeItem(key);
+        }
+    } catch {
+        // sessionStorage may be unavailable.
+    }
 });
 
 const availabilityTimer = typeof window !== 'undefined'
-    ? setInterval(updateAvailableMs, 2_000)
+    ? setInterval(updateAvailableMs, 1_000)
     : null;
 
 onBeforeUnmount(() => {
@@ -281,6 +299,10 @@ onBeforeUnmount(() => {
 <template>
     <div class="py-4 pb-28">
         <div class="max-w-lg mx-auto px-4 space-y-5">
+            <div v-if="reloadWarning"
+                class="rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-sm px-4 py-3">
+                {{ reloadWarning }}
+            </div>
             <div v-if="localError || captureError || saveError"
                 class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
                 {{ localError || captureError || saveError }}

@@ -14,7 +14,7 @@ return [
 
     'heartbeat_seconds' => (int) env('REC_HEARTBEAT_SECONDS', 10),
 
-    'recorder_lease_seconds' => (int) env('REC_RECORDER_LEASE_SECONDS', 35),
+    'recorder_lease_seconds' => (int) env('REC_RECORDER_LEASE_SECONDS', 90),
 
     'save_debounce_milliseconds' => (int) env('REC_SAVE_DEBOUNCE_MILLISECONDS', 800),
 

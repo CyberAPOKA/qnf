@@ -13,6 +13,16 @@ function wait(milliseconds) {
     return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
+function isAppleMobile() {
+    if (typeof navigator === 'undefined') return false;
+    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+function csrfToken() {
+    return document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+}
+
 export function useRecSession(props, options = {}) {
     const config = useRecConfig(props.rec_config);
     const store = options.store || useRecSegmentStore();
@@ -94,6 +104,7 @@ export function useRecSession(props, options = {}) {
     const gameId = props.game.id;
     const channelName = `game.${gameId}`;
     let heartbeatTimer = null;
+    let heartbeatInFlight = false;
     let pollTimer = null;
     let echoChannel = null;
     let stopped = false;
@@ -114,6 +125,10 @@ export function useRecSession(props, options = {}) {
     }
 
     function resolveUrl(name, path, params = {}, current = session.value) {
+        // Ziggy has been unreliable on some iOS Safari builds; prefer concrete paths there.
+        if (isAppleMobile()) {
+            return sessionApiUrl(path, current);
+        }
         return routeName(name, { session: current?.uuid, ...params })
             || sessionApiUrl(path, current);
     }
@@ -263,8 +278,9 @@ export function useRecSession(props, options = {}) {
         stopped = false;
 
         try {
-            const startUrl = routeName('games.rec.sessions.start')
-                || `/games/${gameId}/rec/sessions`;
+            const startUrl = isAppleMobile()
+                ? `/games/${gameId}/rec/sessions`
+                : (routeName('games.rec.sessions.start') || `/games/${gameId}/rec/sessions`);
             const { data } = await axios.post(startUrl, {
                 camera_tag: cameraTag,
                 capabilities: {
@@ -305,7 +321,7 @@ export function useRecSession(props, options = {}) {
             ];
 
             // First heartbeat must succeed before MediaRecorder starts on iOS.
-            const heartbeatOk = await sendHeartbeat({ scheduleNext: true });
+            const heartbeatOk = await sendHeartbeat({ scheduleNext: false });
             if (!heartbeatOk) {
                 saveError.value = 'Sessão criada, mas o keep-alive falhou. Tente novamente.';
                 try {
@@ -316,9 +332,15 @@ export function useRecSession(props, options = {}) {
                 return false;
             }
 
+            ensureHeartbeatLoop();
             startPolling();
             setTimeout(() => uploadQueue?.processNow(), 1_500);
             store.putSession(created).catch(() => {});
+            try {
+                sessionStorage.setItem(`qnf-rec-active:${gameId}`, created.cameraTag || cameraTag);
+            } catch {
+                // sessionStorage may be blocked in private mode.
+            }
             return true;
         } catch (error) {
             const message = error?.response?.data?.message
@@ -352,12 +374,18 @@ export function useRecSession(props, options = {}) {
             // Stop is idempotent and the local session must still be closed.
         } finally {
             session.value = null;
+            try {
+                sessionStorage.removeItem(`qnf-rec-active:${gameId}`);
+            } catch {
+                // ignore
+            }
             await store.clearSession();
         }
     }
 
-    async function sendHeartbeat({ scheduleNext = true } = {}) {
-        if (!session.value || stopped) return false;
+    async function sendHeartbeat({ scheduleNext = false } = {}) {
+        if (!session.value || stopped || heartbeatInFlight) return false;
+        heartbeatInFlight = true;
 
         // Never await IndexedDB before the keep-alive HTTP call — iOS can hang forever there.
         availableMs.value = capture?.getAvailableMsSync?.() || 0;
@@ -366,53 +394,78 @@ export function useRecSession(props, options = {}) {
         if (!url) {
             heartbeatFailures.value += 1;
             saveError.value = 'Rota de heartbeat REC indisponível.';
+            heartbeatInFlight = false;
             return false;
         }
 
         try {
-            const { data } = await axios.post(url, {
-                last_segment_sequence: 0,
-                buffer_available_ms: availableMs.value,
-                queue_size: uploadQueue?.pendingCount?.value || 0,
-                camera_state: capture?.isRecording?.value ? 'recording' : 'stopped',
-                client_sent_at_ms: Date.now(),
-            }, {
-                headers: authHeaders(),
-                timeout: 12_000,
+            const response = await fetch(url, {
+                method: 'POST',
+                credentials: 'same-origin',
+                keepalive: true,
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': csrfToken(),
+                    ...authHeaders(),
+                },
+                body: JSON.stringify({
+                    last_segment_sequence: 0,
+                    buffer_available_ms: availableMs.value,
+                    queue_size: uploadQueue?.pendingCount?.value || 0,
+                    camera_state: capture?.isRecording?.value ? 'recording' : 'stopped',
+                    client_sent_at_ms: Date.now(),
+                }),
+                signal: AbortSignal.timeout ? AbortSignal.timeout(12_000) : undefined,
             });
 
+            if (!response.ok) {
+                if ([403, 409, 422].includes(response.status)) {
+                    sessionExpired.value = true;
+                    stopHeartbeat();
+                    stopPolling();
+                }
+                heartbeatFailures.value += 1;
+                return false;
+            }
+
+            const data = await response.json().catch(() => ({}));
             heartbeatFailures.value = 0;
             sessions.value = data.sessions || data.recorders || sessions.value;
             for (const pending of data.pending_saves || data.pendingSaves || []) {
-                // Do not await — SAVE handling must never stall the keep-alive loop (iOS IDB).
                 receiveSave(pending).catch(() => {});
             }
             return true;
-        } catch (error) {
+        } catch {
             heartbeatFailures.value += 1;
-            if ([403, 409].includes(error?.response?.status)) {
-                sessionExpired.value = true;
-                stopHeartbeat();
-                stopPolling();
-            }
             return false;
         } finally {
-            if (scheduleNext && session.value && !stopped && !sessionExpired.value) {
-                heartbeatTimer = setTimeout(
-                    () => sendHeartbeat({ scheduleNext: true }),
-                    config.heartbeat_seconds * 1000,
-                );
-            }
+            heartbeatInFlight = false;
+            if (scheduleNext) ensureHeartbeatLoop();
         }
+    }
+
+    function ensureHeartbeatLoop() {
+        if (heartbeatTimer || !session.value || stopped || sessionExpired.value) return;
+        const intervalMs = Math.max(5, Number(config.heartbeat_seconds) || 10) * 1000;
+        // Fire immediately is handled by callers; interval keeps lease alive even if one call hangs.
+        heartbeatTimer = setInterval(() => {
+            if (!session.value || stopped || sessionExpired.value) {
+                stopHeartbeat();
+                return;
+            }
+            sendHeartbeat({ scheduleNext: false });
+        }, intervalMs);
     }
 
     function startHeartbeat() {
         stopHeartbeat();
-        sendHeartbeat({ scheduleNext: true });
+        sendHeartbeat({ scheduleNext: false }).finally(() => ensureHeartbeatLoop());
     }
 
     function stopHeartbeat() {
-        clearTimeout(heartbeatTimer);
+        clearInterval(heartbeatTimer);
         heartbeatTimer = null;
     }
 
@@ -586,6 +639,8 @@ export function useRecSession(props, options = {}) {
 
     onMounted(async () => {
         subscribe();
+        // Memory-mode / iOS: do not revive a previous tab session after Safari killed the page.
+        if (isAppleMobile()) return;
         try {
             const stored = await store.getSession();
             if (stored?.gameId === gameId && stored.uuid && stored.token) {

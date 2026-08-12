@@ -57,11 +57,15 @@ export function useRecCapture(options = {}) {
     let keepRecording = false;
     let operationChain = Promise.resolve();
     const mutedSince = new Map();
+    // iOS Safari often kills the tab when MediaRecorder rotates + IndexedDB write often.
+    // Prefer long segments and in-memory retention; rotate less.
     const segmentMs = Math.max(
         config.segment_seconds * 1000,
-        isAppleMobile() ? 15_000 : config.segment_seconds * 1000,
+        isAppleMobile() ? 45_000 : config.segment_seconds * 1000,
     );
+    const maxLocalSegments = isAppleMobile() ? 4 : 24;
     let encodingStarted = false;
+    let rotating = false;
 
     function sessionUuid() {
         return typeof options.sessionUuid === 'function'
@@ -103,7 +107,10 @@ export function useRecCapture(options = {}) {
 
     function recorderOptions(mimeType) {
         if (isAppleMobile()) {
-            return mimeType ? { mimeType } : {};
+            return {
+                ...(mimeType ? { mimeType } : {}),
+                videoBitsPerSecond: 700_000,
+            };
         }
 
         return {
@@ -111,6 +118,19 @@ export function useRecCapture(options = {}) {
             videoBitsPerSecond: 1_200_000,
             ...(hasAudio.value ? { audioBitsPerSecond: 96_000 } : {}),
         };
+    }
+
+    async function pruneOldSegments() {
+        try {
+            const currentSession = sessionUuid();
+            const segments = await store.getSegments(currentSession);
+            const overflow = segments.length - maxLocalSegments;
+            if (overflow <= 0) return;
+            const doomed = segments.slice(0, overflow);
+            await Promise.all(doomed.map((segment) => store.deleteSegment(segment.uuid).catch(() => {})));
+        } catch {
+            // Retention is best-effort.
+        }
     }
 
     function bindRecorder(activeRecorder) {
@@ -223,7 +243,9 @@ export function useRecCapture(options = {}) {
                 blob: finalized.blob,
                 uploadVerified: false,
             });
-            await options.onSegment?.(segment);
+            await pruneOldSegments();
+            // Upload asynchronously so rotate/heartbeat are never blocked by network.
+            Promise.resolve(options.onSegment?.(segment)).catch(() => {});
             return segment;
         } catch {
             error.value = 'Não foi possível guardar o segmento localmente. O SAVE pode falhar neste aparelho.';
@@ -232,17 +254,26 @@ export function useRecCapture(options = {}) {
     }
 
     async function rotate() {
-        return runExclusive(async () => {
-            if (!recorder || recorder.state !== 'recording') return null;
-            const finalized = await finalizeRecorder();
-            const segment = await persistFinalized(finalized);
-            if (keepRecording) startRecorder();
-            return segment;
-        });
+        if (rotating) return null;
+        rotating = true;
+        try {
+            return await runExclusive(async () => {
+                if (!recorder || recorder.state !== 'recording') return null;
+                const finalized = await finalizeRecorder();
+                const segment = await persistFinalized(finalized);
+                if (keepRecording) startRecorder();
+                return segment;
+            });
+        } finally {
+            rotating = false;
+        }
     }
 
     function startTimers() {
-        segmentTimer = setInterval(() => rotate().catch(() => {}), segmentMs);
+        segmentTimer = setInterval(() => {
+            if (document.visibilityState === 'hidden') return;
+            rotate().catch(() => {});
+        }, segmentMs);
         watchdogTimer = setInterval(() => {
             if (!stream) return;
             stream.getTracks().forEach((track) => {
@@ -273,8 +304,16 @@ export function useRecCapture(options = {}) {
     async function getMediaStream() {
         const attempts = isAppleMobile()
             ? [
+                {
+                    audio: false,
+                    video: {
+                        facingMode: { ideal: 'environment' },
+                        width: { ideal: 640 },
+                        height: { ideal: 360 },
+                        frameRate: { ideal: 15, max: 24 },
+                    },
+                },
                 { audio: false, video: { facingMode: { ideal: 'environment' } } },
-                { audio: true, video: { facingMode: { ideal: 'environment' } } },
                 { audio: false, video: true },
             ]
             : [

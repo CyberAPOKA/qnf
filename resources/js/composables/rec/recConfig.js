@@ -6,7 +6,7 @@ export const REC_CONFIG_DEFAULTS = Object.freeze({
     local_retention_seconds: 180,
     post_roll_seconds: 2,
     heartbeat_seconds: 10,
-    recorder_lease_seconds: 35,
+    recorder_lease_seconds: 90,
     save_debounce_milliseconds: 800,
     save_scope_cooldown_seconds: 10,
     pending_save_poll_seconds: 2,

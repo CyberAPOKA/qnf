@@ -26,13 +26,23 @@ export function useRecHealth(signals = {}) {
         return 'healthy';
     });
 
-    const label = computed(() => ({
-        healthy: 'Saudável',
-        warming_up: 'Aquecendo buffer',
-        degraded: 'Conexão instável',
-        offline: 'Offline',
-        critical: 'Atenção necessária',
-    })[status.value]);
+    const label = computed(() => {
+        const availableMs = Number(value(signals.availableMs, 0));
+        const targetBufferMs = Math.max(1, Number(value(signals.targetBufferMs, 30_000)));
+        const availableSec = Math.max(0, Math.round(availableMs / 1000));
+        const targetSec = Math.max(1, Math.round(targetBufferMs / 1000));
+
+        if (status.value === 'warming_up') {
+            return `Aquecendo buffer (${availableSec}/${targetSec}s)`;
+        }
+
+        return ({
+            healthy: 'Saudável',
+            degraded: 'Conexão instável',
+            offline: 'Offline',
+            critical: 'Atenção necessária',
+        })[status.value];
+    });
 
     const colorClass = computed(() => ({
         healthy: 'bg-emerald-100 text-emerald-700 border-emerald-200',
