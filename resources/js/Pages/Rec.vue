@@ -55,6 +55,7 @@ const {
     previewEl,
     availableMs,
     start: startCapture,
+    startEncoding,
     stop: stopCapture,
     attachPreview,
     hasBuffer,
@@ -200,7 +201,7 @@ async function toggleRecMode() {
             return;
         }
 
-        // V1 flow: camera + MediaRecorder together, then register session/heartbeat.
+        // 1) Preview only — buffer clock must move and heartbeat must work first.
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
@@ -218,6 +219,15 @@ async function toggleRecMode() {
 
         if (!isAppleMobile()) {
             await enterFullscreen();
+        }
+
+        // 2) Start MediaRecorder AFTER session+heartbeat are alive.
+        // On iOS this uses a canvas stream (not the live camera track).
+        await new Promise((resolve) => setTimeout(resolve, isAppleMobile() ? 400 : 50));
+        const encoding = await startEncoding();
+        if (!encoding) {
+            localError.value = captureError.value
+                || 'Câmera e sessão ok, mas a gravação falhou. O keep-alive continua ativo — tente parar e iniciar de novo.';
         }
     } catch (error) {
         localError.value = error?.response?.data?.message
