@@ -33,11 +33,14 @@ watch(() => props.recording, async (recording) => {
 </script>
 
 <template>
+    <!-- V1 used display:none → block. Off-screen (-9999px) with a live track froze some iPhones. -->
     <section
         class="rec-stage relative overflow-hidden bg-black shadow-lg"
-        :class="recording
-            ? (fullscreen ? 'rec-stage--fullscreen' : 'aspect-video rounded-2xl')
-            : 'pointer-events-none fixed left-[-9999px] top-0 h-px w-px opacity-0 overflow-hidden'"
+        :class="[
+            recording ? 'block' : 'hidden',
+            recording && fullscreen ? 'rec-stage--fullscreen' : '',
+            recording && !fullscreen ? 'aspect-video rounded-2xl' : '',
+        ]"
     >
         <video
             ref="videoEl"

@@ -6,6 +6,12 @@ function isRecPage() {
     return typeof window !== 'undefined' && /\/games\/\d+\/rec(?:\/|$|\?)/.test(window.location.pathname);
 }
 
+function isAppleMobile() {
+    if (typeof navigator === 'undefined') return false;
+    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
 async function disableServiceWorkersOnRec() {
     if (!isRecPage() || !('serviceWorker' in navigator)) return;
 
@@ -18,8 +24,21 @@ async function disableServiceWorkersOnRec() {
     // Do NOT clear caches here — wiping caches on iOS mid-navigation can white-screen the tab.
 }
 
+function quietRealtimeOnRec() {
+    if (!isRecPage() || !isAppleMobile()) return;
+    try {
+        window.Echo?.disconnect?.();
+    } catch {
+        // ignore
+    }
+}
+
 if (isRecPage()) {
     disableServiceWorkersOnRec();
+    quietRealtimeOnRec();
+    // Echo may connect after bootstrap; disconnect again shortly.
+    setTimeout(quietRealtimeOnRec, 0);
+    setTimeout(quietRealtimeOnRec, 500);
 } else {
     registerSW({
         immediate: true,

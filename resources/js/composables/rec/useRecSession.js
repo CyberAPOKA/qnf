@@ -390,7 +390,7 @@ export function useRecSession(props, options = {}) {
             if (isAppleMobile()) {
                 ensureHeartbeatLoop();
                 void sendHeartbeat({ scheduleNext: false });
-                startPolling();
+                // Don't poll pending SAVEs until encoding is on — heavy and freezes diagnose.
                 store.putSession?.(created)?.catch?.(() => {});
                 try {
                     sessionStorage.setItem(`qnf-rec-active:${gameId}`, created.cameraTag || cameraTag);
@@ -510,6 +510,7 @@ export function useRecSession(props, options = {}) {
             heartbeatFailures.value = 0;
             sessions.value = data.sessions || data.recorders || sessions.value;
             for (const pending of data.pending_saves || data.pendingSaves || []) {
+                if (isAppleMobile() && capture?.encodingReady?.value !== true) continue;
                 receiveSave(pending).catch(() => {});
             }
             return true;
@@ -700,6 +701,8 @@ export function useRecSession(props, options = {}) {
     }
 
     function subscribe() {
+        // Echo/WebSocket has caused instability on some iOS REC sessions — skip while diagnosing.
+        if (isAppleMobile()) return;
         if (!window.Echo) return;
         echoChannel = window.Echo.private(channelName);
         echoChannel
@@ -717,6 +720,7 @@ export function useRecSession(props, options = {}) {
     const health = useRecHealth({
         online: computed(() => typeof navigator === 'undefined' || navigator.onLine),
         isRecording: capture?.isRecording,
+        encodingReady: capture?.encodingReady,
         isSupported: capture?.isSupported,
         captureError: capture?.error,
         sessionExpired,

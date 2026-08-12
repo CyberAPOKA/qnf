@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { Link } from '@inertiajs/vue3';
 import RecActiveCameras from '@/Components/Rec/RecActiveCameras.vue';
 import RecCameraHealthCard from '@/Components/Rec/RecCameraHealthCard.vue';
@@ -26,7 +26,7 @@ const CAPTURE_SCOPE_TAGS = {
     right: ['A2', 'B2'],
 };
 
-const BUILD_STAMP = 'rec-20260812-f';
+const BUILD_STAMP = 'rec-20260812-h';
 const selectedAngle = ref(null);
 const localError = ref(null);
 const infoMessage = ref(null);
@@ -34,14 +34,25 @@ const isTogglingRec = ref(false);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
 const preferLandscapeHint = ref(false);
-const bufferLabelEl = ref(null);
+const clockLabel = ref(`clock 0s | ${BUILD_STAMP}`);
+const phase = ref('idle'); // idle | camera | session | encoding
 
 function isAppleMobile() {
     return /iPad|iPhone|iPod/i.test(navigator.userAgent)
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
+function disconnectRealtime() {
+    try {
+        window.Echo?.disconnect?.();
+    } catch {
+        // ignore
+    }
+}
+
 let recSession = null;
+let localClockStartedAt = 0;
+let localClockTimer = null;
 
 const capture = useRecCapture({
     config: props.rec_config,
@@ -82,7 +93,6 @@ const {
     isScopeCoolingDown,
     health,
     receiveSave,
-    availableMs: sessionAvailableMs,
 } = recSession;
 
 const healthLabel = computed(() => health.label.value);
@@ -99,13 +109,32 @@ const canStartRec = computed(() =>
 );
 const canSave = computed(() => activeRecorderCount.value > 0 && !isSaving.value);
 
-watch(availableMs, (ms) => {
-    if (sessionAvailableMs) sessionAvailableMs.value = ms;
-    // Direct DOM update — survives some Vue render stalls for diagnosis.
-    if (bufferLabelEl.value) {
-        bufferLabelEl.value.textContent = `buffer ${Math.round((ms || 0) / 1000)}s | ${BUILD_STAMP}`;
-    }
-}, { immediate: true });
+function startLocalClock() {
+    stopLocalClock();
+    localClockStartedAt = Date.now();
+    const tick = () => {
+        const sec = Math.floor((Date.now() - localClockStartedAt) / 1000);
+        const text = `clock ${sec}s | phase=${phase.value} | ${BUILD_STAMP}`;
+        clockLabel.value = text;
+        // Bypass Vue for hard proof that timers still run.
+        const el = document.getElementById('rec-alive-clock');
+        if (el) el.textContent = text;
+        try {
+            document.title = `REC ${sec}s`;
+        } catch {
+            // ignore
+        }
+    };
+    tick();
+    localClockTimer = setInterval(tick, 250);
+}
+
+function stopLocalClock() {
+    clearInterval(localClockTimer);
+    localClockTimer = null;
+    localClockStartedAt = 0;
+    clockLabel.value = `clock 0s | ${BUILD_STAMP}`;
+}
 
 function canSaveScope(scope) {
     if (!canSave.value) return false;
@@ -184,14 +213,35 @@ function onFullscreenChange() {
     if (!isFullscreen.value) unlockOrientation();
 }
 
-async function enableEncoding() {
-    infoMessage.value = null;
+async function enableSession() {
     localError.value = null;
+    infoMessage.value = null;
+    const registered = await registerRecorder(selectedAngle.value);
+    if (!registered) {
+        localError.value = saveError.value || 'Falha ao registrar sessão.';
+        return;
+    }
+    phase.value = 'session';
+    infoMessage.value = 'Sessão registrada. Se o clock continuar subindo, toque em Ativar gravação.';
+}
+
+async function enableEncoding() {
+    localError.value = null;
+    infoMessage.value = null;
+    if (isAppleMobile() && phase.value === 'camera') {
+        const registered = await registerRecorder(selectedAngle.value);
+        if (!registered) {
+            localError.value = saveError.value || 'Falha ao registrar sessão.';
+            return;
+        }
+        phase.value = 'session';
+    }
     const encoding = await startEncoding();
     if (!encoding) {
         localError.value = captureError.value || 'Falha ao iniciar a gravação de vídeo.';
         return;
     }
+    phase.value = 'encoding';
     infoMessage.value = 'Gravação de buffer ativa.';
 }
 
@@ -206,6 +256,8 @@ async function toggleRecMode() {
             await exitFullscreen();
             await stopCapture();
             await unregisterRecorder();
+            stopLocalClock();
+            phase.value = 'idle';
             return;
         }
         if (!selectedAngle.value) {
@@ -221,32 +273,41 @@ async function toggleRecMode() {
             return;
         }
 
-        // Preview + session only first (especially on iPhone).
+        // Start independent clock FIRST (proves JS timers work even if Vue stalls).
+        phase.value = 'camera';
+        startLocalClock();
+
         const started = await startCapture();
         if (!started) {
+            stopLocalClock();
+            phase.value = 'idle';
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
             return;
         }
 
         attachPreview?.();
 
-        const registered = await registerRecorder(selectedAngle.value);
-        if (!registered) {
-            await stopCapture();
-            localError.value = saveError.value || 'Não foi possível registrar esta câmera.';
+        if (isAppleMobile()) {
+            // CRITICAL isolate: do NOT register/encode yet.
+            infoMessage.value = 'iPhone: só câmera. O relógio amarelo deve subir (2s, 3s…). Se travar, diga o stamp (h).';
             return;
         }
 
-        if (!isAppleMobile()) {
-            await enterFullscreen();
-            const encoding = await startEncoding();
-            if (!encoding) {
-                localError.value = captureError.value || 'Falha ao iniciar a gravação.';
-            }
+        const registered = await registerRecorder(selectedAngle.value);
+        if (!registered) {
+            await stopCapture();
+            stopLocalClock();
+            phase.value = 'idle';
+            localError.value = saveError.value || 'Não foi possível registrar esta câmera.';
+            return;
+        }
+        phase.value = 'session';
+        await enterFullscreen();
+        const encoding = await startEncoding();
+        if (!encoding) {
+            localError.value = captureError.value || 'Falha ao iniciar a gravação.';
         } else {
-            // iPhone diagnostic path: NO MediaRecorder until the user taps the button.
-            // If buffer still freezes at 1s here, the crash is preview/session — not encode.
-            infoMessage.value = 'iPhone: câmera + keep-alive ativos. Espere o buffer subir; depois toque em “Ativar gravação”.';
+            phase.value = 'encoding';
         }
     } catch (error) {
         localError.value = error?.response?.data?.message
@@ -262,6 +323,8 @@ async function toggleRecMode() {
         } catch {
             // ignore
         }
+        stopLocalClock();
+        phase.value = 'idle';
     } finally {
         isTogglingRec.value = false;
     }
@@ -269,8 +332,8 @@ async function toggleRecMode() {
 
 async function handleSave(scope = 'all') {
     localError.value = null;
-    if (isAppleMobile() && isThisDeviceRecording.value && !encodingReady?.value) {
-        localError.value = 'Ative a gravação antes do SAVE.';
+    if (isAppleMobile() && phase.value !== 'encoding') {
+        localError.value = 'No iPhone: registre a sessão e ative a gravação antes do SAVE.';
         return;
     }
     if (isThisDeviceRecording.value && !hasBuffer?.()) {
@@ -283,6 +346,7 @@ async function handleSave(scope = 'all') {
 }
 
 onMounted(() => {
+    if (isAppleMobile()) disconnectRealtime();
     document.addEventListener('fullscreenchange', onFullscreenChange);
     document.addEventListener('webkitfullscreenchange', onFullscreenChange);
 });
@@ -291,14 +355,18 @@ onBeforeUnmount(() => {
     document.removeEventListener('fullscreenchange', onFullscreenChange);
     document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
     unlockOrientation();
+    stopLocalClock();
 });
 </script>
 
 <template>
     <div class="py-4 pb-28">
         <div class="max-w-lg mx-auto px-4 space-y-5">
-            <div ref="bufferLabelEl" class="text-[10px] text-center text-gray-400 font-mono">
-                buffer 0s | {{ BUILD_STAMP }}
+            <div
+                id="rec-alive-clock"
+                class="text-xs text-center text-gray-700 font-mono bg-yellow-100 border border-yellow-300 rounded px-2 py-2"
+            >
+                {{ clockLabel }}
             </div>
             <div v-if="infoMessage"
                 class="rounded-lg bg-sky-50 border border-sky-200 text-sky-900 text-sm px-4 py-3">
@@ -327,14 +395,24 @@ onBeforeUnmount(() => {
                 :color-class="health.colorClass.value" :available-ms="availableMs"
                 :pending-uploads="0" :has-audio="capture.hasAudio.value" />
 
-            <button
-                v-if="isThisDeviceRecording && !encodingReady"
-                type="button"
-                class="w-full rounded-xl bg-indigo-600 text-white font-semibold py-3"
-                @click="enableEncoding"
-            >
-                Ativar gravação (buffer)
-            </button>
+            <div v-if="isThisDeviceRecording && isAppleMobile()" class="space-y-2">
+                <button
+                    v-if="phase === 'camera'"
+                    type="button"
+                    class="w-full rounded-xl bg-slate-800 text-white font-semibold py-3"
+                    @click="enableSession"
+                >
+                    2) Registrar sessão
+                </button>
+                <button
+                    v-if="phase === 'camera' || phase === 'session'"
+                    type="button"
+                    class="w-full rounded-xl bg-indigo-600 text-white font-semibold py-3"
+                    @click="enableEncoding"
+                >
+                    3) Ativar gravação (buffer)
+                </button>
+            </div>
 
             <RecSaveControls :recording="isThisDeviceRecording" :can-start="canStartRec" :toggling="isTogglingRec"
                 :registering="isRegistering" :saving="isSaving" :cooldown="saveCooldownRemaining || 0"
