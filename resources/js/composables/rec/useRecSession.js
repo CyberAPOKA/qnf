@@ -215,19 +215,23 @@ export function useRecSession(props, options = {}) {
         if (!session.value || apple || !closed?.blob?.size) return null;
 
         const uuid = makeUuid();
-        const stored = await store.putSegment({
-            uuid,
-            sessionUuid: session.value.uuid,
-            sequence: closed.sequence,
-            blob: closed.blob,
-            startedAt: closed.startedAt,
-            endedAt: closed.endedAt,
-            durationMs: closed.durationMs,
-            mimeType: closed.blob.type,
-            bytes: closed.blob.size,
-        });
-        await uploadQueue.enqueueSegment(stored);
-        return stored;
+        try {
+            const stored = await store.putSegment({
+                uuid,
+                sessionUuid: session.value.uuid,
+                sequence: closed.sequence,
+                blob: closed.blob,
+                startedAt: closed.startedAt,
+                endedAt: closed.endedAt,
+                durationMs: closed.durationMs,
+                mimeType: closed.blob.type,
+                bytes: closed.blob.size,
+            });
+            await uploadQueue.enqueueSegment(stored);
+            return stored;
+        } catch {
+            return null;
+        }
     }
 
     function wireSegmentUpload() {
@@ -422,11 +426,8 @@ export function useRecSession(props, options = {}) {
             ];
 
             wireSegmentUpload();
-            await store.putSession(created);
-
-            if (!apple) {
-                beginNetwork();
-            }
+            // Never block REC startup on IndexedDB — it can hang Safari/Chrome during camera open.
+            void store.putSession(created).catch(() => {});
 
             try {
                 sessionStorage.setItem(`qnf-rec-active:${gameId}`, created.cameraTag || cameraTag);

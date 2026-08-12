@@ -2,6 +2,7 @@
 import { nextTick, onMounted, ref, watch } from 'vue';
 
 const props = defineProps({
+    visible: Boolean,
     recording: Boolean,
     fullscreen: Boolean,
     cameraTag: String,
@@ -27,10 +28,20 @@ onMounted(async () => {
     publishPreview();
 });
 
-watch(() => props.recording, async (recording) => {
+watch(() => props.visible, async (visible) => {
+    if (!visible) return;
     await nextTick();
     publishPreview();
-    if (recording && videoEl.value) {
+    if (videoEl.value) {
+        videoEl.value.play().catch(() => {});
+    }
+});
+
+watch(() => props.recording, async (recording) => {
+    if (!recording) return;
+    await nextTick();
+    publishPreview();
+    if (videoEl.value) {
         videoEl.value.play().catch(() => {});
     }
 });
@@ -40,9 +51,9 @@ watch(() => props.recording, async (recording) => {
     <section
         class="rec-stage relative overflow-hidden bg-black shadow-lg"
         :class="[
-            recording ? 'block' : 'hidden',
-            recording && fullscreen ? 'rec-stage--fullscreen' : '',
-            recording && !fullscreen ? 'aspect-video rounded-2xl' : '',
+            visible ? 'block' : 'hidden',
+            visible && fullscreen ? 'rec-stage--fullscreen' : '',
+            visible && !fullscreen ? 'aspect-video rounded-2xl' : '',
         ]"
     >
         <video
@@ -53,7 +64,7 @@ watch(() => props.recording, async (recording) => {
             playsinline
             webkit-playsinline
         />
-        <div class="absolute top-3 left-3 flex items-center gap-2 z-10">
+        <div v-if="recording" class="absolute top-3 left-3 flex items-center gap-2 z-10">
             <span class="flex items-center gap-2 bg-black/60 rounded-full px-3 py-1 text-white text-xs font-semibold">
                 <span class="w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse" /> REC
             </span>
@@ -68,6 +79,7 @@ watch(() => props.recording, async (recording) => {
             </span>
         </div>
         <button
+            v-if="recording"
             type="button"
             class="absolute top-3 right-3 z-10 bg-black/60 text-white text-xs font-semibold rounded-full px-3 py-1.5"
             @click="fullscreen ? emit('exit-fullscreen') : emit('enter-fullscreen')"
@@ -75,10 +87,19 @@ watch(() => props.recording, async (recording) => {
             <i :class="fullscreen ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" class="mr-1" />
             {{ fullscreen ? 'Sair' : 'Tela cheia' }}
         </button>
+        <div
+            v-else-if="visible"
+            class="absolute inset-0 flex items-center justify-center z-10 bg-black/40"
+        >
+            <span class="text-white text-sm font-medium flex items-center gap-2">
+                <i class="fa-solid fa-spinner fa-spin" />
+                Abrindo câmera...
+            </span>
+        </div>
         <div v-if="landscapeHint && fullscreen" class="absolute inset-x-0 bottom-4 flex justify-center z-10 pointer-events-none">
             <span class="bg-black/70 text-white text-xs rounded-full px-4 py-2">Gire o celular na horizontal</span>
         </div>
-        <div class="absolute inset-x-0 bottom-6 flex items-end justify-center gap-2 px-4 z-10">
+        <div v-if="recording" class="absolute inset-x-0 bottom-6 flex items-end justify-center gap-2 px-4 z-10">
             <button
                 type="button"
                 class="rounded-full bg-emerald-700 text-white font-bold text-xs w-16 h-16 disabled:opacity-50"

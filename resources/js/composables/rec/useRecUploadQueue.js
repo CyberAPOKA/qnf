@@ -78,7 +78,7 @@ export function useRecUploadQueue(options = {}) {
                 });
             }
             await refreshJobs();
-            processNow();
+            scheduleProcess(0);
             return existing;
         }
 
@@ -91,13 +91,13 @@ export function useRecUploadQueue(options = {}) {
             priority: saveRequestUuid ? 1 : 0,
         });
         await refreshJobs();
-        processNow();
+        scheduleProcess(0);
         return job;
     }
 
     async function prioritizeSave(saveRequestUuid, segments) {
         await Promise.all(segments.map((segment) => enqueueSegment(segment, saveRequestUuid)));
-        processNow();
+        scheduleProcess(0);
     }
 
     function retryable(error) {
@@ -257,40 +257,64 @@ export function useRecUploadQueue(options = {}) {
         return true;
     }
 
+    function pickNextJob() {
+        const now = Date.now();
+        return jobs.value
+            .filter((job) =>
+                !['verified', 'permanent_failed'].includes(job.status)
+                && (job.nextAttemptAt || 0) <= now)
+            .sort((a, b) =>
+                (b.priority || 0) - (a.priority || 0)
+                || (a.sequence || 0) - (b.sequence || 0))[0];
+    }
+
+    function scheduleProcess(delayMs = 0) {
+        clearTimeout(wakeTimer);
+        if (!running) return;
+        wakeTimer = setTimeout(() => processNow(), Math.max(0, delayMs));
+    }
+
     async function processNow() {
         if (isProcessing.value || !running || navigator.onLine === false) return;
         isProcessing.value = true;
         clearTimeout(wakeTimer);
 
         try {
-            while (running && navigator.onLine !== false) {
-                await refreshJobs();
-                const now = Date.now();
-                const next = jobs.value
-                    .filter((job) =>
-                        !['verified', 'permanent_failed'].includes(job.status)
-                        && (job.nextAttemptAt || 0) <= now)
-                    .sort((a, b) =>
-                        (b.priority || 0) - (a.priority || 0)
-                        || (a.sequence || 0) - (b.sequence || 0))[0];
-                if (!next || !await processJob(next)) break;
+            await refreshJobs();
+            const next = pickNextJob();
+            if (next) {
+                await processJob(next);
             }
         } finally {
             isProcessing.value = false;
             await refreshJobs();
-            const nextAt = Math.min(...jobs.value
-                .filter((job) => !['verified', 'permanent_failed'].includes(job.status))
-                .map((job) => job.nextAttemptAt || Date.now()));
-            if (Number.isFinite(nextAt) && running) {
-                wakeTimer = setTimeout(processNow, Math.max(250, nextAt - Date.now()));
+
+            const pending = jobs.value.filter((job) =>
+                !['verified', 'permanent_failed'].includes(job.status));
+            if (!pending.length || !running) return;
+
+            const now = Date.now();
+            const ready = pending.some((job) => (job.nextAttemptAt || 0) <= now);
+            if (ready) {
+                scheduleProcess(50);
+                return;
+            }
+
+            const nextAt = Math.min(...pending.map((job) => job.nextAttemptAt || now));
+            if (Number.isFinite(nextAt)) {
+                scheduleProcess(Math.max(250, nextAt - now));
             }
         }
     }
 
     async function start() {
         running = true;
-        await refreshJobs();
-        processNow();
+        try {
+            await refreshJobs();
+        } catch {
+            // IndexedDB may be unavailable; uploads stay disabled until next start().
+        }
+        scheduleProcess(0);
     }
 
     function stop() {
@@ -299,12 +323,11 @@ export function useRecUploadQueue(options = {}) {
     }
 
     function handleOnline() {
-        processNow();
+        scheduleProcess(0);
     }
 
     onMounted(() => {
         window.addEventListener('online', handleOnline);
-        start();
     });
     onBeforeUnmount(() => {
         window.removeEventListener('online', handleOnline);

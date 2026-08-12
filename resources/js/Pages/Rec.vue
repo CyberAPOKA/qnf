@@ -88,6 +88,9 @@ const bufferSec = computed(() =>
 const bufferTargetSec = computed(() => props.buffer_seconds || captureBufferSeconds || 30);
 const activeRecorderCount = computed(() => recorders.value.length);
 const isThisDeviceRecording = computed(() => isRecording.value);
+const showCameraStage = computed(() =>
+    isRecording.value || isTogglingRec.value || isRegistering.value,
+);
 const takenAngles = computed(() =>
     new Set(recorders.value.map((item) => item.camera_tag).filter(Boolean)),
 );
@@ -224,6 +227,7 @@ async function toggleRecMode() {
             return;
         }
 
+        beginNetwork();
         await enterFullscreen();
     } catch (error) {
         localError.value = error?.response?.data?.message
@@ -299,6 +303,7 @@ onBeforeUnmount(() => {
 
             <RecCameraStage
                 ref="stageEl"
+                :visible="showCameraStage"
                 :recording="isRecording"
                 :fullscreen="isFullscreen"
                 :camera-tag="selectedAngle"
