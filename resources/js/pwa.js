@@ -1,48 +1,17 @@
 import { registerSW } from 'virtual:pwa-register';
-import { isAppleMobile, isRecPage } from '@/composables/rec/recUtils';
 
 const CHECK_INTERVAL_MS = 60 * 1000;
 
-async function disableServiceWorkersOnRec() {
-    if (!isRecPage() || !('serviceWorker' in navigator)) return;
+registerSW({
+    immediate: true,
+    onRegisteredSW(_swUrl, registration) {
+        if (!registration) {
+            return;
+        }
 
-    try {
-        const registrations = await navigator.serviceWorker.getRegistrations();
-        await Promise.all(registrations.map((registration) => registration.unregister()));
-    } catch {
-        // Best-effort.
-    }
-    // Do NOT clear caches here — wiping caches on iOS mid-navigation can white-screen the tab.
-}
-
-function quietRealtimeOnRec() {
-    if (!isRecPage() || !isAppleMobile()) return;
-    try {
-        window.Echo?.disconnect?.();
-    } catch {
-        // ignore
-    }
-}
-
-if (isRecPage()) {
-    disableServiceWorkersOnRec();
-    quietRealtimeOnRec();
-    // Echo may connect after bootstrap; disconnect again shortly.
-    setTimeout(quietRealtimeOnRec, 0);
-    setTimeout(quietRealtimeOnRec, 500);
-} else {
-    registerSW({
-        immediate: true,
-        onNeedRefresh() {
-            // Never reload automatically.
-        },
-        onRegisteredSW(_swUrl, registration) {
-            if (!registration) return;
-
-            setInterval(() => {
-                if (isRecPage()) return;
-                registration.update().catch(() => {});
-            }, CHECK_INTERVAL_MS);
-        },
-    });
-}
+        // Procura nova versão periodicamente (usuário com app aberto)
+        setInterval(() => {
+            registration.update();
+        }, CHECK_INTERVAL_MS);
+    },
+});
