@@ -66,6 +66,7 @@ const {
     error: captureError,
     previewEl,
     start: startCapture,
+    startEncoding,
     stop: stopCapture,
 } = capture;
 
@@ -204,7 +205,7 @@ async function toggleRecMode() {
             return;
         }
 
-        // Camera first: mobile browsers require getUserMedia inside the user gesture.
+        // Camera preview first (user gesture). Encoding starts after the session is alive.
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
@@ -219,6 +220,11 @@ async function toggleRecMode() {
         }
 
         await enterFullscreen();
+
+        const encoding = await startEncoding();
+        if (!encoding) {
+            localError.value = captureError.value || 'Câmera aberta, mas a gravação de vídeo falhou neste aparelho.';
+        }
     } catch (error) {
         localError.value = error?.response?.data?.message
             || error?.message
@@ -246,14 +252,9 @@ async function handleSave(scope = 'all') {
 }
 
 async function updateAvailableMs() {
-    try {
-        const ms = await capture.getAvailableMs();
-        availableMs.value = ms;
-        if (recSession?.availableMs) {
-            recSession.availableMs.value = ms;
-        }
-    } catch {
-        // IndexedDB must never block the recording UI.
+    availableMs.value = capture.getAvailableMsSync?.() || await capture.getAvailableMs();
+    if (recSession?.availableMs) {
+        recSession.availableMs.value = availableMs.value;
     }
 }
 

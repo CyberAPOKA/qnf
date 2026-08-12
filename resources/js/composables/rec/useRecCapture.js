@@ -57,7 +57,11 @@ export function useRecCapture(options = {}) {
     let keepRecording = false;
     let operationChain = Promise.resolve();
     const mutedSince = new Map();
-    const segmentMs = config.segment_seconds * 1000;
+    const segmentMs = Math.max(
+        config.segment_seconds * 1000,
+        isAppleMobile() ? 15_000 : config.segment_seconds * 1000,
+    );
+    let encodingStarted = false;
 
     function sessionUuid() {
         return typeof options.sessionUuid === 'function'
@@ -322,18 +326,10 @@ export function useRecCapture(options = {}) {
 
         try {
             stream = await getMediaStream();
-            let existing = [];
-            try {
-                existing = await store.getSegments(sessionUuid());
-            } catch {
-                existing = [];
-            }
-            sequence = existing.reduce((max, item) => Math.max(max, item.sequence || 0), 0);
             keepRecording = true;
+            encodingStarted = false;
             recordingStartedAt = Date.now();
             operationChain = Promise.resolve();
-            startRecorder();
-            startTimers();
             isRecording.value = true;
             attachPreview();
             await nextTick();
@@ -358,10 +354,37 @@ export function useRecCapture(options = {}) {
         }
     }
 
+    async function startEncoding() {
+        if (!isRecording.value || !stream || encodingStarted) return true;
+
+        try {
+            let existing = [];
+            try {
+                existing = await store.getSegments(sessionUuid());
+            } catch {
+                existing = [];
+            }
+            sequence = existing.reduce((max, item) => Math.max(max, item.sequence || 0), 0);
+            keepRecording = true;
+            startRecorder();
+            startTimers();
+            encodingStarted = true;
+            return true;
+        } catch (encodeError) {
+            error.value = encodeError?.message || 'Não foi possível iniciar a gravação de vídeo.';
+            return false;
+        }
+    }
+
     async function stop() {
         keepRecording = false;
+        encodingStarted = false;
         stopTimers();
-        await runExclusive(async () => persistFinalized(await finalizeRecorder()));
+        try {
+            await runExclusive(async () => persistFinalized(await finalizeRecorder()));
+        } catch {
+            // Best-effort finalize on stop.
+        }
         stream?.getTracks().forEach((track) => track.stop());
         stream = null;
         mutedSince.clear();
@@ -373,35 +396,33 @@ export function useRecCapture(options = {}) {
     }
 
     async function listLocalSegmentsInWindow(from, until = Date.now()) {
-        if (isRecording.value) await rotate();
+        if (isRecording.value && encodingStarted) await rotate();
         const fromMs = typeof from === 'string' ? Date.parse(from) : Number(from);
         const untilMs = typeof until === 'string' ? Date.parse(until) : Number(until);
-        // Include orphan segments created before the session UUID was assigned.
-        const segments = await store.getSegments();
-        const currentSession = sessionUuid();
-        return segments.filter((segment) =>
-            (!currentSession || !segment.sessionUuid || segment.sessionUuid === currentSession)
-            && segment.endedAt >= (Number.isFinite(fromMs) ? fromMs : 0)
-            && segment.startedAt <= (Number.isFinite(untilMs) ? untilMs : Date.now()));
+        try {
+            const segments = await store.getSegments();
+            const currentSession = sessionUuid();
+            return segments.filter((segment) =>
+                (!currentSession || !segment.sessionUuid || segment.sessionUuid === currentSession)
+                && segment.endedAt >= (Number.isFinite(fromMs) ? fromMs : 0)
+                && segment.startedAt <= (Number.isFinite(untilMs) ? untilMs : Date.now()));
+        } catch {
+            return [];
+        }
     }
 
-    async function getAvailableMs() {
-        if (isRecording.value && recordingStartedAt) {
+    function getAvailableMsSync() {
+        if (recordingStartedAt) {
             return Math.min(
                 config.local_retention_seconds * 1000,
                 Math.max(0, Date.now() - recordingStartedAt),
             );
         }
+        return 0;
+    }
 
-        const segments = await store.getSegments();
-        const currentSession = sessionUuid();
-        const scoped = segments.filter((segment) =>
-            !currentSession || !segment.sessionUuid || segment.sessionUuid === currentSession);
-        if (!scoped.length) return 0;
-
-        const earliest = Math.min(...scoped.map((item) => item.startedAt));
-        const latest = Math.max(...scoped.map((item) => item.endedAt));
-        return Math.min(config.local_retention_seconds * 1000, Math.max(0, latest - earliest));
+    async function getAvailableMs() {
+        return getAvailableMsSync();
     }
 
     async function handleVisibilityChange() {
@@ -421,6 +442,7 @@ export function useRecCapture(options = {}) {
 
     return {
         start,
+        startEncoding,
         stop,
         isRecording,
         isSupported,
@@ -428,6 +450,7 @@ export function useRecCapture(options = {}) {
         previewEl,
         hasAudio,
         getAvailableMs,
+        getAvailableMsSync,
         listLocalSegmentsInWindow,
     };
 }

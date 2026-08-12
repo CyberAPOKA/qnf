@@ -288,7 +288,8 @@ export function useRecSession(props, options = {}) {
             ];
             startHeartbeat();
             startPolling();
-            uploadQueue?.processNow();
+            // Delay upload queue until after first heartbeat tick so IndexedDB cannot stall REC start.
+            setTimeout(() => uploadQueue?.processNow(), 1_500);
             store.putSession(created).catch(() => {});
             return true;
         } catch (error) {
@@ -327,25 +328,15 @@ export function useRecSession(props, options = {}) {
 
     async function sendHeartbeat() {
         if (!session.value || stopped) return;
+
+        // Never await IndexedDB before the keep-alive HTTP call — iOS can hang forever there.
+        availableMs.value = capture?.getAvailableMsSync?.() || 0;
+
         try {
-            try {
-                availableMs.value = await capture?.getAvailableMs?.() || 0;
-            } catch {
-                availableMs.value = availableMs.value || 0;
-            }
-
-            let lastSequence = 0;
-            try {
-                const localSegments = await store.getSegments(session.value.uuid);
-                lastSequence = localSegments.at(-1)?.sequence || 0;
-            } catch {
-                lastSequence = 0;
-            }
-
             const { data } = await axios.post(routeName('games.rec.sessions.heartbeat', {
                 session: session.value.uuid,
             }), {
-                last_segment_sequence: lastSequence,
+                last_segment_sequence: 0,
                 buffer_available_ms: availableMs.value,
                 queue_size: uploadQueue?.pendingCount?.value || 0,
                 camera_state: capture?.isRecording?.value ? 'recording' : 'stopped',
@@ -439,7 +430,7 @@ export function useRecSession(props, options = {}) {
 
     function startPolling() {
         stopPolling();
-        pollTimer = setTimeout(pollPendingSaves, 0);
+        pollTimer = setTimeout(pollPendingSaves, 2_000);
     }
 
     function stopPolling() {

@@ -1,18 +1,38 @@
 const DB_NAME = 'qnf-rec';
 const DB_VERSION = 1;
+const IDB_TIMEOUT_MS = 2_500;
+
+function withTimeout(promise, label = 'IndexedDB') {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(`${label} timeout`));
+        }, IDB_TIMEOUT_MS);
+
+        Promise.resolve(promise).then(
+            (value) => {
+                clearTimeout(timer);
+                resolve(value);
+            },
+            (error) => {
+                clearTimeout(timer);
+                reject(error);
+            },
+        );
+    });
+}
 
 function requestAsPromise(request) {
     return new Promise((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        request.onerror = () => reject(request.error || new Error('IndexedDB request failed'));
     });
 }
 
 function transactionDone(transaction) {
     return new Promise((resolve, reject) => {
         transaction.oncomplete = () => resolve();
-        transaction.onerror = () => reject(transaction.error);
-        transaction.onabort = () => reject(transaction.error);
+        transaction.onerror = () => reject(transaction.error || new Error('IndexedDB transaction failed'));
+        transaction.onabort = () => reject(transaction.error || new Error('IndexedDB transaction aborted'));
     });
 }
 
@@ -30,7 +50,7 @@ function openDatabase() {
         return Promise.reject(new Error('IndexedDB não está disponível.'));
     }
 
-    return new Promise((resolve, reject) => {
+    return withTimeout(new Promise((resolve, reject) => {
         const request = indexedDB.open(DB_NAME, DB_VERSION);
 
         request.onupgradeneeded = () => {
@@ -53,16 +73,26 @@ function openDatabase() {
         };
 
         request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        request.onerror = () => reject(request.error || new Error('IndexedDB open failed'));
         request.onblocked = () => reject(new Error('Atualização do IndexedDB bloqueada.'));
-    });
+    }), 'IndexedDB open');
 }
 
 export function useRecSegmentStore() {
     let databasePromise;
+    let databaseFailed = false;
 
     function database() {
-        databasePromise ||= openDatabase();
+        if (databaseFailed) {
+            return Promise.reject(new Error('IndexedDB unavailable'));
+        }
+
+        databasePromise ||= openDatabase().catch((error) => {
+            databaseFailed = true;
+            databasePromise = null;
+            throw error;
+        });
+
         return databasePromise;
     }
 
@@ -70,7 +100,7 @@ export function useRecSegmentStore() {
         const db = await database();
         const transaction = db.transaction(name, mode);
         const result = await callback(transaction.objectStore(name));
-        await transactionDone(transaction);
+        await withTimeout(transactionDone(transaction), `IndexedDB ${name}`);
         return result;
     }
 
