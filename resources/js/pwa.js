@@ -13,16 +13,9 @@ async function disableServiceWorkersOnRec() {
         const registrations = await navigator.serviceWorker.getRegistrations();
         await Promise.all(registrations.map((registration) => registration.unregister()));
     } catch {
-        // Best-effort: REC must not depend on service workers.
+        // Best-effort.
     }
-
-    try {
-        if (!('caches' in window)) return;
-        const keys = await caches.keys();
-        await Promise.all(keys.map((key) => caches.delete(key)));
-    } catch {
-        // Cache cleanup is best-effort.
-    }
+    // Do NOT clear caches here — wiping caches on iOS mid-navigation can white-screen the tab.
 }
 
 if (isRecPage()) {
@@ -31,7 +24,7 @@ if (isRecPage()) {
     registerSW({
         immediate: true,
         onNeedRefresh() {
-            // Never reload automatically — a SW update mid-session is disruptive.
+            // Never reload automatically.
         },
         onRegisteredSW(_swUrl, registration) {
             if (!registration) return;

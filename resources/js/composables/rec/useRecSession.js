@@ -386,7 +386,20 @@ export function useRecSession(props, options = {}) {
                 },
             ];
 
-            // First heartbeat must succeed before MediaRecorder starts on iOS.
+            // iOS: do not block the UI on the first heartbeat — Safari was freezing during this await.
+            if (isAppleMobile()) {
+                ensureHeartbeatLoop();
+                void sendHeartbeat({ scheduleNext: false });
+                startPolling();
+                store.putSession?.(created)?.catch?.(() => {});
+                try {
+                    sessionStorage.setItem(`qnf-rec-active:${gameId}`, created.cameraTag || cameraTag);
+                } catch {
+                    // ignore
+                }
+                return true;
+            }
+
             const heartbeatOk = await sendHeartbeat({ scheduleNext: false });
             if (!heartbeatOk) {
                 saveError.value = 'Sessão criada, mas o keep-alive falhou. Tente novamente.';
@@ -511,9 +524,23 @@ export function useRecSession(props, options = {}) {
 
     function ensureHeartbeatLoop() {
         if (!session.value || stopped || sessionExpired.value) return;
-        // iOS needs denser keep-alive while we delay MediaRecorder startup.
         const base = Math.max(5, Number(config.heartbeat_seconds) || 10);
         const intervalMs = (isAppleMobile() ? Math.min(base, 5) : base) * 1000;
+
+        // iOS: plain setInterval — Blob Workers have crashed some Safari builds.
+        if (isAppleMobile()) {
+            heartbeatScheduler.stop();
+            clearInterval(heartbeatTimer);
+            heartbeatTimer = setInterval(() => {
+                if (!session.value || stopped || sessionExpired.value) {
+                    stopHeartbeat();
+                    return;
+                }
+                sendHeartbeat({ scheduleNext: false });
+            }, intervalMs);
+            return;
+        }
+
         heartbeatScheduler.start(intervalMs);
         heartbeatTimer = true;
     }
@@ -525,6 +552,9 @@ export function useRecSession(props, options = {}) {
 
     function stopHeartbeat() {
         heartbeatScheduler.stop();
+        if (heartbeatTimer && heartbeatTimer !== true) {
+            clearInterval(heartbeatTimer);
+        }
         heartbeatTimer = null;
     }
 

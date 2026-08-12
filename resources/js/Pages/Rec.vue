@@ -26,12 +26,15 @@ const CAPTURE_SCOPE_TAGS = {
     right: ['A2', 'B2'],
 };
 
+const BUILD_STAMP = 'rec-20260812-f';
 const selectedAngle = ref(null);
 const localError = ref(null);
+const infoMessage = ref(null);
 const isTogglingRec = ref(false);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
 const preferLandscapeHint = ref(false);
+const bufferLabelEl = ref(null);
 
 function isAppleMobile() {
     return /iPad|iPhone|iPod/i.test(navigator.userAgent)
@@ -50,6 +53,7 @@ recSession = useRecSession(props, {
 
 const {
     isRecording,
+    encodingReady,
     isSupported,
     error: captureError,
     previewEl,
@@ -97,6 +101,10 @@ const canSave = computed(() => activeRecorderCount.value > 0 && !isSaving.value)
 
 watch(availableMs, (ms) => {
     if (sessionAvailableMs) sessionAvailableMs.value = ms;
+    // Direct DOM update — survives some Vue render stalls for diagnosis.
+    if (bufferLabelEl.value) {
+        bufferLabelEl.value.textContent = `buffer ${Math.round((ms || 0) / 1000)}s | ${BUILD_STAMP}`;
+    }
 }, { immediate: true });
 
 function canSaveScope(scope) {
@@ -176,10 +184,22 @@ function onFullscreenChange() {
     if (!isFullscreen.value) unlockOrientation();
 }
 
+async function enableEncoding() {
+    infoMessage.value = null;
+    localError.value = null;
+    const encoding = await startEncoding();
+    if (!encoding) {
+        localError.value = captureError.value || 'Falha ao iniciar a gravação de vídeo.';
+        return;
+    }
+    infoMessage.value = 'Gravação de buffer ativa.';
+}
+
 async function toggleRecMode() {
     if (isTogglingRec.value) return;
     isTogglingRec.value = true;
     localError.value = null;
+    infoMessage.value = null;
 
     try {
         if (isThisDeviceRecording.value) {
@@ -201,7 +221,7 @@ async function toggleRecMode() {
             return;
         }
 
-        // 1) Preview only — buffer clock must move and heartbeat must work first.
+        // Preview + session only first (especially on iPhone).
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
@@ -219,28 +239,14 @@ async function toggleRecMode() {
 
         if (!isAppleMobile()) {
             await enterFullscreen();
-        }
-
-        // 2) On iPhone: wait until the buffer clock proves JS is alive (must pass 1s).
-        // If it still freezes at 1/30 here, the bug is NOT MediaRecorder.
-        if (isAppleMobile()) {
-            const deadline = Date.now() + 12_000;
-            while (Date.now() < deadline && (availableMs.value || 0) < 5_000) {
-                await new Promise((resolve) => setTimeout(resolve, 250));
-            }
-            if ((availableMs.value || 0) < 3_000) {
-                localError.value = 'Buffer travou antes da gravação (JS/Safari). Build rec-20260812-e — reporte se o contador não passou de 1s.';
-                return;
+            const encoding = await startEncoding();
+            if (!encoding) {
+                localError.value = captureError.value || 'Falha ao iniciar a gravação.';
             }
         } else {
-            await new Promise((resolve) => setTimeout(resolve, 50));
-        }
-
-        // 3) Start MediaRecorder only after buffer is moving.
-        const encoding = await startEncoding();
-        if (!encoding) {
-            localError.value = captureError.value
-                || 'Câmera e sessão ok, mas a gravação falhou. Keep-alive segue ativo.';
+            // iPhone diagnostic path: NO MediaRecorder until the user taps the button.
+            // If buffer still freezes at 1s here, the crash is preview/session — not encode.
+            infoMessage.value = 'iPhone: câmera + keep-alive ativos. Espere o buffer subir; depois toque em “Ativar gravação”.';
         }
     } catch (error) {
         localError.value = error?.response?.data?.message
@@ -263,6 +269,10 @@ async function toggleRecMode() {
 
 async function handleSave(scope = 'all') {
     localError.value = null;
+    if (isAppleMobile() && isThisDeviceRecording.value && !encodingReady?.value) {
+        localError.value = 'Ative a gravação antes do SAVE.';
+        return;
+    }
     if (isThisDeviceRecording.value && !hasBuffer?.()) {
         localError.value = `Buffer insuficiente. Aguarde cerca de ${minClipSeconds || 25}s e tente de novo.`;
         return;
@@ -287,7 +297,13 @@ onBeforeUnmount(() => {
 <template>
     <div class="py-4 pb-28">
         <div class="max-w-lg mx-auto px-4 space-y-5">
-            <div class="text-[10px] text-center text-gray-400">rec-20260812-e</div>
+            <div ref="bufferLabelEl" class="text-[10px] text-center text-gray-400 font-mono">
+                buffer 0s | {{ BUILD_STAMP }}
+            </div>
+            <div v-if="infoMessage"
+                class="rounded-lg bg-sky-50 border border-sky-200 text-sky-900 text-sm px-4 py-3">
+                {{ infoMessage }}
+            </div>
             <div v-if="localError || captureError || saveError"
                 class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
                 {{ localError || captureError || saveError }}
@@ -310,6 +326,15 @@ onBeforeUnmount(() => {
             <RecCameraHealthCard v-if="isRecording" :status="health.status.value" :label="healthLabel"
                 :color-class="health.colorClass.value" :available-ms="availableMs"
                 :pending-uploads="0" :has-audio="capture.hasAudio.value" />
+
+            <button
+                v-if="isThisDeviceRecording && !encodingReady"
+                type="button"
+                class="w-full rounded-xl bg-indigo-600 text-white font-semibold py-3"
+                @click="enableEncoding"
+            >
+                Ativar gravação (buffer)
+            </button>
 
             <RecSaveControls :recording="isThisDeviceRecording" :can-start="canStartRec" :toggling="isTogglingRec"
                 :registering="isRegistering" :saving="isSaving" :cooldown="saveCooldownRemaining || 0"

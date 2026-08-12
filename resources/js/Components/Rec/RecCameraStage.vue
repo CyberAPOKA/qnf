@@ -34,9 +34,10 @@ watch(() => props.recording, async (recording) => {
 
 <template>
     <section
-        v-if="recording"
         class="rec-stage relative overflow-hidden bg-black shadow-lg"
-        :class="fullscreen ? 'rec-stage--fullscreen' : 'aspect-video rounded-2xl'"
+        :class="recording
+            ? (fullscreen ? 'rec-stage--fullscreen' : 'aspect-video rounded-2xl')
+            : 'pointer-events-none fixed left-[-9999px] top-0 h-px w-px opacity-0 overflow-hidden'"
     >
         <video
             ref="videoEl"
