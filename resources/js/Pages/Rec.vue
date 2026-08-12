@@ -26,7 +26,7 @@ const CAPTURE_SCOPE_TAGS = {
     right: ['A2', 'B2'],
 };
 
-const BUILD_STAMP = 'rec-20260812-i';
+const BUILD_STAMP = 'rec-20260812-j';
 
 const selectedAngle = ref(null);
 const localError = ref(null);
@@ -69,6 +69,7 @@ const {
     previewEl,
     availableMs,
     start: startCapture,
+    startWithEncoding,
     startEncoding,
     stop: stopCapture,
     attachPreview,
@@ -215,6 +216,27 @@ async function toggleRecMode() {
             return;
         }
 
+        if (isAppleMobile()) {
+            // Encode in the same user-gesture chain as getUserMedia (V1 order).
+            // Network + CSS fullscreen after encode — fullscreen before encode froze Safari.
+            const started = await startWithEncoding();
+            if (!started) {
+                localError.value = captureError.value || 'Não foi possível iniciar a gravação.';
+                return;
+            }
+            attachPreview?.();
+
+            const registered = await registerRecorder(selectedAngle.value);
+            if (!registered) {
+                await stopCapture();
+                localError.value = saveError.value || 'Não foi possível registrar esta câmera.';
+                return;
+            }
+
+            infoMessage.value = 'REC ativo. Aguarde ~30s até o buffer ficar pronto. Toque em Tela cheia se quiser.';
+            return;
+        }
+
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
@@ -222,8 +244,7 @@ async function toggleRecMode() {
         }
 
         attachPreview?.();
-        // Let the preview paint before session + MediaRecorder (iOS needs this gap).
-        await wait(isAppleMobile() ? 500 : 100);
+        await wait(100);
 
         const registered = await registerRecorder(selectedAngle.value);
         if (!registered) {
@@ -234,20 +255,11 @@ async function toggleRecMode() {
 
         await enterFullscreen();
 
-        if (isAppleMobile()) {
-            infoMessage.value = 'Iniciando buffer…';
-            await wait(300);
-        }
-
         const encoding = await startEncoding();
         if (!encoding) {
             localError.value = captureError.value || 'Falha ao iniciar a gravação.';
             return;
         }
-
-        infoMessage.value = isAppleMobile()
-            ? 'REC ativo. Aguarde ~30s até o buffer ficar pronto.'
-            : null;
     } catch (error) {
         localError.value = error?.response?.data?.message
             || error?.message

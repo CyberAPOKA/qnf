@@ -274,6 +274,52 @@ export function useRecCapture(options = {}) {
         segmentTimer = null;
     }
 
+    /** iOS/V1: camera + MediaRecorder in one gesture chain (before any network/fullscreen). */
+    async function startWithEncoding() {
+        error.value = null;
+        encodingReady.value = false;
+        if (!isSupported.value) {
+            error.value = 'Gravação não suportada neste navegador.';
+            return false;
+        }
+        if (isRecording.value && encodingStarted) return true;
+        if (isRecording.value && !encodingStarted) return startEncoding();
+
+        try {
+            mediaStream = await getMediaStream();
+            previousSegment = null;
+            shouldKeepRecording = true;
+            encodingStarted = false;
+            operationChain = Promise.resolve();
+            sequence = 0;
+            isRecording.value = true;
+
+            await nextTick();
+            attachPreview();
+            startRecorder();
+            startSegmentTimer();
+            encodingStarted = true;
+            encodingReady.value = true;
+            recordingStartedAt = Date.now();
+            startAvailableTimer();
+            tickAvailableMs();
+            return true;
+        } catch (err) {
+            const name = err?.name || '';
+            if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+                error.value = 'Permissão da câmera negada.';
+            } else if (name === 'NotFoundError') {
+                error.value = 'Nenhuma câmera encontrada.';
+            } else if (name === 'NotReadableError') {
+                error.value = 'A câmera está em uso por outro aplicativo.';
+            } else {
+                error.value = err?.message || 'Não foi possível iniciar a gravação.';
+            }
+            stop();
+            return false;
+        }
+    }
+
     /** Preview only. Does NOT start MediaRecorder or buffer clock. */
     async function start() {
         error.value = null;
@@ -475,6 +521,7 @@ export function useRecCapture(options = {}) {
 
     return {
         start,
+        startWithEncoding,
         startEncoding,
         stop,
         snapshot,
