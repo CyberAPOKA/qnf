@@ -21,21 +21,17 @@ function isAppleMobile() {
 
 function pickMimeType() {
     if (typeof MediaRecorder === 'undefined') return '';
-    if (isAppleMobile()) {
-        // Match V1: let Safari pick; prefer mp4 when advertised.
-        return MediaRecorder.isTypeSupported('video/mp4') ? 'video/mp4' : '';
-    }
-    return [
+    const candidates = [
         'video/webm;codecs=vp8,opus',
         'video/webm;codecs=vp8',
         'video/webm',
         'video/mp4',
-    ].find((type) => MediaRecorder.isTypeSupported(type)) || '';
+    ];
+    return candidates.find((type) => MediaRecorder.isTypeSupported(type)) || '';
 }
 
 /**
- * Preview-first capture. MediaRecorder starts only via startEncoding().
- * iOS uses the V1-proven path: camera stream → MediaRecorder(+timeslice), no canvas/IDB.
+ * V1-style buffer: one tap → camera + MediaRecorder. Upload only on SAVE (via session ack).
  */
 export function useRecCapture(options = {}) {
     const config = useRecConfig(options.config);
@@ -53,7 +49,7 @@ export function useRecCapture(options = {}) {
     );
     const error = ref(null);
     const previewEl = ref(null);
-    const hasAudio = ref(!apple);
+    const hasAudio = ref(true);
     const availableMs = ref(0);
 
     let mediaStream = null;
@@ -66,12 +62,11 @@ export function useRecCapture(options = {}) {
     let segmentTimer = null;
     let availableTimer = null;
     let shouldKeepRecording = false;
-    let encodingStarted = false;
     let operationChain = Promise.resolve();
     let sequence = 0;
 
     function blobType() {
-        return (mimeType || mediaRecorder?.mimeType || chunks[0]?.type || 'video/mp4').split(';')[0];
+        return (mimeType || chunks[0]?.type || 'video/webm').split(';')[0];
     }
 
     function currentDurationMs() {
@@ -84,9 +79,7 @@ export function useRecCapture(options = {}) {
             availableMs.value = 0;
             return 0;
         }
-        const fromSegments = currentDurationMs() + (previousSegment?.durationMs || 0);
-        const fromClock = Math.max(0, Date.now() - recordingStartedAt);
-        const ms = Math.min(bufferSeconds * 1000, Math.max(fromSegments, fromClock));
+        const ms = Math.min(bufferSeconds * 1000, Math.max(0, Date.now() - recordingStartedAt));
         availableMs.value = ms;
         return ms;
     }
@@ -94,7 +87,7 @@ export function useRecCapture(options = {}) {
     function startAvailableTimer() {
         stopAvailableTimer();
         tickAvailableMs();
-        availableTimer = setInterval(tickAvailableMs, 250);
+        availableTimer = setInterval(tickAvailableMs, 500);
     }
 
     function stopAvailableTimer() {
@@ -102,17 +95,14 @@ export function useRecCapture(options = {}) {
         availableTimer = null;
     }
 
-    function attachPreview() {
-        if (!previewEl.value || !mediaStream) return false;
-        const video = previewEl.value;
-        if (video.srcObject !== mediaStream) {
-            video.srcObject = mediaStream;
-        }
-        video.muted = true;
-        video.playsInline = true;
-        video.setAttribute('playsinline', 'true');
-        video.setAttribute('webkit-playsinline', 'true');
-        video.play().catch(() => {});
+    function attachPreview(stream = mediaStream) {
+        if (!previewEl.value || !stream) return false;
+        previewEl.value.srcObject = stream;
+        previewEl.value.muted = true;
+        previewEl.value.playsInline = true;
+        previewEl.value.setAttribute('playsinline', 'true');
+        previewEl.value.setAttribute('webkit-playsinline', 'true');
+        previewEl.value.play().catch(() => {});
         return true;
     }
 
@@ -123,42 +113,46 @@ export function useRecCapture(options = {}) {
     }
 
     async function getMediaStream() {
-        // iOS: ONE getUserMedia call. Stop/retry of tracks was freezing Safari ~1s in.
         if (apple) {
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: false,
-                video: { facingMode: { ideal: 'environment' } },
+                video: {
+                    facingMode: { ideal: 'environment' },
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 },
+                },
             });
             hasAudio.value = false;
             return stream;
         }
 
-        const attempts = [
-            { audio: false, video: { facingMode: { exact: 'environment' } } },
-            { audio: false, video: { facingMode: 'environment' } },
-            { audio: false, video: { facingMode: { ideal: 'environment' } } },
-            {
-                audio: true,
-                video: {
-                    facingMode: { ideal: 'environment' },
-                    width: { ideal: 1280 },
-                    height: { ideal: 720 },
-                    frameRate: { ideal: 24, max: 30 },
-                },
+        const stream = await navigator.mediaDevices.getUserMedia({
+            audio: true,
+            video: {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                aspectRatio: { ideal: 16 / 9 },
+                frameRate: { ideal: 24, max: 30 },
             },
-        ];
+        });
+        hasAudio.value = true;
+        return stream;
+    }
 
-        let lastError = null;
-        for (const constraints of attempts) {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia(constraints);
-                hasAudio.value = constraints.audio === true;
-                return stream;
-            } catch (err) {
-                lastError = err;
-            }
+    function recorderOptions() {
+        const opts = {};
+        if (mimeType) opts.mimeType = mimeType;
+        if (!apple) {
+            opts.videoBitsPerSecond = 1_200_000;
+            opts.audioBitsPerSecond = 96_000;
         }
-        throw lastError || new Error('getUserMedia failed');
+        return opts;
+    }
+
+    function buildBlobFromChunks() {
+        if (!chunks.length) return null;
+        return new Blob(chunks.slice(), { type: blobType() });
     }
 
     function startRecorder() {
@@ -166,20 +160,9 @@ export function useRecCapture(options = {}) {
 
         chunks.length = 0;
         segmentStartedAt = Date.now();
-        mimeType = pickMimeType();
-
-        // V1-style options (worked on iPhone before REC V2).
-        const options = {};
-        if (mimeType) options.mimeType = mimeType;
-        if (!apple) {
-            options.videoBitsPerSecond = 1_200_000;
-            options.audioBitsPerSecond = 96_000;
-        }
 
         try {
-            mediaRecorder = Object.keys(options).length
-                ? new MediaRecorder(mediaStream, options)
-                : new MediaRecorder(mediaStream);
+            mediaRecorder = new MediaRecorder(mediaStream, recorderOptions());
         } catch {
             mediaRecorder = new MediaRecorder(mediaStream);
         }
@@ -191,17 +174,17 @@ export function useRecCapture(options = {}) {
             error.value = 'Erro na gravação.';
         };
 
-        // V1 used timeslice on all devices including iPhone.
         mediaRecorder.start(TIMESLICE_MS);
     }
 
     function finalizeCurrentSegment() {
         return new Promise((resolve) => {
             if (!mediaRecorder || mediaRecorder.state === 'inactive') {
-                const blob = chunks.length
-                    ? new Blob(chunks.slice(), { type: blobType() })
-                    : null;
-                resolve({ blob, durationMs: currentDurationMs(), startedAt: segmentStartedAt });
+                resolve({
+                    blob: buildBlobFromChunks(),
+                    durationMs: currentDurationMs(),
+                    startedAt: segmentStartedAt,
+                });
                 return;
             }
 
@@ -214,9 +197,7 @@ export function useRecCapture(options = {}) {
                 settled = true;
                 await wait(FLUSH_MS);
                 const durationMs = Math.max(0, Date.now() - startedAt);
-                const blob = chunks.length
-                    ? new Blob(chunks.slice(), { type: blobType() })
-                    : null;
+                const blob = buildBlobFromChunks();
                 chunks.length = 0;
                 mediaRecorder = null;
                 resolve({ blob, durationMs, startedAt });
@@ -238,7 +219,7 @@ export function useRecCapture(options = {}) {
 
     async function rotateSegment() {
         return runExclusive(async () => {
-            if (!shouldKeepRecording || !encodingStarted || !mediaRecorder || mediaRecorder.state !== 'recording') {
+            if (!shouldKeepRecording || !mediaRecorder || mediaRecorder.state !== 'recording') {
                 return;
             }
 
@@ -252,8 +233,7 @@ export function useRecCapture(options = {}) {
                 };
             }
 
-            if (shouldKeepRecording && encodingStarted) {
-                await wait(50);
+            if (shouldKeepRecording) {
                 startRecorder();
             }
             tickAvailableMs();
@@ -262,8 +242,6 @@ export function useRecCapture(options = {}) {
 
     function startSegmentTimer() {
         stopSegmentTimer();
-        // Keep rotation off on iOS — V1 eventually also avoided mid-session restart issues.
-        if (apple) return;
         segmentTimer = setInterval(() => {
             rotateSegment().catch(() => {});
         }, segmentMs);
@@ -274,56 +252,11 @@ export function useRecCapture(options = {}) {
         segmentTimer = null;
     }
 
-    /** iOS/V1: camera + MediaRecorder in one gesture chain (before any network/fullscreen). */
-    async function startWithEncoding() {
-        error.value = null;
-        encodingReady.value = false;
-        if (!isSupported.value) {
-            error.value = 'Gravação não suportada neste navegador.';
-            return false;
-        }
-        if (isRecording.value && encodingStarted) return true;
-        if (isRecording.value && !encodingStarted) return startEncoding();
-
-        try {
-            mediaStream = await getMediaStream();
-            previousSegment = null;
-            shouldKeepRecording = true;
-            encodingStarted = false;
-            operationChain = Promise.resolve();
-            sequence = 0;
-            isRecording.value = true;
-
-            await nextTick();
-            attachPreview();
-            startRecorder();
-            startSegmentTimer();
-            encodingStarted = true;
-            encodingReady.value = true;
-            recordingStartedAt = Date.now();
-            startAvailableTimer();
-            tickAvailableMs();
-            return true;
-        } catch (err) {
-            const name = err?.name || '';
-            if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-                error.value = 'Permissão da câmera negada.';
-            } else if (name === 'NotFoundError') {
-                error.value = 'Nenhuma câmera encontrada.';
-            } else if (name === 'NotReadableError') {
-                error.value = 'A câmera está em uso por outro aplicativo.';
-            } else {
-                error.value = err?.message || 'Não foi possível iniciar a gravação.';
-            }
-            stop();
-            return false;
-        }
-    }
-
-    /** Preview only. Does NOT start MediaRecorder or buffer clock. */
+    /** One tap: camera + buffer (V1). */
     async function start() {
         error.value = null;
         encodingReady.value = false;
+
         if (!isSupported.value) {
             error.value = 'Gravação não suportada neste navegador.';
             return false;
@@ -332,58 +265,41 @@ export function useRecCapture(options = {}) {
 
         try {
             mediaStream = await getMediaStream();
+            mimeType = pickMimeType();
             previousSegment = null;
             shouldKeepRecording = true;
-            encodingStarted = false;
             operationChain = Promise.resolve();
             sequence = 0;
-            recordingStartedAt = 0;
-            availableMs.value = 0;
+            recordingStartedAt = Date.now();
+
+            // V1 order: preview + recorder BEFORE flipping isRecording.
+            attachPreview(mediaStream);
+            startRecorder();
+            startSegmentTimer();
+            startAvailableTimer();
+
             isRecording.value = true;
+            encodingReady.value = true;
 
             await nextTick();
-            attachPreview();
-            // One more attach after layout paints (V1 stage used display:none → block).
-            await wait(50);
-            attachPreview();
+            attachPreview(mediaStream);
+
             return true;
         } catch (err) {
-            const name = err?.name || '';
-            if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
-                error.value = 'Permissão da câmera negada.';
-            } else if (name === 'NotFoundError') {
-                error.value = 'Nenhuma câmera encontrada.';
-            } else if (name === 'NotReadableError') {
-                error.value = 'A câmera está em uso por outro aplicativo.';
-            } else {
-                error.value = 'Não foi possível acessar a câmera.';
-            }
+            error.value = err?.name === 'NotAllowedError'
+                ? 'Permissão da câmera negada.'
+                : 'Não foi possível acessar a câmera.';
             stop();
             return false;
         }
     }
 
-    /** Start MediaRecorder (V1-style) after preview is stable. */
     async function startEncoding() {
-        if (!isRecording.value || !mediaStream) return false;
-        if (encodingStarted) return true;
+        return isRecording.value;
+    }
 
-        try {
-            await nextTick();
-            attachPreview();
-            startRecorder();
-            startSegmentTimer();
-            encodingStarted = true;
-            encodingReady.value = true;
-            recordingStartedAt = Date.now();
-            startAvailableTimer();
-            tickAvailableMs();
-            return true;
-        } catch (err) {
-            encodingReady.value = false;
-            error.value = err?.message || 'Não foi possível iniciar a gravação de vídeo.';
-            return false;
-        }
+    async function startWithEncoding() {
+        return start();
     }
 
     async function snapshot() {
@@ -393,7 +309,7 @@ export function useRecCapture(options = {}) {
                 const { blob, durationMs, startedAt } = await finalizeCurrentSegment();
                 const endedAt = Date.now();
 
-                if (shouldKeepRecording && encodingStarted) {
+                if (shouldKeepRecording) {
                     startRecorder();
                     startSegmentTimer();
                 }
@@ -416,7 +332,8 @@ export function useRecCapture(options = {}) {
                 if (previousSegment?.blob?.size) {
                     const parts = [{
                         blob: previousSegment.blob,
-                        startedAt: previousSegment.startedAt || (previousSegment.endedAt - previousSegment.durationMs),
+                        startedAt: previousSegment.startedAt
+                            || (previousSegment.endedAt - previousSegment.durationMs),
                         endedAt: previousSegment.endedAt,
                         durationMs: previousSegment.durationMs,
                     }];
@@ -462,7 +379,6 @@ export function useRecCapture(options = {}) {
     }
 
     function hasBuffer() {
-        if (!encodingStarted) return false;
         const minMs = minClipSeconds * 1000;
         if (currentDurationMs() >= minMs) return true;
         return !!(previousSegment?.blob?.size && previousSegment.durationMs >= minMs);
@@ -479,7 +395,6 @@ export function useRecCapture(options = {}) {
 
     function stop() {
         shouldKeepRecording = false;
-        encodingStarted = false;
         encodingReady.value = false;
         stopSegmentTimer();
         stopAvailableTimer();

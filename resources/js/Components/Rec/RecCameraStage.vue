@@ -26,14 +26,15 @@ onMounted(async () => {
 });
 
 watch(() => props.recording, async (recording) => {
-    if (!recording) return;
     await nextTick();
     publishPreview();
+    if (recording && videoEl.value) {
+        videoEl.value.play().catch(() => {});
+    }
 });
 </script>
 
 <template>
-    <!-- V1 used display:none → block. Off-screen (-9999px) with a live track froze some iPhones. -->
     <section
         class="rec-stage relative overflow-hidden bg-black shadow-lg"
         :class="[
@@ -59,7 +60,7 @@ watch(() => props.recording, async (recording) => {
             </span>
             <span
                 v-if="availableLabel"
-                class="bg-amber-500/90 text-black text-xs font-semibold rounded-full px-3 py-1"
+                class="bg-amber-500/90 text-black text-xs font-semibold rounded-full px-3 py-1 max-w-[11rem] truncate"
             >
                 {{ availableLabel }}
             </span>
@@ -72,7 +73,7 @@ watch(() => props.recording, async (recording) => {
             <i :class="fullscreen ? 'fa-solid fa-compress' : 'fa-solid fa-expand'" class="mr-1" />
             {{ fullscreen ? 'Sair' : 'Tela cheia' }}
         </button>
-        <div v-if="landscapeHint && fullscreen" class="absolute inset-x-0 bottom-4 flex justify-center z-10">
+        <div v-if="landscapeHint && fullscreen" class="absolute inset-x-0 bottom-4 flex justify-center z-10 pointer-events-none">
             <span class="bg-black/70 text-white text-xs rounded-full px-4 py-2">Gire o celular na horizontal</span>
         </div>
         <div class="absolute inset-x-0 bottom-6 flex items-end justify-center gap-2 px-4 z-10">

@@ -26,11 +26,8 @@ const CAPTURE_SCOPE_TAGS = {
     right: ['A2', 'B2'],
 };
 
-const BUILD_STAMP = 'rec-20260812-j';
-
 const selectedAngle = ref(null);
 const localError = ref(null);
-const infoMessage = ref(null);
 const isTogglingRec = ref(false);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
@@ -39,10 +36,6 @@ const preferLandscapeHint = ref(false);
 function isAppleMobile() {
     return /iPad|iPhone|iPod/i.test(navigator.userAgent)
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
-function wait(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function disconnectRealtime() {
@@ -63,14 +56,11 @@ const recSession = useRecSession(props, {
 
 const {
     isRecording,
-    encodingReady,
     isSupported,
     error: captureError,
     previewEl,
     availableMs,
     start: startCapture,
-    startWithEncoding,
-    startEncoding,
     stop: stopCapture,
     attachPreview,
     hasBuffer,
@@ -107,11 +97,7 @@ const canStartRec = computed(() =>
     && !isTogglingRec.value
     && !isRegistering.value,
 );
-const canSave = computed(() =>
-    activeRecorderCount.value > 0
-    && !isSaving.value
-    && (!isAppleMobile() || encodingReady.value),
-);
+const canSave = computed(() => activeRecorderCount.value > 0 && !isSaving.value);
 
 function canSaveScope(scope) {
     if (!canSave.value) return false;
@@ -130,14 +116,13 @@ function selectAngle(tag) {
     selectedAngle.value = tag;
 }
 
-async function setPreviewElement(element) {
+function setPreviewElement(element) {
     previewEl.value = element;
     if (isRecording.value) attachPreview?.();
 }
 
 async function lockLandscape() {
     preferLandscapeHint.value = window.matchMedia('(orientation: portrait)').matches;
-    if (isAppleMobile()) return;
     try {
         await screen.orientation?.lock?.('landscape');
     } catch {
@@ -157,19 +142,17 @@ function unlockOrientation() {
 async function enterFullscreen() {
     isFullscreen.value = true;
     preferLandscapeHint.value = window.matchMedia('(orientation: portrait)').matches;
-    if (isAppleMobile()) {
-        attachPreview?.();
-        return;
-    }
     await lockLandscape();
+
     const element = stageEl.value?.$el || stageEl.value;
     try {
         const request = element?.requestFullscreen?.bind(element)
             || element?.webkitRequestFullscreen?.bind(element);
         if (request) await request();
     } catch {
-        // CSS fullscreen fallback
+        // CSS fullscreen fallback (iPhone)
     }
+    attachPreview?.();
 }
 
 async function exitFullscreen() {
@@ -185,8 +168,11 @@ async function exitFullscreen() {
 }
 
 function onFullscreenChange() {
-    if (isAppleMobile()) return;
-    isFullscreen.value = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    const native = !!(document.fullscreenElement || document.webkitFullscreenElement);
+    if (!native && isFullscreen.value && isAppleMobile()) {
+        return;
+    }
+    isFullscreen.value = native || isFullscreen.value;
     if (!isFullscreen.value) unlockOrientation();
 }
 
@@ -194,12 +180,11 @@ async function toggleRecMode() {
     if (isTogglingRec.value) return;
     isTogglingRec.value = true;
     localError.value = null;
-    infoMessage.value = null;
 
     try {
         if (isThisDeviceRecording.value) {
             await exitFullscreen();
-            await stopCapture();
+            stopCapture();
             await unregisterRecorder();
             return;
         }
@@ -216,56 +201,26 @@ async function toggleRecMode() {
             return;
         }
 
-        if (isAppleMobile()) {
-            // Encode in the same user-gesture chain as getUserMedia (V1 order).
-            // Network + CSS fullscreen after encode — fullscreen before encode froze Safari.
-            const started = await startWithEncoding();
-            if (!started) {
-                localError.value = captureError.value || 'Não foi possível iniciar a gravação.';
-                return;
-            }
-            attachPreview?.();
-
-            const registered = await registerRecorder(selectedAngle.value);
-            if (!registered) {
-                await stopCapture();
-                localError.value = saveError.value || 'Não foi possível registrar esta câmera.';
-                return;
-            }
-
-            infoMessage.value = 'REC ativo. Aguarde ~30s até o buffer ficar pronto. Toque em Tela cheia se quiser.';
-            return;
-        }
-
         const started = await startCapture();
         if (!started) {
             localError.value = captureError.value || 'Não foi possível acessar a câmera.';
             return;
         }
 
-        attachPreview?.();
-        await wait(100);
-
         const registered = await registerRecorder(selectedAngle.value);
         if (!registered) {
-            await stopCapture();
+            stopCapture();
             localError.value = saveError.value || 'Não foi possível registrar esta câmera.';
             return;
         }
 
         await enterFullscreen();
-
-        const encoding = await startEncoding();
-        if (!encoding) {
-            localError.value = captureError.value || 'Falha ao iniciar a gravação.';
-            return;
-        }
     } catch (error) {
         localError.value = error?.response?.data?.message
             || error?.message
             || 'Falha ao iniciar o REC MODE.';
         try {
-            await stopCapture();
+            stopCapture();
         } catch {
             // ignore
         }
@@ -281,12 +236,8 @@ async function toggleRecMode() {
 
 async function handleSave(scope = 'all') {
     localError.value = null;
-    if (isThisDeviceRecording.value && !encodingReady.value) {
-        localError.value = 'Aguarde o buffer iniciar e tente de novo.';
-        return;
-    }
     if (isThisDeviceRecording.value && !hasBuffer?.()) {
-        localError.value = `Buffer insuficiente. Aguarde cerca de ${minClipSeconds || 25}s e tente de novo.`;
+        localError.value = `Aguarde cerca de ${minClipSeconds || 25}s gravando e tente de novo.`;
         return;
     }
     const save = await triggerSave(scope);
@@ -310,12 +261,6 @@ onBeforeUnmount(() => {
 <template>
     <div class="py-4 pb-28">
         <div class="max-w-lg mx-auto px-4 space-y-5">
-            <p class="text-[10px] text-center text-gray-400 font-mono">{{ BUILD_STAMP }}</p>
-
-            <div v-if="infoMessage"
-                class="rounded-lg bg-sky-50 border border-sky-200 text-sky-900 text-sm px-4 py-3">
-                {{ infoMessage }}
-            </div>
             <div v-if="localError || captureError || saveError"
                 class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
                 {{ localError || captureError || saveError }}

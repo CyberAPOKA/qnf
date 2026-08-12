@@ -9,7 +9,6 @@ export function useRecHealth(signals = {}) {
     const status = computed(() => {
         const online = value(signals.online, typeof navigator === 'undefined' ? true : navigator.onLine);
         const recording = value(signals.isRecording, false);
-        const encodingReady = value(signals.encodingReady, true);
         const supported = value(signals.isSupported, true);
         const captureError = value(signals.captureError);
         const sessionExpired = value(signals.sessionExpired, false);
@@ -23,7 +22,6 @@ export function useRecHealth(signals = {}) {
         if (!supported || sessionExpired || storageCritical || trackEnded) return 'critical';
         if (!online) return 'offline';
         if (captureError || heartbeatFailures >= 3 || pendingUploads >= 12) return 'degraded';
-        if (recording && !encodingReady) return 'preview';
         if (!recording || availableMs < targetBufferMs) return 'warming_up';
         return 'healthy';
     });
@@ -34,9 +32,6 @@ export function useRecHealth(signals = {}) {
         const availableSec = Math.max(0, Math.round(availableMs / 1000));
         const targetSec = Math.max(1, Math.round(targetBufferMs / 1000));
 
-        if (status.value === 'preview') {
-            return 'Câmera OK (sem encode)';
-        }
         if (status.value === 'warming_up') {
             return `Aquecendo buffer (${availableSec}/${targetSec}s)`;
         }
@@ -51,7 +46,6 @@ export function useRecHealth(signals = {}) {
 
     const colorClass = computed(() => ({
         healthy: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-        preview: 'bg-sky-100 text-sky-800 border-sky-200',
         warming_up: 'bg-amber-100 text-amber-700 border-amber-200',
         degraded: 'bg-orange-100 text-orange-700 border-orange-200',
         offline: 'bg-gray-100 text-gray-700 border-gray-200',
