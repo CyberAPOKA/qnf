@@ -101,7 +101,21 @@ export function useRecSession(props, options = {}) {
     let activeSaveRequests = 0;
 
     function routeName(name, params = {}) {
-        return window.route(name, { game: gameId, ...params });
+        try {
+            return window.route(name, { game: gameId, ...params });
+        } catch {
+            return null;
+        }
+    }
+
+    function sessionApiUrl(path, current = session.value) {
+        if (!current?.uuid) return null;
+        return `/games/${gameId}/rec/sessions/${encodeURIComponent(current.uuid)}${path}`;
+    }
+
+    function resolveUrl(name, path, params = {}, current = session.value) {
+        return routeName(name, { session: current?.uuid, ...params })
+            || sessionApiUrl(path, current);
     }
 
     function authHeaders(current = session.value) {
@@ -185,7 +199,7 @@ export function useRecSession(props, options = {}) {
 
         const body = {
             last_sequence: segments.at(-1)?.sequence || 0,
-            buffer_available_ms: await capture.getAvailableMs(),
+            buffer_available_ms: capture.getAvailableMsSync?.() ?? await capture.getAvailableMs(),
             local_segments: segments.map((item) => ({
                 uuid: item.uuid,
                 sequence: item.sequence,
@@ -197,10 +211,11 @@ export function useRecSession(props, options = {}) {
             capture_state: capture.isRecording.value ? 'recording' : 'stopped',
         };
 
-        await axios.post(routeName('games.rec.sessions.ack-save', {
-            session: session.value.uuid,
-            saveRequest: save.uuid,
-        }), body, { headers: authHeaders() });
+        await axios.post(resolveUrl(
+            'games.rec.sessions.ack-save',
+            `/save-requests/${encodeURIComponent(save.uuid)}/ack`,
+            { saveRequest: save.uuid },
+        ), body, { headers: authHeaders() });
         await store.markProcessed(`save:${save.uuid}`, { saveRequestUuid: save.uuid });
         pendingPatch(save.uuid, {
             status: segments.length ? 'uploading' : 'waiting',
@@ -248,7 +263,9 @@ export function useRecSession(props, options = {}) {
         stopped = false;
 
         try {
-            const { data } = await axios.post(routeName('games.rec.sessions.start'), {
+            const startUrl = routeName('games.rec.sessions.start')
+                || `/games/${gameId}/rec/sessions`;
+            const { data } = await axios.post(startUrl, {
                 camera_tag: cameraTag,
                 capabilities: {
                     mime_types: typeof MediaRecorder === 'undefined'
@@ -286,9 +303,20 @@ export function useRecSession(props, options = {}) {
                     user_name: props.current_user_name,
                 },
             ];
-            startHeartbeat();
+
+            // First heartbeat must succeed before MediaRecorder starts on iOS.
+            const heartbeatOk = await sendHeartbeat({ scheduleNext: true });
+            if (!heartbeatOk) {
+                saveError.value = 'Sessão criada, mas o keep-alive falhou. Tente novamente.';
+                try {
+                    await unregister();
+                } catch {
+                    session.value = null;
+                }
+                return false;
+            }
+
             startPolling();
-            // Delay upload queue until after first heartbeat tick so IndexedDB cannot stall REC start.
             setTimeout(() => uploadQueue?.processNow(), 1_500);
             store.putSession(created).catch(() => {});
             return true;
@@ -314,9 +342,11 @@ export function useRecSession(props, options = {}) {
         if (!current) return;
 
         try {
-            const { data } = await axios.post(routeName('games.rec.sessions.stop', {
-                session: current.uuid,
-            }), {}, { headers: authHeaders(current) });
+            const { data } = await axios.post(
+                resolveUrl('games.rec.sessions.stop', '/stop', {}, current),
+                {},
+                { headers: authHeaders(current) },
+            );
             sessions.value = data.sessions || data.recorders || sessions.value;
         } catch {
             // Stop is idempotent and the local session must still be closed.
@@ -326,28 +356,38 @@ export function useRecSession(props, options = {}) {
         }
     }
 
-    async function sendHeartbeat() {
-        if (!session.value || stopped) return;
+    async function sendHeartbeat({ scheduleNext = true } = {}) {
+        if (!session.value || stopped) return false;
 
         // Never await IndexedDB before the keep-alive HTTP call — iOS can hang forever there.
         availableMs.value = capture?.getAvailableMsSync?.() || 0;
 
+        const url = resolveUrl('games.rec.sessions.heartbeat', '/heartbeat');
+        if (!url) {
+            heartbeatFailures.value += 1;
+            saveError.value = 'Rota de heartbeat REC indisponível.';
+            return false;
+        }
+
         try {
-            const { data } = await axios.post(routeName('games.rec.sessions.heartbeat', {
-                session: session.value.uuid,
-            }), {
+            const { data } = await axios.post(url, {
                 last_segment_sequence: 0,
                 buffer_available_ms: availableMs.value,
                 queue_size: uploadQueue?.pendingCount?.value || 0,
                 camera_state: capture?.isRecording?.value ? 'recording' : 'stopped',
                 client_sent_at_ms: Date.now(),
-            }, { headers: authHeaders() });
+            }, {
+                headers: authHeaders(),
+                timeout: 12_000,
+            });
 
             heartbeatFailures.value = 0;
             sessions.value = data.sessions || data.recorders || sessions.value;
             for (const pending of data.pending_saves || data.pendingSaves || []) {
-                await receiveSave(pending);
+                // Do not await — SAVE handling must never stall the keep-alive loop (iOS IDB).
+                receiveSave(pending).catch(() => {});
             }
+            return true;
         } catch (error) {
             heartbeatFailures.value += 1;
             if ([403, 409].includes(error?.response?.status)) {
@@ -355,16 +395,20 @@ export function useRecSession(props, options = {}) {
                 stopHeartbeat();
                 stopPolling();
             }
+            return false;
         } finally {
-            if (session.value && !stopped && !sessionExpired.value) {
-                heartbeatTimer = setTimeout(sendHeartbeat, config.heartbeat_seconds * 1000);
+            if (scheduleNext && session.value && !stopped && !sessionExpired.value) {
+                heartbeatTimer = setTimeout(
+                    () => sendHeartbeat({ scheduleNext: true }),
+                    config.heartbeat_seconds * 1000,
+                );
             }
         }
     }
 
     function startHeartbeat() {
         stopHeartbeat();
-        sendHeartbeat();
+        sendHeartbeat({ scheduleNext: true });
     }
 
     function stopHeartbeat() {
@@ -375,21 +419,24 @@ export function useRecSession(props, options = {}) {
     async function pollPendingSaves() {
         if (!session.value || stopped || sessionExpired.value) return;
         try {
-            const { data } = await axios.get(routeName('games.rec.sessions.pending-saves', {
-                session: session.value.uuid,
-            }), { headers: authHeaders() });
+            const { data } = await axios.get(
+                resolveUrl('games.rec.sessions.pending-saves', '/save-requests/pending'),
+                { headers: authHeaders() },
+            );
             const candidates = data.pending_saves
                 || data.pending
                 || data.data
                 || (Array.isArray(data) ? data : []);
             for (const pending of candidates) {
-                await receiveSave(pending);
+                receiveSave(pending).catch(() => {});
             }
             await Promise.all(recentSaves.value.slice(0, 10).map(async (save) => {
                 try {
-                    const response = await axios.get(routeName('games.rec.save-requests.show', {
-                        saveRequest: save.uuid,
-                    }), { headers: authHeaders() });
+                    const response = await axios.get(
+                        routeName('games.rec.save-requests.show', { saveRequest: save.uuid })
+                            || `/games/${gameId}/rec/save-requests/${encodeURIComponent(save.uuid)}`,
+                        { headers: authHeaders() },
+                    );
                     const fresh = normalizeSave(response.data);
                     fresh.clips = [
                         ...(fresh.clips || []),
@@ -449,15 +496,19 @@ export function useRecSession(props, options = {}) {
         const idempotencyKey = makeUuid();
 
         try {
-            const { data } = await axios.post(routeName('games.rec.save-requests.store'), {
-                capture_scope: captureScope,
-                idempotency_key: idempotencyKey,
-            }, {
-                headers: {
-                    ...authHeaders(),
-                    'Idempotency-Key': idempotencyKey,
+            const { data } = await axios.post(
+                routeName('games.rec.save-requests.store') || `/games/${gameId}/rec/save-requests`,
+                {
+                    capture_scope: captureScope,
+                    idempotency_key: idempotencyKey,
                 },
-            });
+                {
+                    headers: {
+                        ...authHeaders(),
+                        'Idempotency-Key': idempotencyKey,
+                    },
+                },
+            );
             const save = normalizeSave(data);
             save.triggered_by ||= props.current_user_name;
             mergeSave(save);

@@ -13,11 +13,19 @@ function makeUuid() {
 }
 
 function routeFor(name, gameId, sessionUuid, params = {}) {
-    return window.route(name, {
-        game: gameId,
-        session: sessionUuid,
-        ...params,
-    });
+    try {
+        return window.route(name, {
+            game: gameId,
+            session: sessionUuid,
+            ...params,
+        });
+    } catch {
+        return null;
+    }
+}
+
+function sessionPath(gameId, sessionUuid, path) {
+    return `/games/${gameId}/rec/sessions/${encodeURIComponent(sessionUuid)}${path}`;
 }
 
 async function sha256(blob) {
@@ -126,7 +134,7 @@ export function useRecUploadQueue(options = {}) {
                 'games.rec.sessions.segments.status',
                 options.gameId,
                 session.uuid,
-            ),
+            ) || sessionPath(options.gameId, session.uuid, '/segments/status'),
             {
                 headers: headers(session),
                 params: {
@@ -155,7 +163,8 @@ export function useRecUploadQueue(options = {}) {
         form.append('segment', segment.blob, `${segment.sequence}-${segment.uuid}.webm`);
 
         const { data } = await axios.post(
-            routeFor('games.rec.sessions.segments', options.gameId, session.uuid),
+            routeFor('games.rec.sessions.segments', options.gameId, session.uuid)
+                || sessionPath(options.gameId, session.uuid, '/segments'),
             form,
             {
                 headers: {

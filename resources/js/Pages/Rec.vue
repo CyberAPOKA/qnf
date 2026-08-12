@@ -221,9 +221,12 @@ async function toggleRecMode() {
 
         await enterFullscreen();
 
+        // Keep preview + session alive if encoding fails (common on some iOS builds).
+        // Heartbeats must continue so the lease does not expire and reload the page.
         const encoding = await startEncoding();
         if (!encoding) {
-            localError.value = captureError.value || 'Câmera aberta, mas a gravação de vídeo falhou neste aparelho.';
+            localError.value = captureError.value
+                || 'Câmera e sessão ativas, mas a gravação de vídeo falhou neste aparelho. Mantenha a tela aberta e tente novamente.';
         }
     } catch (error) {
         localError.value = error?.response?.data?.message
