@@ -362,50 +362,95 @@ export function useRecCapture(options = {}) {
         watchdogTimer = null;
     }
 
+    function isFrontCameraTrack(track) {
+        if (!track) return false;
+        const label = (track.label || '').toLowerCase();
+        const facing = track.getSettings?.()?.facingMode;
+        if (facing === 'environment') return false;
+        if (facing === 'user') return true;
+        return label.includes('front')
+            || label.includes('frontal')
+            || /\buser\b/.test(label)
+            || label.includes('face time')
+            || label.includes('facetime');
+    }
+
+    async function findRearDeviceId() {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const rear = devices.find((device) => {
+                if (device.kind !== 'videoinput') return false;
+                const label = (device.label || '').toLowerCase();
+                return label.includes('back')
+                    || label.includes('rear')
+                    || label.includes('trás')
+                    || label.includes('traseira')
+                    || /\benvironment\b/.test(label);
+            });
+            return rear?.deviceId || null;
+        } catch {
+            return null;
+        }
+    }
+
     async function getMediaStream() {
-        const attempts = isAppleMobile()
-            ? [
-                { audio: false, video: true },
-                { audio: false, video: { facingMode: 'environment' } },
-                { audio: false, video: { facingMode: { ideal: 'environment' } } },
-            ]
-            : [
-                {
-                    audio: true,
-                    video: {
-                        facingMode: { ideal: 'environment' },
-                        width: { ideal: 1280 },
-                        height: { ideal: 720 },
-                        aspectRatio: { ideal: 16 / 9 },
-                        frameRate: { ideal: 24, max: 30 },
-                    },
-                },
-                {
-                    audio: true,
-                    video: { facingMode: { ideal: 'environment' } },
-                },
-                {
-                    audio: false,
-                    video: { facingMode: { ideal: 'environment' } },
-                },
-                {
-                    audio: false,
-                    video: true,
-                },
-            ];
+        const attempts = [
+            { audio: false, video: { facingMode: { exact: 'environment' } } },
+            { audio: false, video: { facingMode: 'environment' } },
+            { audio: false, video: { facingMode: { ideal: 'environment' } } },
+        ];
 
         let lastError = null;
 
         for (const constraints of attempts) {
             try {
-                hasAudio.value = constraints.audio === true;
-                return await navigator.mediaDevices.getUserMedia(constraints);
+                hasAudio.value = false;
+                const media = await navigator.mediaDevices.getUserMedia(constraints);
+                if (isFrontCameraTrack(media.getVideoTracks()[0])) {
+                    media.getTracks().forEach((track) => track.stop());
+                    continue;
+                }
+                return media;
             } catch (attemptError) {
                 lastError = attemptError;
             }
         }
 
-        throw lastError || new Error('getUserMedia failed');
+        // After permission, labels are usually available — pick the rear device explicitly.
+        const rearDeviceId = await findRearDeviceId();
+        if (rearDeviceId) {
+            try {
+                hasAudio.value = false;
+                const media = await navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: { deviceId: { exact: rearDeviceId } },
+                });
+                if (!isFrontCameraTrack(media.getVideoTracks()[0])) {
+                    return media;
+                }
+                media.getTracks().forEach((track) => track.stop());
+            } catch (attemptError) {
+                lastError = attemptError;
+            }
+        }
+
+        if (!isAppleMobile()) {
+            try {
+                hasAudio.value = true;
+                const media = await navigator.mediaDevices.getUserMedia({
+                    audio: true,
+                    video: { facingMode: { exact: 'environment' } },
+                });
+                if (!isFrontCameraTrack(media.getVideoTracks()[0])) {
+                    return media;
+                }
+                media.getTracks().forEach((track) => track.stop());
+            } catch (attemptError) {
+                lastError = attemptError;
+            }
+        }
+
+        throw lastError || new Error('Não foi possível abrir a câmera traseira.');
     }
 
     async function start() {
