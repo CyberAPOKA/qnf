@@ -429,16 +429,17 @@ class RecClipNormalizeService
         $disk = Storage::disk('public');
         $publicRelative = $this->mp4RelativePath($clip);
         $publicAbsolute = $disk->path($publicRelative);
-        $cacheAbsolute = storage_path('app/tmp/rec-converted/'.$clip->id.'.mp4');
 
-        foreach ([$publicAbsolute, $cacheAbsolute] as $cached) {
+        $webm = PublicStorage::localPath($clip->file_path)
+            ?? ($disk->exists($clip->file_path) ? $disk->path($clip->file_path) : null);
+
+        $cacheAbsolute = $this->writableMp4Path($clip, $webm, $publicAbsolute);
+
+        foreach (array_filter([$publicAbsolute, $cacheAbsolute]) as $cached) {
             if (is_file($cached) && filesize($cached) > 0) {
                 return $cached;
             }
         }
-
-        $webm = PublicStorage::localPath($clip->file_path)
-            ?? ($disk->exists($clip->file_path) ? $disk->path($clip->file_path) : null);
 
         if (! $webm || ! is_file($webm)) {
             Log::warning('REC mp4 skipped: source missing', [
@@ -449,51 +450,48 @@ class RecClipNormalizeService
             return null;
         }
 
+        if (! $cacheAbsolute) {
+            Log::error('REC mp4 skipped: no writable output dir', ['clip_id' => $clip->id]);
+
+            return null;
+        }
+
         if (! $this->ffmpegAvailable()) {
             Log::warning('REC mp4 skipped: ffmpeg not available', ['clip_id' => $clip->id]);
 
             return null;
         }
 
-        $outDir = dirname($cacheAbsolute);
+        // Temp MUST end in .mp4 — ffmpeg guesses the muxer from the extension.
+        $tmpOut = dirname($cacheAbsolute).DIRECTORY_SEPARATOR.$clip->id.'.converting.mp4';
 
-        if (! is_dir($outDir) && ! @mkdir($outDir, 0775, true) && ! is_dir($outDir)) {
-            Log::error('REC mp4 skipped: cannot create output dir', [
-                'clip_id' => $clip->id,
-                'dir' => $outDir,
-            ]);
-
-            return null;
-        }
-
-        $encoder = $this->h264Encoder();
-
-        if (! $encoder) {
-            Log::warning('REC mp4 skipped: no h264 encoder in ffmpeg', ['clip_id' => $clip->id]);
-
-            return null;
-        }
-
-        $videoArgs = $encoder === 'libx264'
-            ? ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p']
-            : ['-c:v', $encoder, '-pix_fmt', 'yuv420p'];
-
-        $tmpOut = $cacheAbsolute.'.tmp';
+        $videoArgs = [
+            '-c:v', 'libx264',
+            '-preset', 'fast',
+            '-crf', '18',
+            '-pix_fmt', 'yuv420p',
+        ];
 
         $attempts = [
             [
+                '-analyzeduration', '100M',
+                '-probesize', '100M',
                 '-i', $webm,
                 ...$videoArgs,
                 '-c:a', 'aac',
                 '-b:a', '192k',
                 '-movflags', '+faststart',
+                '-f', 'mp4',
                 $tmpOut,
             ],
             [
+                '-analyzeduration', '100M',
+                '-probesize', '100M',
                 '-i', $webm,
                 ...$videoArgs,
                 '-an',
                 '-movflags', '+faststart',
+                '-f', 'mp4',
                 $tmpOut,
             ],
         ];
@@ -505,23 +503,25 @@ class RecClipNormalizeService
                 }
 
                 $result = $this->runFfmpeg($args, 180);
+                $wroteFile = is_file($tmpOut) && filesize($tmpOut) > 0;
 
-                if ($result->successful() && is_file($tmpOut) && filesize($tmpOut) > 0) {
+                if ($wroteFile) {
                     if (! @rename($tmpOut, $cacheAbsolute)) {
                         @copy($tmpOut, $cacheAbsolute);
                     }
 
                     if (is_file($cacheAbsolute) && filesize($cacheAbsolute) > 0) {
-                        try {
-                            $disk->makeDirectory('rec/converted');
-                            @copy($cacheAbsolute, $publicAbsolute);
-                        } catch (\Throwable) {
-                            // Cache in storage/app/tmp is enough to serve the download.
+                        if ($cacheAbsolute !== $publicAbsolute) {
+                            try {
+                                $disk->makeDirectory('rec/converted');
+                                @copy($cacheAbsolute, $publicAbsolute);
+                            } catch (\Throwable) {
+                            }
                         }
 
                         Log::info('REC mp4 ok', [
                             'clip_id' => $clip->id,
-                            'encoder' => $encoder,
+                            'path' => $cacheAbsolute,
                             'bytes' => filesize($cacheAbsolute),
                         ]);
 
@@ -531,7 +531,7 @@ class RecClipNormalizeService
 
                 Log::warning('REC mp4 ffmpeg failed', [
                     'clip_id' => $clip->id,
-                    'encoder' => $encoder,
+                    'exit' => $result->exitCode(),
                     'error' => trim($result->errorOutput() ?: $result->output()),
                 ]);
             }
@@ -549,24 +549,25 @@ class RecClipNormalizeService
         return null;
     }
 
-    private function h264Encoder(): ?string
+    private function writableMp4Path(RecClip $clip, ?string $webm, string $publicAbsolute): ?string
     {
-        $bin = $this->ffmpegBinary();
+        $candidates = array_values(array_filter([
+            $publicAbsolute,
+            $webm ? dirname($webm).DIRECTORY_SEPARATOR.$clip->id.'.mp4' : null,
+            storage_path('framework/cache/rec-converted/'.$clip->id.'.mp4'),
+            sys_get_temp_dir().DIRECTORY_SEPARATOR.'rec-'.$clip->id.'.mp4',
+        ]));
 
-        if (! $bin) {
-            return null;
-        }
+        foreach ($candidates as $path) {
+            $dir = dirname($path);
 
-        try {
-            $result = Process::timeout(5)->run([$bin, '-hide_banner', '-encoders']);
-            $out = $result->output().$result->errorOutput();
-
-            foreach (['libx264', 'libopenh264'] as $encoder) {
-                if (str_contains($out, $encoder)) {
-                    return $encoder;
-                }
+            if (! is_dir($dir)) {
+                @mkdir($dir, 0775, true);
             }
-        } catch (\Throwable) {
+
+            if (is_dir($dir) && is_writable($dir)) {
+                return $path;
+            }
         }
 
         return null;
