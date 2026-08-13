@@ -149,11 +149,13 @@ class RecRotateClipsCommand extends Command
                 }
             }
 
-            if ($normalize->rotate($clip->file_path, $direction)) {
+            $result = $normalize->rotate($clip->file_path, $direction);
+
+            if ($result['ok']) {
                 $this->info("  #{$clip->id} ok");
                 $ok++;
             } else {
-                $this->error("  #{$clip->id} falhou");
+                $this->error("  #{$clip->id} falhou: ".($result['error'] ?: 'ffmpeg'));
                 $failed++;
             }
         }

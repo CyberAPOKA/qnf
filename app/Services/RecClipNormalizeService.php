@@ -288,16 +288,15 @@ class RecClipNormalizeService
     }
 
     /**
-     * Rotate a stored clip 90° without dropping audio. Video must be re-encoded.
+     * Rotate a stored clip 90° or 180°. Video must be re-encoded.
      *
      * @param  'cw'|'ccw'|'180'  $direction
+     * @return array{ok: bool, error: ?string}
      */
-    public function rotate(string $relativePath, string $direction = 'cw'): bool
+    public function rotate(string $relativePath, string $direction = 'cw'): array
     {
         if (! $this->ffmpegAvailable()) {
-            Log::warning('REC rotate skipped: ffmpeg not available', ['path' => $relativePath]);
-
-            return false;
+            return ['ok' => false, 'error' => 'ffmpeg não encontrado'];
         }
 
         $disk = Storage::disk('public');
@@ -306,9 +305,7 @@ class RecClipNormalizeService
             : PublicStorage::localPath($relativePath);
 
         if (! $absolute || ! is_file($absolute)) {
-            Log::warning('REC rotate skipped: file missing', ['path' => $relativePath]);
-
-            return false;
+            return ['ok' => false, 'error' => 'arquivo ausente'];
         }
 
         $filter = match ($direction) {
@@ -319,73 +316,59 @@ class RecClipNormalizeService
         $dir = dirname($absolute);
         $extension = pathinfo($absolute, PATHINFO_EXTENSION) ?: 'webm';
         $tmpOut = $dir.DIRECTORY_SEPARATOR.'tmp_rot_'.uniqid('', true).'.'.$extension;
+        $lastError = null;
 
-        try {
-            $withCopiedAudio = $this->runFfmpeg([
+        $attempts = [
+            [
                 '-i', $absolute,
                 '-vf', $filter,
-                ...$this->webmRotateEncodeArgs(),
-                '-c:a', 'copy',
+                ...$this->webmEncodeArgs(),
                 $tmpOut,
-            ], 180);
+            ],
+            [
+                '-i', $absolute,
+                '-vf', $filter,
+                ...$this->webmVideoEncodeArgs(),
+                '-an',
+                $tmpOut,
+            ],
+        ];
 
-            if (! $withCopiedAudio->successful() || ! is_file($tmpOut) || filesize($tmpOut) < 1) {
+        try {
+            foreach ($attempts as $args) {
                 if (is_file($tmpOut)) {
                     @unlink($tmpOut);
                 }
 
-                $withAudio = $this->runFfmpeg([
-                    '-i', $absolute,
-                    '-vf', $filter,
-                    ...$this->webmRotateEncodeArgs(),
-                    '-c:a', 'libopus',
-                    '-b:a', '96k',
-                    $tmpOut,
-                ], 180);
+                $result = $this->runFfmpeg($args, 180);
+                $lastError = trim($result->errorOutput() ?: $result->output()) ?: 'exit '.$result->exitCode();
 
-                if (! $withAudio->successful() || ! is_file($tmpOut) || filesize($tmpOut) < 1) {
-                    Log::warning('REC rotate ffmpeg failed', [
+                if ($result->successful() && is_file($tmpOut) && filesize($tmpOut) > 0) {
+                    if (! @rename($tmpOut, $absolute)) {
+                        @unlink($absolute);
+                        @rename($tmpOut, $absolute);
+                    }
+
+                    Log::info('REC rotate ok', [
                         'path' => $relativePath,
-                        'error' => $withAudio->errorOutput() ?: $withCopiedAudio->errorOutput(),
+                        'direction' => $direction,
+                        'bytes' => @filesize($absolute),
                     ]);
 
-                    return false;
+                    return ['ok' => is_file($absolute) && filesize($absolute) > 0, 'error' => null];
                 }
             }
 
-            if (! @rename($tmpOut, $absolute)) {
-                @unlink($absolute);
-                @rename($tmpOut, $absolute);
-            }
-
-            Log::info('REC rotate ok', [
+            Log::warning('REC rotate ffmpeg failed', [
                 'path' => $relativePath,
-                'direction' => $direction,
-                'bytes' => @filesize($absolute),
+                'error' => $lastError,
             ]);
 
-            return is_file($absolute) && filesize($absolute) > 0;
+            return ['ok' => false, 'error' => $lastError];
         } finally {
             if (is_file($tmpOut)) {
                 @unlink($tmpOut);
             }
         }
-    }
-
-    /**
-     * Higher-quality encode than live capture — rotation cannot stream-copy.
-     *
-     * @return list<string>
-     */
-    private function webmRotateEncodeArgs(): array
-    {
-        return [
-            '-c:v', 'libvpx',
-            '-b:v', '2500k',
-            '-crf', '10',
-            '-deadline', 'good',
-            '-cpu-used', '2',
-            '-auto-alt-ref', '0',
-        ];
     }
 }
