@@ -185,7 +185,7 @@ class RecSessionService
         ]);
     }
 
-    public function recentSaveRequests(Game $game, int $limit = 10): array
+    public function recentSaveRequests(Game $game, int $limit = 100): array
     {
         return RecSaveRequest::query()
             ->where('game_id', $game->id)
