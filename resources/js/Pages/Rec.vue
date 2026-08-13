@@ -120,9 +120,52 @@ function formatTime(iso) {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
-        hour12: false,
-        timeZone: 'America/Sao_Paulo',
     });
+}
+
+function clipDownloadName(save, clip) {
+    const time = formatTime(save.triggered_at).replaceAll(':', '-');
+    const tag = clip.camera_tag || 'cam';
+
+    return `rec-${tag}-${time || clip.id}.webm`;
+}
+
+async function downloadClip(save, clip) {
+    if (!clip.url) {
+        return;
+    }
+
+    const name = clipDownloadName(save, clip);
+
+    try {
+        const response = await fetch(clip.url);
+        if (!response.ok) {
+            throw new Error('download failed');
+        }
+
+        const blob = await response.blob();
+        const file = new File([blob], name, { type: blob.type || 'video/webm' });
+
+        if (navigator.canShare?.({ files: [file] })) {
+            await navigator.share({ files: [file], title: name });
+            return;
+        }
+
+        const href = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(href);
+    } catch (err) {
+        if (err?.name === 'AbortError') {
+            return;
+        }
+
+        window.open(clip.url, '_blank', 'noopener');
+    }
 }
 
 function pendingLabel(uuid) {
@@ -536,12 +579,23 @@ onBeforeUnmount(() => {
 
                     <div v-if="save.clips?.length" class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div v-for="clip in save.clips" :key="clip.id || clip.recorder_id" class="space-y-1 min-w-0">
-                            <p class="text-xs font-medium text-gray-600 flex items-center gap-1.5 min-w-0">
-                                <span v-if="clip.camera_tag"
-                                    class="rounded bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 shrink-0">
-                                    {{ clip.camera_tag }}
+                            <p class="text-xs font-medium text-gray-600 flex items-center justify-between gap-2 min-w-0">
+                                <span class="inline-flex items-center gap-1.5 min-w-0">
+                                    <span v-if="clip.camera_tag"
+                                        class="rounded bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 shrink-0">
+                                        {{ clip.camera_tag }}
+                                    </span>
+                                    <span class="truncate">{{ clip.user_name }}</span>
                                 </span>
-                                <span class="truncate">{{ clip.user_name }}</span>
+                                <button
+                                    v-if="clip.url"
+                                    type="button"
+                                    class="shrink-0 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-gray-700 active:bg-gray-200"
+                                    @click="downloadClip(save, clip)"
+                                >
+                                    <i class="fa-solid fa-download" />
+                                    Baixar
+                                </button>
                             </p>
                             <video :src="clip.url" controls playsinline preload="metadata"
                                 class="w-full aspect-video min-h-44 rounded-lg bg-black object-contain" />
