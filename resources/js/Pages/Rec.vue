@@ -40,6 +40,7 @@ const {
 
 const isTogglingRec = ref(false);
 const localError = ref(null);
+const downloadingClipId = ref(null);
 const selectedAngle = ref(null);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
@@ -123,12 +124,120 @@ function formatTime(iso) {
     });
 }
 
-function downloadClip(clip) {
-    if (! clip.id) {
+function isIosDevice() {
+    const ua = navigator.userAgent || '';
+
+    if (/iPad|iPhone|iPod/.test(ua)) {
+        return true;
+    }
+
+    return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+}
+
+function clipDownloadName(save, clip, extension = 'mp4') {
+    const tag = clip.camera_tag || 'cam';
+    let time = String(clip.id);
+
+    if (save?.triggered_at) {
+        const date = new Date(save.triggered_at);
+        time = date
+            .toLocaleTimeString('pt-BR', {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+                hour12: false,
+            })
+            .replace(/:/g, '');
+    }
+
+    return `rec-${tag}-${time}.${extension}`;
+}
+
+function filenameFromResponse(response, fallback) {
+    const header = response.headers.get('Content-Disposition') || '';
+    const match = header.match(/filename\*?=(?:UTF-8'')?["']?([^";\n]+)/i);
+
+    if (! match) {
+        return fallback;
+    }
+
+    try {
+        return decodeURIComponent(match[1].replace(/["']/g, '').trim());
+    } catch {
+        return match[1].replace(/["']/g, '').trim();
+    }
+}
+
+function triggerFileDownload(blob, name) {
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = href;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 30_000);
+}
+
+async function downloadClip(save, clip) {
+    if (! clip.id || downloadingClipId.value) {
         return;
     }
 
-    window.location.href = route('rec.clips.download', clip.id);
+    const url = route('rec.clips.download', clip.id);
+
+    if (! isIosDevice()) {
+        window.location.href = url;
+
+        return;
+    }
+
+    downloadingClipId.value = clip.id;
+    localError.value = null;
+
+    try {
+        const response = await fetch(url, {
+            credentials: 'include',
+        });
+
+        if (! response.ok) {
+            throw new Error('download failed');
+        }
+
+        const blob = await response.blob();
+        const type = (response.headers.get('Content-Type') || blob.type || 'video/mp4')
+            .split(';')[0]
+            .trim();
+        const extension = type.includes('webm') ? 'webm' : 'mp4';
+        const name = filenameFromResponse(response, clipDownloadName(save, clip, extension));
+        const file = new File([blob], name, {
+            type: type.includes('mp4') ? 'video/mp4' : type,
+        });
+
+        if (navigator.share && navigator.canShare?.({ files: [file] })) {
+            try {
+                await navigator.share({
+                    files: [file],
+                    title: name,
+                });
+
+                return;
+            } catch (err) {
+                if (err?.name === 'AbortError') {
+                    return;
+                }
+            }
+        }
+
+        triggerFileDownload(blob, name);
+    } catch (err) {
+        if (err?.name !== 'AbortError') {
+            localError.value = 'Não foi possível salvar o vídeo.';
+        }
+    } finally {
+        downloadingClipId.value = null;
+    }
 }
 
 function pendingLabel(uuid) {
@@ -553,11 +662,12 @@ onBeforeUnmount(() => {
                                 <button
                                     v-if="clip.id"
                                     type="button"
-                                    class="shrink-0 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-gray-700 active:bg-gray-200"
-                                    @click="downloadClip(clip)"
+                                    :disabled="!!downloadingClipId"
+                                    class="shrink-0 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-gray-700 active:bg-gray-200 disabled:opacity-50"
+                                    @click="downloadClip(save, clip)"
                                 >
-                                    <i class="fa-solid fa-download" />
-                                    Baixar
+                                    <i :class="downloadingClipId === clip.id ? 'fa-solid fa-spinner fa-spin' : 'fa-solid fa-download'" />
+                                    {{ downloadingClipId === clip.id ? 'Preparando' : 'Baixar' }}
                                 </button>
                             </p>
                             <video :src="clip.url" controls playsinline preload="metadata"
