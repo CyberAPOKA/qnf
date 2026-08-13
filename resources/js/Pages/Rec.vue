@@ -136,23 +136,6 @@ function isAppleMobile() {
         || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 }
 
-async function shareFile(file, title) {
-    if (! navigator.share) {
-        return false;
-    }
-
-    try {
-        await navigator.share({ files: [file], title });
-        return true;
-    } catch (err) {
-        if (err?.name === 'AbortError') {
-            return true;
-        }
-
-        return false;
-    }
-}
-
 async function downloadClip(save, clip) {
     if (! clip.url || downloadingClipId.value) {
         return;
@@ -169,20 +152,20 @@ async function downloadClip(save, clip) {
         }
 
         const blob = await response.blob();
-        const videoFile = new File([blob], name, { type: blob.type || 'video/webm' });
-        const genericFile = new File([blob], name, { type: 'application/octet-stream' });
+        downloadingClipId.value = null;
 
-        if (isAppleMobile()) {
-            if (await shareFile(videoFile, name)) {
-                return;
+        // iOS "Save Video" hangs on WebM (Photos does not support it).
+        // Share as a generic file so the sheet offers Save to Files instead.
+        if (isAppleMobile() && navigator.share) {
+            const file = new File([blob], name, { type: 'application/octet-stream' });
+            try {
+                await navigator.share({ files: [file], title: name });
+            } catch (err) {
+                if (err?.name !== 'AbortError') {
+                    localError.value = 'No iPhone, escolha “Salvar em Arquivos”. WebM não salva no app Fotos.';
+                }
             }
-            if (await shareFile(genericFile, name)) {
-                return;
-            }
-            if (navigator.share) {
-                await navigator.share({ title: name, url });
-                return;
-            }
+            return;
         }
 
         const href = URL.createObjectURL(blob);
