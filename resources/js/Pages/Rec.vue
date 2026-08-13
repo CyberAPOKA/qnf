@@ -44,6 +44,7 @@ const selectedAngle = ref(null);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
 const preferLandscapeHint = ref(false);
+const downloadingClipId = ref(null);
 
 const session = useRecSession(props, {
     onSaveRequested: handleSaveRequested,
@@ -130,41 +131,77 @@ function clipDownloadName(save, clip) {
     return `rec-${tag}-${time || clip.id}.webm`;
 }
 
+function isAppleMobile() {
+    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
+        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+}
+
+async function shareFile(file, title) {
+    if (! navigator.share) {
+        return false;
+    }
+
+    try {
+        await navigator.share({ files: [file], title });
+        return true;
+    } catch (err) {
+        if (err?.name === 'AbortError') {
+            return true;
+        }
+
+        return false;
+    }
+}
+
 async function downloadClip(save, clip) {
-    if (!clip.url) {
+    if (! clip.url || downloadingClipId.value) {
         return;
     }
 
     const name = clipDownloadName(save, clip);
+    const url = new URL(clip.url, window.location.origin).href;
+    downloadingClipId.value = clip.id || clip.recorder_id;
 
     try {
-        const response = await fetch(clip.url);
-        if (!response.ok) {
+        const response = await fetch(url, { credentials: 'include' });
+        if (! response.ok) {
             throw new Error('download failed');
         }
 
         const blob = await response.blob();
-        const file = new File([blob], name, { type: blob.type || 'video/webm' });
+        const videoFile = new File([blob], name, { type: blob.type || 'video/webm' });
+        const genericFile = new File([blob], name, { type: 'application/octet-stream' });
 
-        if (navigator.canShare?.({ files: [file] })) {
-            await navigator.share({ files: [file], title: name });
-            return;
+        if (isAppleMobile()) {
+            if (await shareFile(videoFile, name)) {
+                return;
+            }
+            if (await shareFile(genericFile, name)) {
+                return;
+            }
+            if (navigator.share) {
+                await navigator.share({ title: name, url });
+                return;
+            }
         }
 
         const href = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = href;
         link.download = name;
+        link.rel = 'noopener';
         document.body.appendChild(link);
         link.click();
         link.remove();
-        URL.revokeObjectURL(href);
+        setTimeout(() => URL.revokeObjectURL(href), 1000);
     } catch (err) {
         if (err?.name === 'AbortError') {
             return;
         }
 
-        window.open(clip.url, '_blank', 'noopener');
+        localError.value = 'Não foi possível baixar. Toque e segure o vídeo para salvar.';
+    } finally {
+        downloadingClipId.value = null;
     }
 }
 
@@ -590,11 +627,12 @@ onBeforeUnmount(() => {
                                 <button
                                     v-if="clip.url"
                                     type="button"
-                                    class="shrink-0 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-gray-700 active:bg-gray-200"
+                                    class="shrink-0 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-gray-700 active:bg-gray-200 disabled:opacity-50"
+                                    :disabled="downloadingClipId === (clip.id || clip.recorder_id)"
                                     @click="downloadClip(save, clip)"
                                 >
                                     <i class="fa-solid fa-download" />
-                                    Baixar
+                                    {{ downloadingClipId === (clip.id || clip.recorder_id) ? 'Baixando...' : 'Baixar' }}
                                 </button>
                             </p>
                             <video :src="clip.url" controls playsinline preload="metadata"
