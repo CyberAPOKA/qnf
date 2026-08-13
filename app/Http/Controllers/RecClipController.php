@@ -3,31 +3,27 @@
 namespace App\Http\Controllers;
 
 use App\Models\RecClip;
-use App\Support\PublicStorage;
-use Illuminate\Support\Facades\Storage;
+use App\Services\RecClipNormalizeService;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
 
 class RecClipController extends Controller
 {
-    public function download(RecClip $clip): BinaryFileResponse
+    public function download(RecClip $clip, RecClipNormalizeService $normalize): BinaryFileResponse
     {
-        $path = PublicStorage::localPath($clip->file_path)
-            ?? (Storage::disk('public')->exists($clip->file_path)
-                ? Storage::disk('public')->path($clip->file_path)
-                : null);
+        $mp4Path = $normalize->ensureMp4($clip);
 
-        if (! $path || ! is_file($path)) {
-            abort(404, 'Clip não encontrado.');
+        if (! $mp4Path || ! is_file($mp4Path)) {
+            abort(500, 'Não foi possível converter o vídeo para MP4.');
         }
 
         $filename = sprintf(
-            'rec-%s-%s.webm',
+            'rec-%s-%s.mp4',
             $clip->camera_tag ?: 'cam',
             $clip->created_at?->format('His') ?: $clip->id,
         );
 
-        return response()->download($path, $filename, [
-            'Content-Type' => 'application/octet-stream',
+        return response()->download($mp4Path, $filename, [
+            'Content-Type' => 'video/mp4',
         ]);
     }
 }

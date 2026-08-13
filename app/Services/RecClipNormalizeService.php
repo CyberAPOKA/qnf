@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Models\RecClip;
 use App\Support\PublicStorage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
@@ -377,5 +378,102 @@ class RecClipNormalizeService
                 @unlink($tmpOut);
             }
         }
+    }
+
+    public function mp4RelativePath(RecClip $clip): string
+    {
+        return "rec/converted/{$clip->id}.mp4";
+    }
+
+    /**
+     * Convert the original WebM to a cached H.264 MP4 for iPhone download/Photos.
+     */
+    public function ensureMp4(RecClip $clip): ?string
+    {
+        $disk = Storage::disk('public');
+        $relative = $this->mp4RelativePath($clip);
+        $absolute = $disk->path($relative);
+
+        if ($disk->exists($relative) && is_file($absolute) && filesize($absolute) > 0) {
+            return $absolute;
+        }
+
+        $webm = PublicStorage::localPath($clip->file_path)
+            ?? ($disk->exists($clip->file_path) ? $disk->path($clip->file_path) : null);
+
+        if (! $webm || ! is_file($webm)) {
+            Log::warning('REC mp4 skipped: source missing', ['clip_id' => $clip->id]);
+
+            return null;
+        }
+
+        if (! $this->ffmpegAvailable()) {
+            Log::warning('REC mp4 skipped: ffmpeg not available', ['clip_id' => $clip->id]);
+
+            return null;
+        }
+
+        $disk->makeDirectory('rec/converted');
+        $tmpOut = $absolute.'.tmp';
+
+        $attempts = [
+            [
+                '-i', $webm,
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '18',
+                '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac',
+                '-b:a', '192k',
+                '-movflags', '+faststart',
+                $tmpOut,
+            ],
+            [
+                '-i', $webm,
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '18',
+                '-pix_fmt', 'yuv420p',
+                '-an',
+                '-movflags', '+faststart',
+                $tmpOut,
+            ],
+        ];
+
+        try {
+            foreach ($attempts as $args) {
+                if (is_file($tmpOut)) {
+                    @unlink($tmpOut);
+                }
+
+                $result = $this->runFfmpeg($args, 180);
+
+                if ($result->successful() && is_file($tmpOut) && filesize($tmpOut) > 0) {
+                    if (! @rename($tmpOut, $absolute)) {
+                        @copy($tmpOut, $absolute);
+                    }
+
+                    if (is_file($absolute) && filesize($absolute) > 0) {
+                        Log::info('REC mp4 ok', [
+                            'clip_id' => $clip->id,
+                            'bytes' => filesize($absolute),
+                        ]);
+
+                        return $absolute;
+                    }
+                }
+
+                Log::warning('REC mp4 ffmpeg failed', [
+                    'clip_id' => $clip->id,
+                    'error' => trim($result->errorOutput() ?: $result->output()),
+                ]);
+            }
+        } finally {
+            if (is_file($tmpOut)) {
+                @unlink($tmpOut);
+            }
+        }
+
+        return null;
     }
 }

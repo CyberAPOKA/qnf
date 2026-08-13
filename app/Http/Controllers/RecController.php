@@ -6,6 +6,7 @@ use App\Events\ClipReady;
 use App\Events\RecorderJoined;
 use App\Events\RecorderLeft;
 use App\Events\SaveClipRequested;
+use App\Jobs\ConvertRecClipToMp4;
 use App\Models\Game;
 use App\Models\RecSaveRequest;
 use App\Services\RecClipNormalizeService;
@@ -291,6 +292,8 @@ class RecController extends Controller
 
         $clip->load('user');
         $clipPayload = $this->recSession->serializeClip($clip);
+
+        ConvertRecClipToMp4::dispatch($clip->id);
 
         Log::info('REC upload ok', [
             'game_id' => $game->id,

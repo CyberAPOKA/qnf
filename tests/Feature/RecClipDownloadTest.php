@@ -45,10 +45,13 @@ class RecClipDownloadTest extends TestCase
             'duration_seconds' => 30,
         ]);
 
+        $mp4 = "rec/converted/{$clip->id}.mp4";
+        Storage::disk('public')->put($mp4, 'fake-mp4');
+
         $this->actingAs($user)
             ->get(route('rec.clips.download', $clip))
             ->assertOk()
-            ->assertDownload('rec-B1-'.$clip->created_at->format('His').'.webm')
-            ->assertHeader('content-type', 'application/octet-stream');
+            ->assertDownload('rec-B1-'.$clip->created_at->format('His').'.mp4')
+            ->assertHeader('content-type', 'video/mp4');
     }
 }
