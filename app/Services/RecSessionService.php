@@ -203,7 +203,9 @@ class RecSessionService
             'id' => $request->id,
             'uuid' => $request->uuid,
             'triggered_by' => $request->triggeredBy?->name,
-            'triggered_at' => $request->created_at?->toIso8601String(),
+            'triggered_at' => $request->created_at
+                ? $request->created_at->copy()->addHours(3)->toIso8601String()
+                : null,
             'clips' => $request->clips->map(fn (RecClip $clip) => $this->serializeClip($clip))->values()->all(),
         ];
     }

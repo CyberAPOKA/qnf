@@ -120,6 +120,8 @@ function formatTime(iso) {
         hour: '2-digit',
         minute: '2-digit',
         second: '2-digit',
+        hour12: false,
+        timeZone: 'America/Sao_Paulo',
     });
 }
 
@@ -331,7 +333,7 @@ onBeforeUnmount(() => {
         <Link :href="route('dashboard')" class="block text-center text-sm text-indigo-600 font-medium py-2">
             Voltar ao Dashboard
         </Link>
-        <div class="max-w-lg mx-auto px-4 space-y-5">
+        <div class="max-w-lg mx-auto px-1 space-y-5">
 
             <div v-if="localError || bufferError || saveError"
                 class="rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3">
@@ -363,7 +365,7 @@ onBeforeUnmount(() => {
                                     {{ angle.tag }}
                                 </span>
                                 <span v-if="takenAngles.has(angle.tag)"
-                                    class="text-[10px] uppercase font-semibold text-amber-600">
+                                    class="text-xs uppercase font-semibold text-amber-600">
                                     em uso
                                 </span>
                             </span>
@@ -387,7 +389,7 @@ onBeforeUnmount(() => {
                                     {{ angle.tag }}
                                 </span>
                                 <span v-if="takenAngles.has(angle.tag)"
-                                    class="text-[10px] uppercase font-semibold text-amber-600">
+                                    class="text-xs uppercase font-semibold text-amber-600">
                                     em uso
                                 </span>
                             </span>
@@ -494,7 +496,7 @@ onBeforeUnmount(() => {
                         <span class="flex items-center gap-2 min-w-0">
                             <span class="w-2 h-2 rounded-full bg-red-500 shrink-0" />
                             <span v-if="recorder.camera_tag"
-                                class="rounded bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5">
+                                class="rounded bg-red-600 text-white text-xs font-bold px-1.5 py-0.5">
                                 {{ recorder.camera_tag }}
                             </span>
                             <span class="truncate">{{ recorder.user_name }}</span>
@@ -516,7 +518,7 @@ onBeforeUnmount(() => {
                     Nenhum clip salvo ainda.
                 </p>
 
-                <div v-for="save in recentSaves" :key="save.uuid" class="rounded-2xl bg-white shadow overflow-hidden">
+                <div v-for="save in recentSaves" :key="save.uuid" class="rounded-2xl bg-white shadow-xl overflow-hidden border border-black">
                     <div class="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
                         <div>
                             <p class="text-sm font-semibold text-gray-900">
@@ -532,17 +534,17 @@ onBeforeUnmount(() => {
                         </span>
                     </div>
 
-                    <div v-if="save.clips?.length" class="p-3 grid grid-cols-2 gap-2">
+                    <div v-if="save.clips?.length" class="p-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div v-for="clip in save.clips" :key="clip.id || clip.recorder_id" class="space-y-1 min-w-0">
-                            <p class="text-[11px] font-medium text-gray-600 flex items-center gap-1.5 min-w-0">
+                            <p class="text-xs font-medium text-gray-600 flex items-center gap-1.5 min-w-0">
                                 <span v-if="clip.camera_tag"
-                                    class="rounded bg-red-600 text-white text-[10px] font-bold px-1.5 py-0.5 shrink-0">
+                                    class="rounded bg-red-600 text-white text-xs font-bold px-1.5 py-0.5 shrink-0">
                                     {{ clip.camera_tag }}
                                 </span>
                                 <span class="truncate">{{ clip.user_name }}</span>
                             </p>
                             <video :src="clip.url" controls playsinline preload="metadata"
-                                class="w-full aspect-video max-h-36 rounded-lg bg-black object-contain" />
+                                class="w-full aspect-video min-h-44 rounded-lg bg-black object-contain" />
                         </div>
                     </div>
 

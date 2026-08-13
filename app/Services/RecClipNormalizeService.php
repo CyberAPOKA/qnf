@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Support\PublicStorage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Storage;
@@ -254,5 +255,137 @@ class RecClipNormalizeService
         $value = trim($result->output());
 
         return is_numeric($value) ? (float) $value : null;
+    }
+
+    /**
+     * @return array{width: int, height: int}|null
+     */
+    public function probeVideoSize(string $absolutePath): ?array
+    {
+        $result = Process::timeout(15)->run([
+            'ffprobe',
+            '-v', 'error',
+            '-select_streams', 'v:0',
+            '-show_entries', 'stream=width,height',
+            '-of', 'csv=p=0:s=x',
+            $absolutePath,
+        ]);
+
+        if (! $result->successful()) {
+            return null;
+        }
+
+        $value = trim($result->output());
+
+        if (! preg_match('/^(\d+)x(\d+)$/', $value, $matches)) {
+            return null;
+        }
+
+        return [
+            'width' => (int) $matches[1],
+            'height' => (int) $matches[2],
+        ];
+    }
+
+    /**
+     * Rotate a stored clip 90° without dropping audio. Video must be re-encoded.
+     *
+     * @param  'cw'|'ccw'|'180'  $direction
+     */
+    public function rotate(string $relativePath, string $direction = 'cw'): bool
+    {
+        if (! $this->ffmpegAvailable()) {
+            Log::warning('REC rotate skipped: ffmpeg not available', ['path' => $relativePath]);
+
+            return false;
+        }
+
+        $disk = Storage::disk('public');
+        $absolute = $disk->exists($relativePath)
+            ? $disk->path($relativePath)
+            : PublicStorage::localPath($relativePath);
+
+        if (! $absolute || ! is_file($absolute)) {
+            Log::warning('REC rotate skipped: file missing', ['path' => $relativePath]);
+
+            return false;
+        }
+
+        $filter = match ($direction) {
+            'ccw' => 'transpose=2',
+            '180' => 'hflip,vflip',
+            default => 'transpose=1',
+        };
+        $dir = dirname($absolute);
+        $extension = pathinfo($absolute, PATHINFO_EXTENSION) ?: 'webm';
+        $tmpOut = $dir.DIRECTORY_SEPARATOR.'tmp_rot_'.uniqid('', true).'.'.$extension;
+
+        try {
+            $withCopiedAudio = $this->runFfmpeg([
+                '-i', $absolute,
+                '-vf', $filter,
+                ...$this->webmRotateEncodeArgs(),
+                '-c:a', 'copy',
+                $tmpOut,
+            ], 180);
+
+            if (! $withCopiedAudio->successful() || ! is_file($tmpOut) || filesize($tmpOut) < 1) {
+                if (is_file($tmpOut)) {
+                    @unlink($tmpOut);
+                }
+
+                $withAudio = $this->runFfmpeg([
+                    '-i', $absolute,
+                    '-vf', $filter,
+                    ...$this->webmRotateEncodeArgs(),
+                    '-c:a', 'libopus',
+                    '-b:a', '96k',
+                    $tmpOut,
+                ], 180);
+
+                if (! $withAudio->successful() || ! is_file($tmpOut) || filesize($tmpOut) < 1) {
+                    Log::warning('REC rotate ffmpeg failed', [
+                        'path' => $relativePath,
+                        'error' => $withAudio->errorOutput() ?: $withCopiedAudio->errorOutput(),
+                    ]);
+
+                    return false;
+                }
+            }
+
+            if (! @rename($tmpOut, $absolute)) {
+                @unlink($absolute);
+                @rename($tmpOut, $absolute);
+            }
+
+            Log::info('REC rotate ok', [
+                'path' => $relativePath,
+                'direction' => $direction,
+                'bytes' => @filesize($absolute),
+            ]);
+
+            return is_file($absolute) && filesize($absolute) > 0;
+        } finally {
+            if (is_file($tmpOut)) {
+                @unlink($tmpOut);
+            }
+        }
+    }
+
+    /**
+     * Higher-quality encode than live capture — rotation cannot stream-copy.
+     *
+     * @return list<string>
+     */
+    private function webmRotateEncodeArgs(): array
+    {
+        return [
+            '-c:v', 'libvpx',
+            '-b:v', '2500k',
+            '-crf', '10',
+            '-deadline', 'good',
+            '-cpu-used', '2',
+            '-auto-alt-ref', '0',
+        ];
     }
 }
