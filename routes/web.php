@@ -9,6 +9,7 @@ use App\Http\Controllers\GameController;
 use App\Http\Controllers\MercadoPagoWebhookController;
 use App\Http\Controllers\PaymentController;
 use App\Http\Controllers\ProfileController;
+use App\Http\Controllers\RecClipController;
 use App\Http\Controllers\RecController;
 use App\Http\Controllers\RoundsController;
 use App\Http\Controllers\StatisticsController;
@@ -54,6 +55,8 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
         Route::post('/rec/save', [RecController::class, 'save'])->name('games.rec.save');
         Route::post('/rec/upload', [RecController::class, 'upload'])->name('games.rec.upload');
     });
+
+    Route::get('/rec/clips/{clip}/download', [RecClipController::class, 'download'])->name('rec.clips.download');
 
     Route::post('/payments/{payment}/confirm', [PaymentController::class, 'confirm'])->name('payments.confirm');
 

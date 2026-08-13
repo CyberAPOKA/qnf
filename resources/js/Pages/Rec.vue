@@ -44,7 +44,6 @@ const selectedAngle = ref(null);
 const isFullscreen = ref(false);
 const stageEl = ref(null);
 const preferLandscapeHint = ref(false);
-const downloadingClipId = ref(null);
 
 const session = useRecSession(props, {
     onSaveRequested: handleSaveRequested,
@@ -124,68 +123,12 @@ function formatTime(iso) {
     });
 }
 
-function clipDownloadName(save, clip) {
-    const time = formatTime(save.triggered_at).replaceAll(':', '-');
-    const tag = clip.camera_tag || 'cam';
-
-    return `rec-${tag}-${time || clip.id}.webm`;
-}
-
-function isAppleMobile() {
-    return /iPad|iPhone|iPod/i.test(navigator.userAgent)
-        || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-}
-
-async function downloadClip(save, clip) {
-    if (! clip.url || downloadingClipId.value) {
+function downloadClip(clip) {
+    if (! clip.id) {
         return;
     }
 
-    const name = clipDownloadName(save, clip);
-    const url = new URL(clip.url, window.location.origin).href;
-    downloadingClipId.value = clip.id || clip.recorder_id;
-
-    try {
-        const response = await fetch(url, { credentials: 'include' });
-        if (! response.ok) {
-            throw new Error('download failed');
-        }
-
-        const blob = await response.blob();
-        downloadingClipId.value = null;
-
-        // iOS "Save Video" hangs on WebM (Photos does not support it).
-        // Share as a generic file so the sheet offers Save to Files instead.
-        if (isAppleMobile() && navigator.share) {
-            const file = new File([blob], name, { type: 'application/octet-stream' });
-            try {
-                await navigator.share({ files: [file], title: name });
-            } catch (err) {
-                if (err?.name !== 'AbortError') {
-                    localError.value = 'No iPhone, escolha “Salvar em Arquivos”. WebM não salva no app Fotos.';
-                }
-            }
-            return;
-        }
-
-        const href = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = href;
-        link.download = name;
-        link.rel = 'noopener';
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        setTimeout(() => URL.revokeObjectURL(href), 1000);
-    } catch (err) {
-        if (err?.name === 'AbortError') {
-            return;
-        }
-
-        localError.value = 'Não foi possível baixar. Toque e segure o vídeo para salvar.';
-    } finally {
-        downloadingClipId.value = null;
-    }
+    window.location.href = route('rec.clips.download', clip.id);
 }
 
 function pendingLabel(uuid) {
@@ -608,14 +551,13 @@ onBeforeUnmount(() => {
                                     <span class="truncate">{{ clip.user_name }}</span>
                                 </span>
                                 <button
-                                    v-if="clip.url"
+                                    v-if="clip.id"
                                     type="button"
-                                    class="shrink-0 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-gray-700 active:bg-gray-200 disabled:opacity-50"
-                                    :disabled="downloadingClipId === (clip.id || clip.recorder_id)"
-                                    @click="downloadClip(save, clip)"
+                                    class="shrink-0 inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-[11px] font-semibold uppercase text-gray-700 active:bg-gray-200"
+                                    @click="downloadClip(clip)"
                                 >
                                     <i class="fa-solid fa-download" />
-                                    {{ downloadingClipId === (clip.id || clip.recorder_id) ? 'Baixando...' : 'Baixar' }}
+                                    Baixar
                                 </button>
                             </p>
                             <video :src="clip.url" controls playsinline preload="metadata"
