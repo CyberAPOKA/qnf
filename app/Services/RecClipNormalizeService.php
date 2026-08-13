@@ -313,9 +313,14 @@ class RecClipNormalizeService
             '180' => 'hflip,vflip',
             default => 'transpose=1',
         };
-        $dir = dirname($absolute);
         $extension = pathinfo($absolute, PATHINFO_EXTENSION) ?: 'webm';
-        $tmpOut = $dir.DIRECTORY_SEPARATOR.'tmp_rot_'.uniqid('', true).'.'.$extension;
+        $tmpDir = storage_path('app/tmp/rec-rotate');
+
+        if (! is_dir($tmpDir) && ! @mkdir($tmpDir, 0775, true) && ! is_dir($tmpDir)) {
+            return ['ok' => false, 'error' => 'sem permissão para criar '.$tmpDir.'. Rode: sudo -u www-data php artisan rec:rotate-clips'];
+        }
+
+        $tmpOut = $tmpDir.DIRECTORY_SEPARATOR.'rot_'.uniqid('', true).'.'.$extension;
         $lastError = null;
 
         $attempts = [
@@ -344,9 +349,11 @@ class RecClipNormalizeService
                 $lastError = trim($result->errorOutput() ?: $result->output()) ?: 'exit '.$result->exitCode();
 
                 if ($result->successful() && is_file($tmpOut) && filesize($tmpOut) > 0) {
-                    if (! @rename($tmpOut, $absolute)) {
-                        @unlink($absolute);
-                        @rename($tmpOut, $absolute);
+                    if (! @rename($tmpOut, $absolute) && ! @copy($tmpOut, $absolute)) {
+                        return [
+                            'ok' => false,
+                            'error' => 'Permission denied ao substituir o arquivo. Rode: sudo -u www-data php artisan rec:rotate-clips',
+                        ];
                     }
 
                     Log::info('REC rotate ok', [
