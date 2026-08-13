@@ -218,13 +218,49 @@ class RecClipNormalizeService
         ];
     }
 
+    private bool $ffmpegResolved = false;
+
+    private ?string $ffmpegBinary = null;
+
+    private function ffmpegBinary(): ?string
+    {
+        if ($this->ffmpegResolved) {
+            return $this->ffmpegBinary;
+        }
+
+        $this->ffmpegResolved = true;
+
+        foreach (['ffmpeg', '/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'] as $bin) {
+            try {
+                $result = Process::timeout(5)->run([$bin, '-version']);
+
+                if ($result->successful()) {
+                    $this->ffmpegBinary = $bin;
+
+                    return $bin;
+                }
+            } catch (\Throwable) {
+                // proc_open disabled, missing binary, empty php-fpm PATH, etc.
+            }
+        }
+
+        return null;
+    }
+
     /**
      * @param  list<string>  $args
      */
     private function runFfmpeg(array $args, int $timeoutSeconds)
     {
+        $bin = $this->ffmpegBinary();
+
+        if (! $bin) {
+            throw new \RuntimeException('ffmpeg not available');
+        }
+
         return Process::timeout($timeoutSeconds)->run([
-            'ffmpeg',
+            $bin,
+            '-nostdin',
             '-y',
             '-hide_banner',
             '-loglevel', 'error',
@@ -234,9 +270,7 @@ class RecClipNormalizeService
 
     public function ffmpegAvailable(): bool
     {
-        $result = Process::timeout(5)->run(['ffmpeg', '-version']);
-
-        return $result->successful();
+        return $this->ffmpegBinary() !== null;
     }
 
     public function probeDurationSeconds(string $absolutePath): ?float
@@ -390,19 +424,27 @@ class RecClipNormalizeService
      */
     public function ensureMp4(RecClip $clip): ?string
     {
-        $disk = Storage::disk('public');
-        $relative = $this->mp4RelativePath($clip);
-        $absolute = $disk->path($relative);
+        @set_time_limit(180);
 
-        if ($disk->exists($relative) && is_file($absolute) && filesize($absolute) > 0) {
-            return $absolute;
+        $disk = Storage::disk('public');
+        $publicRelative = $this->mp4RelativePath($clip);
+        $publicAbsolute = $disk->path($publicRelative);
+        $cacheAbsolute = storage_path('app/tmp/rec-converted/'.$clip->id.'.mp4');
+
+        foreach ([$publicAbsolute, $cacheAbsolute] as $cached) {
+            if (is_file($cached) && filesize($cached) > 0) {
+                return $cached;
+            }
         }
 
         $webm = PublicStorage::localPath($clip->file_path)
             ?? ($disk->exists($clip->file_path) ? $disk->path($clip->file_path) : null);
 
         if (! $webm || ! is_file($webm)) {
-            Log::warning('REC mp4 skipped: source missing', ['clip_id' => $clip->id]);
+            Log::warning('REC mp4 skipped: source missing', [
+                'clip_id' => $clip->id,
+                'file_path' => $clip->file_path,
+            ]);
 
             return null;
         }
@@ -413,16 +455,35 @@ class RecClipNormalizeService
             return null;
         }
 
-        $disk->makeDirectory('rec/converted');
-        $tmpOut = $absolute.'.tmp';
+        $outDir = dirname($cacheAbsolute);
+
+        if (! is_dir($outDir) && ! @mkdir($outDir, 0775, true) && ! is_dir($outDir)) {
+            Log::error('REC mp4 skipped: cannot create output dir', [
+                'clip_id' => $clip->id,
+                'dir' => $outDir,
+            ]);
+
+            return null;
+        }
+
+        $encoder = $this->h264Encoder();
+
+        if (! $encoder) {
+            Log::warning('REC mp4 skipped: no h264 encoder in ffmpeg', ['clip_id' => $clip->id]);
+
+            return null;
+        }
+
+        $videoArgs = $encoder === 'libx264'
+            ? ['-c:v', 'libx264', '-preset', 'fast', '-crf', '18', '-pix_fmt', 'yuv420p']
+            : ['-c:v', $encoder, '-pix_fmt', 'yuv420p'];
+
+        $tmpOut = $cacheAbsolute.'.tmp';
 
         $attempts = [
             [
                 '-i', $webm,
-                '-c:v', 'libx264',
-                '-preset', 'fast',
-                '-crf', '18',
-                '-pix_fmt', 'yuv420p',
+                ...$videoArgs,
                 '-c:a', 'aac',
                 '-b:a', '192k',
                 '-movflags', '+faststart',
@@ -430,10 +491,7 @@ class RecClipNormalizeService
             ],
             [
                 '-i', $webm,
-                '-c:v', 'libx264',
-                '-preset', 'fast',
-                '-crf', '18',
-                '-pix_fmt', 'yuv420p',
+                ...$videoArgs,
                 '-an',
                 '-movflags', '+faststart',
                 $tmpOut,
@@ -449,29 +507,66 @@ class RecClipNormalizeService
                 $result = $this->runFfmpeg($args, 180);
 
                 if ($result->successful() && is_file($tmpOut) && filesize($tmpOut) > 0) {
-                    if (! @rename($tmpOut, $absolute)) {
-                        @copy($tmpOut, $absolute);
+                    if (! @rename($tmpOut, $cacheAbsolute)) {
+                        @copy($tmpOut, $cacheAbsolute);
                     }
 
-                    if (is_file($absolute) && filesize($absolute) > 0) {
+                    if (is_file($cacheAbsolute) && filesize($cacheAbsolute) > 0) {
+                        try {
+                            $disk->makeDirectory('rec/converted');
+                            @copy($cacheAbsolute, $publicAbsolute);
+                        } catch (\Throwable) {
+                            // Cache in storage/app/tmp is enough to serve the download.
+                        }
+
                         Log::info('REC mp4 ok', [
                             'clip_id' => $clip->id,
-                            'bytes' => filesize($absolute),
+                            'encoder' => $encoder,
+                            'bytes' => filesize($cacheAbsolute),
                         ]);
 
-                        return $absolute;
+                        return $cacheAbsolute;
                     }
                 }
 
                 Log::warning('REC mp4 ffmpeg failed', [
                     'clip_id' => $clip->id,
+                    'encoder' => $encoder,
                     'error' => trim($result->errorOutput() ?: $result->output()),
                 ]);
             }
+        } catch (\Throwable $e) {
+            Log::error('REC mp4 exception', [
+                'clip_id' => $clip->id,
+                'message' => $e->getMessage(),
+            ]);
         } finally {
             if (is_file($tmpOut)) {
                 @unlink($tmpOut);
             }
+        }
+
+        return null;
+    }
+
+    private function h264Encoder(): ?string
+    {
+        $bin = $this->ffmpegBinary();
+
+        if (! $bin) {
+            return null;
+        }
+
+        try {
+            $result = Process::timeout(5)->run([$bin, '-hide_banner', '-encoders']);
+            $out = $result->output().$result->errorOutput();
+
+            foreach (['libx264', 'libopenh264'] as $encoder) {
+                if (str_contains($out, $encoder)) {
+                    return $encoder;
+                }
+            }
+        } catch (\Throwable) {
         }
 
         return null;
