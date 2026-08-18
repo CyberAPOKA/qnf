@@ -11,37 +11,46 @@ use Illuminate\Support\Str;
 
 class LineupsImageService
 {
-    private const WIDTH = 1920;
-    private const HEIGHT = 1280;
+    private const WIDTH = 1080;
 
-    private const PLAYER_W = 240;
-    private const PLAYER_H = 360;
+    private const HEIGHT = 1920;
 
     private const PLAYERS_PER_TEAM = 5;
 
+    /** Canonical player size — matches the blue row, used for every team. */
+    private const PLAYER_W = 170;
+
+    private const PLAYER_H = 203;
+
+    private const PLAYER_OVERFLOW = 1.06;
+
     /**
-     * Position of each team group on the canvas.
+     * Horizontal columns on the 1080x1920 canvas (template is scaled from 941x1672).
+     *
+     * @var array<int, array{x: int, w: int, name_x: int, name_w: int}>
      */
-    private const TEAMS = [
-        0 => ['x' => 15,   'y' => 500],
-        1 => ['x' => 610,  'y' => 900],
-        2 => ['x' => 1170, 'y' => 540],
+    private const COLUMNS = [
+        ['x' => 90, 'w' => 172, 'name_x' => 96, 'name_w' => 158],
+        ['x' => 281, 'w' => 168, 'name_x' => 288, 'name_w' => 155],
+        ['x' => 471, 'w' => 169, 'name_x' => 476, 'name_w' => 156],
+        ['x' => 660, 'w' => 170, 'name_x' => 666, 'name_w' => 157],
+        ['x' => 849, 'w' => 169, 'name_x' => 856, 'name_w' => 155],
     ];
 
     /**
-     * Player slot offsets relative to team origin.
-     * Index: 0 = goalkeeper (left), 2 = captain (center/front), 3-4 = right of captain (flipped).
+     * Team rows matching the template: green, yellow, blue.
+     * photo_h is the same on every row so all players match the blue card size.
+     *
+     * @var array<int, array{photo_y: int, photo_h: int, name_y: int, name_h: int}>
      */
-    private const PLAYER_SLOTS = [
-        0 => ['ox' => 0,   'oy' => 0, 'photo' => 'side',  'flip' => false],
-        1 => ['ox' => 130, 'oy' => 0, 'photo' => 'side',  'flip' => false],
-        2 => ['ox' => 260, 'oy' => 0, 'photo' => 'front', 'flip' => false],
-        3 => ['ox' => 390, 'oy' => 0, 'photo' => 'side',  'flip' => true],
-        4 => ['ox' => 520, 'oy' => 0, 'photo' => 'side',  'flip' => true],
+    private const ROWS = [
+        ['photo_y' => 513, 'photo_h' => 203, 'name_y' => 742, 'name_h' => 34],
+        ['photo_y' => 997, 'photo_h' => 203, 'name_y' => 1226, 'name_h' => 33],
+        ['photo_y' => 1488, 'photo_h' => 203, 'name_y' => 1717, 'name_h' => 38],
     ];
 
     /**
-     * @param  array<int, array<int, int>>  $teamPlayerIds  3 arrays of 5 user IDs each: [goalkeeper, player, captain, player, player]
+     * @param  array<int, array<int, int|null>>  $teamPlayerIds  3 arrays of up to 5 user IDs: [goalkeeper, player, captain, player, player]
      */
     public function generate(Game $game, array $teamPlayerIds): ?string
     {
@@ -49,20 +58,23 @@ class LineupsImageService
             return null;
         }
 
-        foreach ($teamPlayerIds as $team) {
-            if (count($team) !== self::PLAYERS_PER_TEAM) {
-                return null;
-            }
+        foreach ($teamPlayerIds as $index => $team) {
+            $teamPlayerIds[$index] = array_pad(array_values($team), self::PLAYERS_PER_TEAM, null);
         }
 
-        $allIds = array_merge(...$teamPlayerIds);
+        $allIds = array_values(array_filter(array_merge(...$teamPlayerIds)));
+
+        if ($allIds === []) {
+            return null;
+        }
+
         $users = User::whereIn('id', $allIds)->get()->keyBy('id');
 
         $teams = [];
         foreach ($teamPlayerIds as $teamIds) {
             $teamUsers = [];
             foreach ($teamIds as $id) {
-                $teamUsers[] = $users->get($id);
+                $teamUsers[] = $id ? $users->get($id) : null;
             }
             $teams[] = $teamUsers;
         }
@@ -76,9 +88,7 @@ class LineupsImageService
 
         File::ensureDirectoryExists($outputDir);
 
-        $path = $this->generateImage($teams, $outputDir, "lineups/{$round}");
-
-        return $path;
+        return $this->generateImage($teams, $outputDir, "lineups/{$round}");
     }
 
     /**
@@ -156,92 +166,107 @@ class LineupsImageService
         imagesavealpha($base, true);
 
         imagecopyresampled(
-            $canvas, $base,
-            0, 0, 0, 0,
-            self::WIDTH, self::HEIGHT,
-            imagesx($base), imagesy($base)
+            $canvas,
+            $base,
+            0,
+            0,
+            0,
+            0,
+            self::WIDTH,
+            self::HEIGHT,
+            imagesx($base),
+            imagesy($base)
         );
         imagedestroy($base);
 
-        // Render order: edges first (0,4), then adjacent to captain (1,3), then captain (2)
-        $renderOrder = [0, 4, 1, 3, 2];
-
-        // First pass: place all player photos
         foreach ($teams as $teamIndex => $teamPlayers) {
-            $team = self::TEAMS[$teamIndex];
-
-            foreach ($renderOrder as $slotIndex) {
-                $player = $teamPlayers[$slotIndex] ?? null;
-                if (! $player) {
+            foreach ($teamPlayers as $slotIndex => $player) {
+                if (! $player || ! isset(self::COLUMNS[$slotIndex], self::ROWS[$teamIndex])) {
                     continue;
                 }
 
-                $slot = self::PLAYER_SLOTS[$slotIndex];
-                $x = $team['x'] + $slot['ox'];
-                $y = $team['y'] + $slot['oy'];
-
-                $photoColumn = $slot['photo'] === 'front' ? 'photo_front' : 'photo_side';
-                $photoPath = $this->resolvePhotoPath($player, $photoColumn);
+                $box = $this->slotBox($teamIndex, $slotIndex);
+                $photoPath = $this->resolvePhotoPath($player);
 
                 $this->placePlayer(
                     $canvas,
                     $photoPath,
-                    $x,
-                    $y,
-                    self::PLAYER_W,
-                    self::PLAYER_H,
-                    $slot['flip']
+                    $box['photo_x'],
+                    $box['photo_y'],
+                    $box['photo_w'],
+                    $box['photo_h']
                 );
             }
         }
 
-        // Second pass: draw all name cards on top
         foreach ($teams as $teamIndex => $teamPlayers) {
-            $team = self::TEAMS[$teamIndex];
-
             foreach ($teamPlayers as $slotIndex => $player) {
-                if (! $player) {
+                if (! $player || ! isset(self::COLUMNS[$slotIndex], self::ROWS[$teamIndex])) {
                     continue;
                 }
 
-                $slot = self::PLAYER_SLOTS[$slotIndex];
-                $x = $team['x'] + $slot['ox'];
-                $y = $team['y'] + $slot['oy'];
+                $box = $this->slotBox($teamIndex, $slotIndex);
 
-                $this->drawNameCard(
+                $this->drawPlayerName(
                     $canvas,
                     $this->firstName($player->name),
-                    $x,
-                    $y,
-                    self::PLAYER_W,
-                    self::PLAYER_H
+                    $box['name_x'],
+                    $box['name_y'],
+                    $box['name_w'],
+                    $box['name_h']
                 );
             }
         }
 
         $fileName = 'lineups.png';
-        $fullPath = $outputDir . DIRECTORY_SEPARATOR . $fileName;
+        $fullPath = $outputDir.DIRECTORY_SEPARATOR.$fileName;
 
         imagepng($canvas, $fullPath);
         imagedestroy($canvas);
 
-        return $relativePath . '/' . $fileName;
+        return $relativePath.'/'.$fileName;
     }
 
-    private function resolvePhotoPath(User $player, string $column): string
+    /**
+     * @return array{photo_x: int, photo_y: int, photo_w: int, photo_h: int, name_x: int, name_y: int, name_w: int, name_h: int}
+     */
+    private function slotBox(int $row, int $col): array
+    {
+        $column = self::COLUMNS[$col];
+        $rowCfg = self::ROWS[$row];
+
+        return [
+            'photo_x' => $column['x'],
+            'photo_y' => $rowCfg['photo_y'],
+            'photo_w' => $column['w'],
+            'photo_h' => $rowCfg['photo_h'],
+            'name_x' => $column['name_x'],
+            'name_y' => $rowCfg['name_y'],
+            'name_w' => $column['name_w'],
+            'name_h' => $rowCfg['name_h'],
+        ];
+    }
+
+    private function resolvePhotoPath(User $player): string
     {
         $fallback = public_path('assets/week_team/unknown_player.png');
 
-        if (! $player->$column) {
-            return $fallback;
+        foreach (['photo_front', 'photo_side'] as $column) {
+            if (! $player->$column) {
+                continue;
+            }
+
+            $path = PublicStorage::localPath($player->$column);
+
+            if ($path) {
+                return $path;
+            }
         }
 
-        $path = PublicStorage::localPath($player->$column);
-
-        return $path ?? $fallback;
+        return $fallback;
     }
 
-    private function placePlayer(\GdImage $canvas, string $photoPath, int $x, int $y, int $targetW, int $targetH, bool $flip): void
+    private function placePlayer(\GdImage $canvas, string $photoPath, int $x, int $y, int $targetW, int $targetH): void
     {
         $info = @getimagesize($photoPath);
         if (! $info) {
@@ -249,10 +274,10 @@ class LineupsImageService
         }
 
         $src = match ($info[2]) {
-            IMAGETYPE_PNG  => imagecreatefrompng($photoPath),
+            IMAGETYPE_PNG => imagecreatefrompng($photoPath),
             IMAGETYPE_JPEG => imagecreatefromjpeg($photoPath),
             IMAGETYPE_WEBP => imagecreatefromwebp($photoPath),
-            default        => null,
+            default => null,
         };
 
         if (! $src) {
@@ -262,83 +287,183 @@ class LineupsImageService
         imagealphablending($src, true);
         imagesavealpha($src, true);
 
-        $srcW = imagesx($src);
-        $srcH = imagesy($src);
+        $bounds = $this->opaqueBounds($src);
+        $personX = $bounds['x'];
+        $personY = $bounds['y'];
+        $personW = $bounds['w'];
+        $personH = $bounds['h'];
 
-        $scale = max($targetW / $srcW, $targetH / $srcH);
-        $newW = (int) round($srcW * $scale);
-        $newH = (int) round($srcH * $scale);
+        $imgW = imagesx($src);
+        $imgH = imagesy($src);
+
+        // Same body window and scale for every player, matching the blue card.
+        $cropH = $this->headToWaistCropHeight($personW, $personH);
+        $cropW = max(1, (int) round($cropH * (self::PLAYER_W / self::PLAYER_H)));
+        $cropW = min($cropW, $imgW);
+        $cropH = min($cropH, $personH, $imgH);
+
+        $cropX = $personX + (int) (($personW - $cropW) / 2);
+        $cropX = max(0, min($cropX, $imgW - $cropW));
+        $cropY = max(0, $personY);
+        if ($cropY + $cropH > $imgH) {
+            $cropH = $imgH - $cropY;
+        }
+
+        $scale = (self::PLAYER_H / max(1, $cropH)) * self::PLAYER_OVERFLOW;
+        $newW = max(1, (int) round($cropW * $scale));
+        $newH = max(1, (int) round($cropH * $scale));
 
         $resized = imagecreatetruecolor($newW, $newH);
         imagealphablending($resized, false);
         imagesavealpha($resized, true);
         $transparent = imagecolorallocatealpha($resized, 0, 0, 0, 127);
         imagefill($resized, 0, 0, $transparent);
-        imagecopyresampled($resized, $src, 0, 0, 0, 0, $newW, $newH, $srcW, $srcH);
+        imagecopyresampled($resized, $src, 0, 0, $cropX, $cropY, $newW, $newH, $cropW, $cropH);
         imagedestroy($src);
 
-        $cropX = (int) (($newW - $targetW) / 2);
-        $cropped = imagecreatetruecolor($targetW, $targetH);
-        imagealphablending($cropped, false);
-        imagesavealpha($cropped, true);
-        $transparent2 = imagecolorallocatealpha($cropped, 0, 0, 0, 127);
-        imagefill($cropped, 0, 0, $transparent2);
-        imagecopy($cropped, $resized, 0, 0, $cropX, 0, $targetW, $targetH);
-        imagedestroy($resized);
+        $baseline = $y + $targetH;
+        $destX = $x + (int) (($targetW - $newW) / 2);
+        $destY = $baseline - $newH;
 
-        if ($flip) {
-            imageflip($cropped, IMG_FLIP_HORIZONTAL);
+        $copyX = 0;
+        $copyY = 0;
+        $copyW = $newW;
+        $copyH = $newH;
+
+        if ($destX < 0) {
+            $copyX = -$destX;
+            $copyW -= $copyX;
+            $destX = 0;
+        }
+        if ($destY < 0) {
+            $copyY = -$destY;
+            $copyH -= $copyY;
+            $destY = 0;
+        }
+        if ($destX + $copyW > self::WIDTH) {
+            $copyW = self::WIDTH - $destX;
+        }
+        if ($destY + $copyH > $baseline) {
+            $copyH = $baseline - $destY;
         }
 
-        imagealphablending($canvas, true);
-        imagecopy($canvas, $cropped, $x, $y, 0, 0, $targetW, $targetH);
-        imagedestroy($cropped);
+        if ($copyW > 0 && $copyH > 0) {
+            imagealphablending($canvas, true);
+            imagecopy($canvas, $resized, $destX, $destY, $copyX, $copyY, $copyW, $copyH);
+        }
+
+        imagedestroy($resized);
     }
 
-    private function drawNameCard(\GdImage $canvas, string $name, int $x, int $y, int $playerWidth, int $playerHeight): void
+    /**
+     * Height of the head-to-waist window inside a player cutout.
+     * Taller (full-body) photos keep only the upper half; bust shots use the full cutout.
+     */
+    private function headToWaistCropHeight(int $personW, int $personH): int
     {
-        $fontPath = public_path('fonts/Anton-Regular.ttf');
+        $tallness = $personH / max(1, $personW);
 
-        if (! file_exists($fontPath) || blank($name)) {
+        $ratio = match (true) {
+            $tallness >= 2.3 => 0.50,
+            $tallness >= 1.85 => 0.64,
+            $tallness >= 1.45 => 0.82,
+            default => 1.0,
+        };
+
+        return max(1, (int) round($personH * $ratio));
+    }
+
+    /**
+     * @return array{x: int, y: int, w: int, h: int}
+     */
+    private function opaqueBounds(\GdImage $src): array
+    {
+        $w = imagesx($src);
+        $h = imagesy($src);
+        $minX = $w;
+        $minY = $h;
+        $maxX = -1;
+        $maxY = -1;
+
+        for ($py = 0; $py < $h; $py++) {
+            for ($px = 0; $px < $w; $px++) {
+                $alpha = (imagecolorat($src, $px, $py) >> 24) & 0x7F;
+                if ($alpha >= 110) {
+                    continue;
+                }
+
+                if ($px < $minX) {
+                    $minX = $px;
+                }
+                if ($px > $maxX) {
+                    $maxX = $px;
+                }
+                if ($py < $minY) {
+                    $minY = $py;
+                }
+                if ($py > $maxY) {
+                    $maxY = $py;
+                }
+            }
+        }
+
+        if ($maxX < 0) {
+            return ['x' => 0, 'y' => 0, 'w' => $w, 'h' => $h];
+        }
+
+        return [
+            'x' => $minX,
+            'y' => $minY,
+            'w' => $maxX - $minX + 1,
+            'h' => $maxY - $minY + 1,
+        ];
+    }
+
+    private function drawPlayerName(\GdImage $canvas, string $name, int $x, int $y, int $width, int $height): void
+    {
+        $fontPath = $this->fontPath();
+
+        if (! $fontPath || blank($name)) {
             return;
         }
 
         $displayName = mb_strtoupper($name);
-        $fontSize = 20;
-        $paddingX = 8;
-        $paddingY = 8;
-        $radius = 8;
-        $bottomMargin = 0;
+        $maxWidth = max(20, $width - 12);
+        $fontSize = 15;
 
-        $bbox = imagettfbbox($fontSize, 0, $fontPath, $displayName);
-        $textWidth = (int) abs($bbox[2] - $bbox[0]);
-        $textHeight = (int) abs($bbox[7] - $bbox[1]);
+        do {
+            $bbox = imagettfbbox($fontSize, 0, $fontPath, $displayName);
+            $textWidth = (int) abs($bbox[2] - $bbox[0]);
+            $textHeight = (int) abs($bbox[7] - $bbox[1]);
+            if ($textWidth <= $maxWidth || $fontSize <= 10) {
+                break;
+            }
+            $fontSize--;
+        } while (true);
 
-        $cardW = $textWidth + ($paddingX * 2);
-        $cardH = $textHeight + ($paddingY * 2);
+        $textX = $x + (int) (($width - $textWidth) / 2);
+        $textY = $y + (int) (($height + $textHeight) / 2) - 1;
 
-        $cardX = $x + (int) (($playerWidth - $cardW) / 2);
-        $cardY = $y + $playerHeight - $cardH - $bottomMargin;
+        $shadow = imagecolorallocate($canvas, 0, 0, 0);
+        $white = imagecolorallocate($canvas, 255, 255, 255);
 
-        $bgColor = imagecolorallocate($canvas, 0xD2, 0xB0, 0x6A);
-        $textColor = imagecolorallocate($canvas, 0, 0, 0);
-
-        $this->drawRoundedRect($canvas, $cardX, $cardY, $cardX + $cardW, $cardY + $cardH, $radius, $bgColor);
-
-        $textX = $cardX + $paddingX;
-        $textY = $cardY + $paddingY + $textHeight;
-
-        imagettftext($canvas, $fontSize, 0, $textX, $textY, $textColor, $fontPath, $displayName);
+        imagettftext($canvas, $fontSize, 0, $textX + 1, $textY + 1, $shadow, $fontPath, $displayName);
+        imagettftext($canvas, $fontSize, 0, $textX, $textY, $white, $fontPath, $displayName);
     }
 
-    private function drawRoundedRect(\GdImage $canvas, int $x1, int $y1, int $x2, int $y2, int $radius, int $color): void
+    private function fontPath(): ?string
     {
-        imagefilledrectangle($canvas, $x1 + $radius, $y1, $x2 - $radius, $y2, $color);
-        imagefilledrectangle($canvas, $x1, $y1 + $radius, $x2, $y2 - $radius, $color);
-        imagefilledellipse($canvas, $x1 + $radius, $y1 + $radius, $radius * 2, $radius * 2, $color);
-        imagefilledellipse($canvas, $x2 - $radius, $y1 + $radius, $radius * 2, $radius * 2, $color);
-        imagefilledellipse($canvas, $x1 + $radius, $y2 - $radius, $radius * 2, $radius * 2, $color);
-        imagefilledellipse($canvas, $x2 - $radius, $y2 - $radius, $radius * 2, $radius * 2, $color);
+        foreach ([
+            public_path('fonts/Orbitron-ExtraBold.ttf'),
+            public_path('fonts/Orbitron-Bold.ttf'),
+            public_path('fonts/Anton-Regular.ttf'),
+        ] as $path) {
+            if (is_file($path)) {
+                return $path;
+            }
+        }
+
+        return null;
     }
 
     private function firstName(?string $name): string

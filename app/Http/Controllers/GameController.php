@@ -311,14 +311,14 @@ class GameController extends Controller
 
         $teamPlayerIds = $request->input('teams');
 
-        if ($teamPlayerIds) {
-            $path = $imageService->generate($game, $teamPlayerIds);
-        } else {
-            $path = $imageService->generateRandom($game);
+        if (! is_array($teamPlayerIds) || count($teamPlayerIds) !== 3) {
+            $teamPlayerIds = $this->draftService->buildTeamPlayerIdsForLineups($game);
         }
 
+        $path = $imageService->generate($game, $teamPlayerIds);
+
         if (! $path) {
-            return response()->json(['error' => 'Jogadores insuficientes para gerar escalações.'], 422);
+            return response()->json(['error' => 'Times ainda não definidos para gerar as escalações.'], 422);
         }
 
         return response()->json(['image' => PublicStorage::url($path)]);

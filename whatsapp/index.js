@@ -9,7 +9,10 @@ const MAX_SEND_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1500;
 
 const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
+    // Snap Chromium cannot lock a profile under /var/www; keep the session in $HOME.
+    authStrategy: new LocalAuth({
+        dataPath: process.env.WWEBJS_AUTH_PATH || './.wwebjs_auth',
+    }),
     webVersionCache: {
         type: 'remote',
         remotePath: 'https://raw.githubusercontent.com/nicomeyer96/whatsapp-web.js-version-fix/main/bypass/webVersion',

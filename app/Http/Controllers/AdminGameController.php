@@ -337,6 +337,90 @@ class AdminGameController extends Controller
         return back();
     }
 
+    public function replaceInTeam(Request $request, Game $game, ScoringService $scoringService): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+
+        $validated = $request->validate([
+            'user_id' => ['required', 'integer', 'exists:users,id'],
+            'replacement_user_id' => ['required', 'integer', 'exists:users,id', 'different:user_id'],
+            'color' => ['required', Rule::in(TeamColor::values())],
+        ]);
+
+        $oldUserId = (int) $validated['user_id'];
+        $newUserId = (int) $validated['replacement_user_id'];
+        $color = $validated['color'];
+
+        $oldPlayer = User::findOrFail($oldUserId);
+        $newPlayer = User::findOrFail($newUserId);
+
+        DB::transaction(function () use ($game, $oldUserId, $newUserId, $color, $oldPlayer, $newPlayer) {
+            $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
+
+            $oldIsGoalkeeper = $oldPlayer->position === Position::GOALKEEPER;
+            $newIsGoalkeeper = $newPlayer->position === Position::GOALKEEPER;
+
+            if ($oldIsGoalkeeper !== $newIsGoalkeeper) {
+                throw ValidationException::withMessages([
+                    'replacement_user_id' => $oldIsGoalkeeper
+                        ? 'Selecione um goleiro para substituir o goleiro.'
+                        : 'Selecione um jogador de linha para substituir.',
+                ]);
+            }
+
+            $isCaptain = Team::where('game_id', $lockedGame->id)->where('captain_user_id', $newUserId)->exists();
+            $isDrafted = DraftPick::where('game_id', $lockedGame->id)->where('picked_user_id', $newUserId)->exists();
+
+            if ($isCaptain || $isDrafted) {
+                throw ValidationException::withMessages(['replacement_user_id' => 'Jogador já está em um time.']);
+            }
+
+            $team = Team::where('game_id', $lockedGame->id)->where('color', $color)->first();
+
+            if ($team && $team->captain_user_id === $oldUserId) {
+                $team->update(['captain_user_id' => $newUserId]);
+            } else {
+                $pick = DraftPick::where('game_id', $lockedGame->id)
+                    ->where('team_color', $color)
+                    ->where('picked_user_id', $oldUserId)
+                    ->first();
+
+                if (! $pick) {
+                    throw ValidationException::withMessages(['user_id' => 'Este jogador não está neste time.']);
+                }
+
+                $pick->update(['picked_user_id' => $newUserId]);
+
+                if ($team && $team->first_pick_user_id === $oldUserId) {
+                    $team->update(['first_pick_user_id' => $newUserId]);
+                }
+            }
+
+            $oldGamePlayer = GamePlayer::where('game_id', $lockedGame->id)
+                ->where('user_id', $oldUserId)
+                ->where('dropped_out', false)
+                ->first();
+
+            if ($oldGamePlayer) {
+                $oldGamePlayer->update(['dropped_out' => true]);
+            }
+
+            GamePlayer::updateOrCreate(
+                ['game_id' => $lockedGame->id, 'user_id' => $newUserId],
+                ['joined_at' => now(), 'dropped_out' => false, 'waitlist_at' => null],
+            );
+        });
+
+        rescue(fn () => $this->paymentService->cancelPaymentForPlayer($game->id, $oldUserId), report: false);
+
+        $hasScores = Team::where('game_id', $game->id)->whereNotNull('score')->exists();
+        if ($hasScores) {
+            $scoringService->calculateAndAssignPoints($game);
+        }
+
+        return back();
+    }
+
     public function removePlayer(Request $request, Game $game): RedirectResponse
     {
         abort_unless($request->user()->role === 'admin', 403);

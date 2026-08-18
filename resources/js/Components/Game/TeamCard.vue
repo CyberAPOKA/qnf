@@ -4,6 +4,11 @@ import { useForm } from '@inertiajs/vue3';
 import Select from 'primevue/select';
 import AddGuestModal from '@/Components/Game/AddGuestModal.vue';
 import Button from 'primevue/button';
+import DialogModal from '@/Components/DialogModal.vue';
+import ConfirmationModal from '@/Components/ConfirmationModal.vue';
+import InputError from '@/Components/InputError.vue';
+import PrimaryButton from '@/Components/PrimaryButton.vue';
+import SecondaryButton from '@/Components/SecondaryButton.vue';
 
 const props = defineProps({
     color: {
@@ -47,6 +52,7 @@ const members = computed(() => {
         list.push({
             id: props.team.captain.id,
             name: props.team.captain.name,
+            position: props.team.captain.position,
             badgeIcon: 'fa-solid fa-copyright',
             badgeTitle: 'Capitão',
         });
@@ -65,6 +71,7 @@ const members = computed(() => {
         list.push({
             id: player.id,
             name: player.name,
+            position: player.position,
             badgeIcon,
             badgeTitle,
         });
@@ -108,7 +115,19 @@ const filteredPlayers = computed(() => {
 const selectedPlayer = ref(null);
 const removeForm = useForm({ user_id: null, color: '' });
 const addForm = useForm({ user_id: '', color: '' });
+const replaceForm = useForm({ user_id: null, replacement_user_id: null, color: '' });
 const guestModal = ref(null);
+const memberToRemove = ref(null);
+const memberToReplace = ref(null);
+const replacementPlayer = ref(null);
+
+const isGoalkeeper = (member) => member?.position === 'goalkeeper';
+
+const replaceCandidates = computed(() => {
+    if (!memberToReplace.value) return [];
+    const wantGoalkeeper = isGoalkeeper(memberToReplace.value);
+    return props.availablePlayers.filter((p) => (p.position === 'goalkeeper') === wantGoalkeeper);
+});
 
 const allowedGuestPositions = computed(() => {
     if (isFull.value) return [];
@@ -118,13 +137,51 @@ const allowedGuestPositions = computed(() => {
     return positions;
 });
 
-const removeMember = (userId) => {
-    if (!props.gameId) return;
-    removeForm.user_id = userId;
+const openRemoveModal = (member) => {
+    memberToRemove.value = member;
+};
+
+const closeRemoveModal = () => {
+    if (removeForm.processing) return;
+    memberToRemove.value = null;
+};
+
+const confirmRemove = () => {
+    if (!props.gameId || !memberToRemove.value) return;
+    removeForm.user_id = memberToRemove.value.id;
     removeForm.color = props.color;
     removeForm.post(route('games.remove-from-team', props.gameId), {
         preserveScroll: true,
         preserveState: false,
+        onSuccess: () => { memberToRemove.value = null; },
+    });
+};
+
+const openReplaceModal = (member) => {
+    memberToReplace.value = member;
+    replacementPlayer.value = null;
+    replaceForm.reset();
+    replaceForm.clearErrors();
+};
+
+const closeReplaceModal = () => {
+    if (replaceForm.processing) return;
+    memberToReplace.value = null;
+    replacementPlayer.value = null;
+};
+
+const confirmReplace = () => {
+    if (!props.gameId || !memberToReplace.value || !replacementPlayer.value) return;
+    replaceForm.user_id = memberToReplace.value.id;
+    replaceForm.replacement_user_id = replacementPlayer.value.id;
+    replaceForm.color = props.color;
+    replaceForm.post(route('games.replace-in-team', props.gameId), {
+        preserveScroll: true,
+        preserveState: false,
+        onSuccess: () => {
+            memberToReplace.value = null;
+            replacementPlayer.value = null;
+        },
     });
 };
 
@@ -176,15 +233,26 @@ const firstName = (name) => name.split(' ')[0];
                 >
                     <i :class="member.badgeIcon" aria-hidden="true" />
                 </span>
-                <button
-                    v-if="editable"
-                    type="button"
-                    class="team-card__remove"
-                    :disabled="removeForm.processing"
-                    @click="removeMember(member.id)"
-                >
-                    <i class="fa-solid fa-xmark" aria-hidden="true" />
-                </button>
+                <span v-if="editable" class="team-card__actions">
+                    <button
+                        type="button"
+                        class="team-card__swap"
+                        title="Substituir"
+                        :disabled="replaceForm.processing"
+                        @click="openReplaceModal(member)"
+                    >
+                        <i class="fa-solid fa-right-left" aria-hidden="true" />
+                    </button>
+                    <button
+                        type="button"
+                        class="team-card__remove"
+                        title="Remover"
+                        :disabled="removeForm.processing"
+                        @click="openRemoveModal(member)"
+                    >
+                        <i class="fa-solid fa-xmark" aria-hidden="true" />
+                    </button>
+                </span>
             </li>
         </ul>
 
@@ -227,6 +295,69 @@ const firstName = (name) => name.split(' ')[0];
         </Button>
 
         <AddGuestModal ref="guestModal" :game-id="gameId" team-mode :allowed-positions="allowedGuestPositions" />
+
+        <ConfirmationModal :show="memberToRemove !== null" max-width="lg" @close="closeRemoveModal">
+            <template #title>Remover do time</template>
+            <template #content>
+                Tem certeza que deseja remover
+                <strong>{{ memberToRemove ? firstName(memberToRemove.name) : '' }}</strong>
+                do {{ config.label }}? O jogador será marcado como desistente nesta rodada.
+            </template>
+            <template #footer>
+                <SecondaryButton :disabled="removeForm.processing" @click="closeRemoveModal">Cancelar</SecondaryButton>
+                <PrimaryButton
+                    class="ms-3 !bg-red-600 hover:!bg-red-500"
+                    :disabled="removeForm.processing"
+                    @click="confirmRemove"
+                >
+                    {{ removeForm.processing ? 'Removendo...' : 'Sim, remover' }}
+                </PrimaryButton>
+            </template>
+        </ConfirmationModal>
+
+        <DialogModal :show="memberToReplace !== null" max-width="lg" @close="closeReplaceModal">
+            <template #title>Substituir jogador</template>
+            <template #content>
+                <p class="mb-3">
+                    Escolha quem vai substituir
+                    <strong>{{ memberToReplace ? firstName(memberToReplace.name) : '' }}</strong>
+                    ({{ memberToReplace && isGoalkeeper(memberToReplace) ? 'goleiro' : 'linha' }}).
+                </p>
+                <div
+                    v-if="replaceCandidates.length"
+                    class="max-h-64 overflow-y-auto rounded-md border border-gray-200"
+                >
+                    <button
+                        v-for="player in replaceCandidates"
+                        :key="player.id"
+                        type="button"
+                        class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition hover:bg-gray-50"
+                        :class="replacementPlayer?.id === player.id ? 'bg-indigo-50 text-indigo-900' : 'text-gray-800'"
+                        @click="replacementPlayer = player"
+                    >
+                        <span class="font-medium">{{ player.name }}</span>
+                        <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+                            {{ player.position_label }}
+                        </span>
+                    </button>
+                </div>
+                <p v-else class="rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-500">
+                    Nenhum {{ memberToReplace && isGoalkeeper(memberToReplace) ? 'goleiro' : 'jogador de linha' }} disponível para substituição.
+                </p>
+                <InputError :message="replaceForm.errors.replacement_user_id" class="mt-2" />
+                <InputError :message="replaceForm.errors.user_id" class="mt-2" />
+            </template>
+            <template #footer>
+                <SecondaryButton :disabled="replaceForm.processing" @click="closeReplaceModal">Cancelar</SecondaryButton>
+                <PrimaryButton
+                    class="ms-3"
+                    :disabled="replaceForm.processing || !replacementPlayer"
+                    @click="confirmReplace"
+                >
+                    {{ replaceForm.processing ? 'Substituindo...' : 'Substituir' }}
+                </PrimaryButton>
+            </template>
+        </DialogModal>
     </article>
 </template>
 
@@ -446,6 +577,36 @@ const firstName = (name) => name.split(' ')[0];
     color: var(--team-light);
     font-size: 0.72rem;
     opacity: 0.9;
+}
+
+.team-card__actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 4px;
+}
+
+.team-card__swap {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    color: #38bdf8;
+    font-size: 0.58rem;
+    background: rgba(56, 189, 248, 0.12);
+    border-radius: 4px;
+    transition: background 150ms ease, color 150ms ease;
+}
+
+.team-card__swap:hover:not(:disabled) {
+    background: rgba(56, 189, 248, 0.28);
+    color: #bae6fd;
+}
+
+.team-card__swap:disabled {
+    opacity: 0.5;
 }
 
 .team-card__remove {

@@ -43,18 +43,20 @@ const regenerateAllWeekTeams = async () => {
 };
 
 const generators = ref([
-    { key: 'captains', label: 'Capitães', routeName: 'api.captains.generate', imgClass: 'w-full', loading: false, image: null },
-    { key: 'lineups', label: 'Escalações', routeName: 'api.lineups.generate', imgClass: 'w-full', loading: false, image: null },
-    { key: 'ranking', label: 'Ranking', routeName: 'api.ranking.generate', imgClass: 'w-fit max-h-fit', loading: false, image: null },
+    { key: 'captains', label: 'Capitães', routeName: 'api.captains.generate', imgClass: 'w-full', loading: false, image: null, error: null },
+    { key: 'lineups', label: 'Escalações', routeName: 'api.lineups.generate', imgClass: 'w-full', loading: false, image: null, error: null },
+    { key: 'ranking', label: 'Ranking', routeName: 'api.ranking.generate', imgClass: 'w-fit max-h-fit', loading: false, image: null, error: null },
 ]);
 
 const generateImage = async (generator) => {
     if (generator.loading) return;
     generator.loading = true;
+    generator.error = null;
     try {
         const { data } = await axios.post(route(generator.routeName));
         generator.image = `${data.image}?t=${Date.now()}`;
     } catch (e) {
+        generator.error = e.response?.data?.error || `Erro ao gerar ${generator.label.toLowerCase()}`;
         console.error(`Failed to generate ${generator.key} image`, e);
     } finally {
         generator.loading = false;
@@ -86,6 +88,7 @@ const generateImage = async (generator) => {
         <div v-for="generator in generators" :key="generator.key" class="space-y-2">
             <FuturisticButton :label="generator.loading ? 'Gerando...' : `Gerar ${generator.label}`"
                 @click="generateImage(generator)" />
+            <p v-if="generator.error" class="text-sm font-medium text-red-600">{{ generator.error }}</p>
             <img v-if="generator.image" :src="generator.image" :alt="generator.label" class="rounded-lg shadow"
                 :class="generator.imgClass">
         </div>
