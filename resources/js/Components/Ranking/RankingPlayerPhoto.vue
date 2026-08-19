@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { RankingTheme } from '@/Components/Ranking/types'
+import RankingPlayerCustomizationBubble from '@/Components/Ranking/RankingPlayerCustomizationBubble.vue'
+import type { PlayerCustomizations, RankingTheme } from '@/Components/Ranking/types'
 
 const props = defineProps<{
     src?: string | null
     name: string
     initial?: string
     theme?: RankingTheme
+    customizations?: PlayerCustomizations | null
 }>()
 
 const isPodium = computed(() =>
@@ -17,48 +19,31 @@ const isPodium = computed(() =>
 </script>
 
 <template>
-    <div
-        class="ranking-player-photo relative flex items-end justify-center self-stretch"
-        :class="{ 'ranking-player-photo--podium': isPodium }"
-    >
+    <div class="ranking-player-photo relative flex items-end justify-center self-stretch"
+        :class="{ 'ranking-player-photo--podium': isPodium }">
+        <RankingPlayerCustomizationBubble :flag="customizations?.flag" />
+
         <!-- <div class="ranking-player-photo__glow pointer-events-none absolute bottom-[-10px] left-1/2 z-[1] -translate-x-1/2 rounded-full" /> -->
 
         <!-- Pódio: foto fora do mask/crop para atravessar a borda -->
         <template v-if="isPodium">
-            <img
-                v-if="src"
-                :src="src"
-                :alt="name"
-                class="ranking-player-photo__breakout"
-                loading="lazy"
-                decoding="async"
-            >
-            <div
-                v-else
+            <img v-if="src" :src="src" :alt="name" class="ranking-player-photo__breakout" loading="lazy"
+                decoding="async">
+            <div v-else
                 class="ranking-player-photo__breakout-fallback flex items-center justify-center rounded-full border-2 font-black uppercase text-slate-50"
-                style="background: rgba(var(--accent-rgb), 0.25); border-color: rgba(var(--accent-rgb), 0.55);"
-            >
+                style="background: rgba(var(--accent-rgb), 0.25); border-color: rgba(var(--accent-rgb), 0.55);">
                 {{ initial || name?.charAt(0) || '?' }}
             </div>
         </template>
 
-        <div
-            v-else
-            class="ranking-player-photo__crop relative z-[2] flex h-full w-full items-end justify-center overflow-hidden"
-        >
-            <img
-                v-if="src"
-                :src="src"
-                :alt="name"
+        <div v-else
+            class="ranking-player-photo__crop relative z-[2] flex h-full w-full items-end justify-center overflow-hidden">
+            <img v-if="src" :src="src" :alt="name"
                 class="ranking-player-photo__img relative z-[2] block object-cover object-top saturate-[1.05] contrast-[1.04]"
-                loading="lazy"
-                decoding="async"
-            >
-            <div
-                v-else
+                loading="lazy" decoding="async">
+            <div v-else
                 class="ranking-player-photo__fallback relative z-[2] mb-4 flex items-center justify-center rounded-full border-2 font-black uppercase text-slate-50"
-                style="background: rgba(var(--accent-rgb), 0.25); border-color: rgba(var(--accent-rgb), 0.55);"
-            >
+                style="background: rgba(var(--accent-rgb), 0.25); border-color: rgba(var(--accent-rgb), 0.55);">
                 {{ initial || name?.charAt(0) || '?' }}
             </div>
         </div>
@@ -67,7 +52,7 @@ const isPodium = computed(() =>
 
 <style scoped>
 .ranking-player-photo {
-    overflow: hidden;
+    overflow: visible;
     min-height: 0;
 }
 
@@ -96,6 +81,11 @@ const isPodium = computed(() =>
 
 .ranking-player-photo--podium {
     overflow: visible !important;
+}
+
+.ranking-player-photo--podium :deep(.ranking-player-flag) {
+    top: -30px;
+    left: 25%;
 }
 
 .ranking-player-photo--podium .ranking-player-photo__glow {
@@ -166,6 +156,11 @@ const isPodium = computed(() =>
         width: 50px;
         height: 50px;
         font-size: 1.15rem;
+    }
+
+    .ranking-player-photo--podium :deep(.ranking-player-flag) {
+        top: -22px;
+        left: 17%;
     }
 }
 </style>

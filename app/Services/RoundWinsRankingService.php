@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Enums\GameStatus;
+use App\Models\User;
 use App\Support\PublicStorage;
 use Illuminate\Support\Facades\DB;
 
@@ -81,13 +82,18 @@ class RoundWinsRankingService
             ->orderBy('name')
             ->get();
 
+        $customizationsById = User::query()
+            ->whereIn('id', $rows->pluck('id'))
+            ->get(['id', 'customizations'])
+            ->pluck('customizations', 'id');
+
         // Competition ranking (1, 2, 2, 4)
         $pos = 0;
         $rank = 0;
         $lastScore = null;
         $lastAvg = null;
 
-        return $rows->map(function ($row) use (&$pos, &$rank, &$lastScore, &$lastAvg) {
+        return $rows->map(function ($row) use (&$pos, &$rank, &$lastScore, &$lastAvg, $customizationsById) {
             $pos++;
             $score = (int) $row->total_score;
             $avg = (float) $row->avg_score;
@@ -104,6 +110,7 @@ class RoundWinsRankingService
                 'position' => $row->position,
                 'photo_front' => PublicStorage::url($row->photo_front),
                 'initial' => mb_strtoupper(mb_substr($row->name, 0, 1)),
+                'customizations' => User::decodeCustomizations($customizationsById->get($row->id)),
                 'total_score' => $score,
                 'games_played' => (int) $row->games_played,
                 'avg_score' => $avg,

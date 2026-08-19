@@ -113,6 +113,7 @@ function toCardPlayer(player, index) {
         theme: medalTheme(player),
         win_streak: Number(player.win_streak) || 0,
         isGoalkeeper: player.position === 'goalkeeper',
+        customizations: player.customizations ?? null,
     };
 }
 

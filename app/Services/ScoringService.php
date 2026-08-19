@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Enums\GameStatus;
 use App\Models\Game;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Collection;
@@ -394,7 +395,12 @@ class ScoringService
         $gkRank = 0;
         $gkLast = [null, null];
 
-        return $sorted->map(function ($row) use (&$linePos, &$lineRank, &$lineLast, &$gkPos, &$gkRank, &$gkLast, $streaks, $lastResults, $previousRanks) {
+        $customizationsById = User::query()
+            ->whereIn('id', $sorted->pluck('id'))
+            ->get(['id', 'customizations'])
+            ->pluck('customizations', 'id');
+
+        return $sorted->map(function ($row) use (&$linePos, &$lineRank, &$lineLast, &$gkPos, &$gkRank, &$gkLast, $streaks, $lastResults, $previousRanks, $customizationsById) {
             $player = (array) $row;
             $pts = (int) $player['total_points'];
             $gp = (int) $player['games_played'];
@@ -417,6 +423,7 @@ class ScoringService
 
             $player['photo_front'] = PublicStorage::url($player['photo_front']);
             $player['initial'] = mb_strtoupper(mb_substr($player['name'], 0, 1));
+            $player['customizations'] = User::decodeCustomizations($customizationsById->get($player['id']));
             $player['win_streak'] = $streaks[$player['id']] ?? 0;
             $player['last_results'] = $lastResults[$player['id']] ?? [];
 

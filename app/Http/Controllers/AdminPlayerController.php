@@ -61,6 +61,7 @@ class AdminPlayerController extends Controller
                     'ability' => $user->ability,
                     'active' => $user->active,
                     'instagram_username' => $user->instagram_username,
+                    'customizations' => $user->customizations,
                     'suspended_until_round' => $user->suspended_until_round,
                     'photo_front' => $user->photo_front_url,
                     'photo_side' => $user->photo_side_url,
@@ -95,6 +96,7 @@ class AdminPlayerController extends Controller
             'guest' => false,
             'active' => $validated['active'] ?? true,
             'instagram_username' => $validated['instagram_username'] ?? null,
+            'customizations' => $validated['customizations'] ?? null,
             'password' => Hash::make($validated['password']),
         ];
 
@@ -123,6 +125,7 @@ class AdminPlayerController extends Controller
             'ability' => $validated['ability'] ?? $user->ability,
             'active' => $validated['active'] ?? true,
             'instagram_username' => $validated['instagram_username'] ?? null,
+            'customizations' => $validated['customizations'] ?? null,
         ]);
 
         if ($path = $this->storePhoto($request->file('photo_front'))) {

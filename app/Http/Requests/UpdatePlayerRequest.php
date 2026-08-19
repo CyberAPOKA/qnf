@@ -20,6 +20,7 @@ class UpdatePlayerRequest extends FormRequest
             ...$this->basePlayerRules($this->route('user')?->id),
             'active' => ['boolean'],
             'ability' => ['nullable', 'integer', 'min:1', 'max:10'],
+            ...$this->customizationRules(),
             ...$this->photoRules(),
         ];
     }

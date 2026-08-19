@@ -47,6 +47,43 @@ trait ValidatesPlayerFields
                 }
             }
         }
+
+        if ($this->exists('customizations')) {
+            $this->merge([
+                'customizations' => $this->normalizeCustomizationsInput($this->input('customizations')),
+            ]);
+        }
+    }
+
+    protected function normalizeCustomizationsInput(mixed $raw): mixed
+    {
+        if ($raw === null || $raw === [] || (is_string($raw) && trim($raw) === '')) {
+            return null;
+        }
+
+        if (is_array($raw)) {
+            return $raw;
+        }
+
+        if (! is_string($raw)) {
+            return $raw;
+        }
+
+        $decoded = json_decode($raw, true);
+
+        if (json_last_error() !== JSON_ERROR_NONE || ! is_array($decoded)) {
+            return $raw;
+        }
+
+        return $decoded === [] ? null : $decoded;
+    }
+
+    protected function customizationRules(): array
+    {
+        return [
+            'customizations' => ['nullable', 'array'],
+            'customizations.flag' => ['nullable', 'in:B,L'],
+        ];
     }
 
     protected function phoneRules(?int $ignoreUserId = null): array
@@ -83,6 +120,8 @@ trait ValidatesPlayerFields
             'ability.integer' => 'A habilidade deve ser um número inteiro.',
             'ability.min' => 'A habilidade mínima é 1.',
             'ability.max' => 'A habilidade máxima é 10.',
+            'customizations.array' => 'Informe um JSON válido.',
+            'customizations.flag.in' => 'A flag deve ser B, L ou vazia.',
         ];
     }
 
@@ -98,6 +137,8 @@ trait ValidatesPlayerFields
             'active' => 'ativo',
             'photo_front' => 'foto frente',
             'photo_side' => 'foto lado',
+            'customizations' => 'customizações',
+            'customizations.flag' => 'flag',
         ];
     }
 }

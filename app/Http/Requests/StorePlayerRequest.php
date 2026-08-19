@@ -20,6 +20,7 @@ class StorePlayerRequest extends FormRequest
             ...$this->basePlayerRules(),
             'password' => ['required', 'string', 'min:3'],
             'active' => ['boolean'],
+            ...$this->customizationRules(),
             ...$this->photoRules(),
         ];
     }

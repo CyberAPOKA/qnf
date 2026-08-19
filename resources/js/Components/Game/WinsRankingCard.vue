@@ -46,6 +46,7 @@ function toCardPlayer(player) {
         pointsLabel: 'VIT',
         avg: player.avg_score ?? null,
         zeroPoints: player.zeroPoints,
+        customizations: player.customizations ?? null,
     };
 }
 

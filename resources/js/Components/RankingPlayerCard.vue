@@ -21,6 +21,11 @@ const isPodium = computed(() =>
     || props.player.theme === 'silver'
     || props.player.theme === 'bronze',
 )
+
+const hasFlag = computed(() => {
+    const flag = props.player.customizations?.flag
+    return flag === 'B' || flag === 'L'
+})
 </script>
 
 <template>
@@ -28,6 +33,7 @@ const isPodium = computed(() =>
         THEME_CLASS[player.theme],
         {
             'ranking-card--podium': isPodium,
+            'ranking-card--has-flag': hasFlag,
             'ranking-card--streak-fire': streakType === 'fire',
             'ranking-card--streak-ice': streakType === 'ice',
             'ranking-card--streak-purple': streakType === 'purple',
@@ -50,7 +56,8 @@ const isPodium = computed(() =>
         <RankingRankBadge class="relative z-[2]" :rank="player.rank" :theme="player.theme" />
 
         <RankingPlayerPhoto class="relative" :class="isPodium ? 'z-[15]' : 'z-[2]'" :src="player.photo_front"
-            :name="player.name" :initial="player.initial" :theme="player.theme" />
+            :name="player.name" :initial="player.initial" :theme="player.theme"
+            :customizations="player.customizations" />
 
         <RankingPlayerIdentity class="relative z-[2]" :name="player.name" :win-streak="player.win_streak"
             :is-goalkeeper="player.isGoalkeeper" />
@@ -86,6 +93,10 @@ const isPodium = computed(() =>
 .ranking-card--podium {
     overflow: visible !important;
     z-index: 3;
+}
+
+.ranking-card--has-flag {
+    overflow: visible;
 }
 
 .ranking-card--podium:hover {

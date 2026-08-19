@@ -4,6 +4,12 @@ export type RankingTheme = 'gold' | 'silver' | 'bronze' | 'default'
 
 export type RankingStreakType = 'fire' | 'ice' | 'purple' | 'skulls' | 'dragon' | null
 
+export type PlayerCustomizationFlag = 'B' | 'L'
+
+export interface PlayerCustomizations {
+    flag?: PlayerCustomizationFlag | null
+}
+
 export interface RankingPlayer {
     rank: number
     name: string
@@ -21,6 +27,7 @@ export interface RankingPlayer {
     avg?: number | null
     /** Show goalkeeper glove next to the name */
     isGoalkeeper?: boolean
+    customizations?: PlayerCustomizations | null
 }
 
 export const MEDAL_ICONS: Partial<Record<RankingTheme, string>> = {

@@ -50,6 +50,18 @@ const submitLabel = computed(() => {
     return 'Salvar';
 });
 
+const formatCustomizations = (value) => {
+    if (! value || (typeof value === 'object' && Object.keys(value).length === 0)) {
+        return '';
+    }
+
+    try {
+        return JSON.stringify(value, null, 2);
+    } catch {
+        return '';
+    }
+};
+
 const defaultFormData = () => ({
     name: '',
     phone: '',
@@ -58,6 +70,7 @@ const defaultFormData = () => ({
     password: '',
     active: true,
     instagram_username: '',
+    customizations: '',
     photo_front: null,
     photo_side: null,
 });
@@ -84,6 +97,7 @@ const buildForm = (formMode, player = null) => {
         data.ability = player.ability ?? 5;
         data.active = player.active;
         data.instagram_username = player.instagram_username ?? '';
+        data.customizations = formatCustomizations(player.customizations);
     }
 
     if (formMode === 'convert' && player) {
@@ -326,6 +340,20 @@ defineExpose({
                         />
                     </button>
                     <InputLabel value="Ativo" class="cursor-pointer" @click="form.active = !form.active" />
+                </div>
+
+                <div v-if="isCreate || isEdit">
+                    <InputLabel for="player-customizations" value="Customizações (JSON)" />
+                    <textarea
+                        id="player-customizations"
+                        v-model="form.customizations"
+                        rows="6"
+                        class="mt-1 block w-full rounded-md border-gray-300 font-mono text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                        placeholder='{"flag": "B"}'
+                        spellcheck="false"
+                    />
+                    <InputError :message="form.errors.customizations" class="mt-2" />
+                    <InputError :message="form.errors['customizations.flag']" class="mt-2" />
                 </div>
 
                 <div>

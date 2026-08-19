@@ -53,6 +53,7 @@ function toCardPlayer(player) {
         win_streak: Number(player.win_streak) || 0,
         zeroPoints: player.zeroPoints,
         isGoalkeeper: player.position === 'goalkeeper' || player.is_goalkeeper === true,
+        customizations: player.customizations ?? null,
     };
 }
 

@@ -41,6 +41,7 @@ class User extends Authenticatable
         'guest',
         'photo_front',
         'photo_side',
+        'customizations',
         'whatsapp_notifications',
         'instagram_username',
         'music_youtube_id',
@@ -93,6 +94,7 @@ class User extends Authenticatable
             'position' => Position::class,
             'guest' => 'boolean',
             'whatsapp_notifications' => 'boolean',
+            'customizations' => 'array',
             'music_start_seconds' => 'integer',
             'music_end_seconds' => 'integer',
             'music_duration_seconds' => 'integer',
@@ -148,6 +150,26 @@ class User extends Authenticatable
     public function getInitialAttribute(): string
     {
         return mb_strtoupper(mb_substr($this->name, 0, 1));
+    }
+
+    /**
+     * Normalize the JSON customizations column from query-builder rows or Eloquent.
+     *
+     * @return array<string, mixed>|null
+     */
+    public static function decodeCustomizations(mixed $value): ?array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (! is_string($value) || $value === '') {
+            return null;
+        }
+
+        $decoded = json_decode($value, true);
+
+        return is_array($decoded) ? $decoded : null;
     }
 
     public function isSuspended(int $currentRound): bool
