@@ -43,6 +43,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
         Route::post('/store-guest', [AdminGameController::class, 'storeGuest'])->name('games.store-guest');
         Route::post('/scores', [AdminGameController::class, 'saveScores'])->name('games.save-scores');
         Route::post('/remove-player', [AdminGameController::class, 'removePlayer'])->name('games.remove-player');
+        Route::post('/swap-players', [AdminGameController::class, 'swapPlayers'])->name('games.swap-players');
         Route::post('/remove-from-team', [AdminGameController::class, 'removeFromTeam'])->name('games.remove-from-team');
         Route::post('/add-to-team', [AdminGameController::class, 'addToTeam'])->name('games.add-to-team');
         Route::post('/replace-in-team', [AdminGameController::class, 'replaceInTeam'])->name('games.replace-in-team');

@@ -304,7 +304,8 @@ const showTeams = computed(
 
                     <!-- Player list (before draft) -->
                     <SubscribedPlayersCard v-if="!showTeams" :players="effectiveGame?.players || []"
-                        :game-id="effectiveGame?.id" :editable="is_admin && isCurrentRound" />
+                        :game-id="effectiveGame?.id" :editable="is_admin && isCurrentRound"
+                        :available-users="all_users || []" />
 
                     <!-- Teams (after draft) -->
                     <template v-else>

@@ -1,8 +1,12 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { useForm } from '@inertiajs/vue3';
-import Button from 'primevue/button';
-import Dialog from 'primevue/dialog';
+import ConfirmationModal from '@/Components/ConfirmationModal.vue';
+import DialogModal from '@/Components/DialogModal.vue';
+import InputError from '@/Components/InputError.vue';
+import PrimaryButton from '@/Components/PrimaryButton.vue';
+import SecondaryButton from '@/Components/SecondaryButton.vue';
+import TextInput from '@/Components/TextInput.vue';
 
 const props = defineProps({
     players: {
@@ -21,17 +25,58 @@ const props = defineProps({
         type: String,
         default: 'Inscritos',
     },
+    availableUsers: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const removeForm = useForm({ user_id: null });
-const confirmVisible = ref(false);
+const swapForm = useForm({ user_id: null, replacement_user_id: null });
 const playerToRemove = ref(null);
+const playerToSwap = ref(null);
+const replacementPlayer = ref(null);
+const nameFilter = ref('');
 
 const hasPlayers = computed(() => props.players.length > 0);
 
+const firstName = (name) => (name || '').split(' ')[0];
+
+const isGoalkeeper = (player) => player?.position === 'goalkeeper';
+
+const enrolledIds = computed(() => new Set((props.players || []).map((player) => player.id)));
+
+const eligibleCandidates = computed(() => {
+    if (!playerToSwap.value) return [];
+
+    const wantGoalkeeper = isGoalkeeper(playerToSwap.value);
+
+    return (props.availableUsers || []).filter((user) => {
+        if (enrolledIds.value.has(user.id)) return false;
+
+        return (user.position === 'goalkeeper') === wantGoalkeeper;
+    });
+});
+
+const swapCandidates = computed(() => {
+    const term = nameFilter.value.trim().toLowerCase();
+    if (!term) return eligibleCandidates.value;
+
+    return eligibleCandidates.value.filter((user) => (user.name || '').toLowerCase().includes(term));
+});
+
+const swapRoleLabel = computed(() => (
+    isGoalkeeper(playerToSwap.value) ? 'goleiro' : 'jogador de linha'
+));
+
 const askRemove = (player) => {
+    removeForm.clearErrors();
     playerToRemove.value = player;
-    confirmVisible.value = true;
+};
+
+const closeRemoveModal = () => {
+    if (removeForm.processing) return;
+    playerToRemove.value = null;
 };
 
 const confirmRemove = () => {
@@ -41,9 +86,39 @@ const confirmRemove = () => {
     removeForm.post(route('games.remove-player', props.gameId), {
         preserveScroll: true,
         preserveState: false,
-        onFinish: () => {
-            confirmVisible.value = false;
+        onSuccess: () => {
             playerToRemove.value = null;
+        },
+    });
+};
+
+const askSwap = (player) => {
+    swapForm.reset();
+    swapForm.clearErrors();
+    playerToSwap.value = player;
+    replacementPlayer.value = null;
+    nameFilter.value = '';
+};
+
+const closeSwapModal = () => {
+    if (swapForm.processing) return;
+    playerToSwap.value = null;
+    replacementPlayer.value = null;
+    nameFilter.value = '';
+};
+
+const confirmSwap = () => {
+    if (!props.gameId || !playerToSwap.value || !replacementPlayer.value) return;
+    if (!eligibleCandidates.value.some((user) => user.id === replacementPlayer.value.id)) return;
+
+    swapForm.user_id = playerToSwap.value.id;
+    swapForm.replacement_user_id = replacementPlayer.value.id;
+    swapForm.post(route('games.swap-players', props.gameId), {
+        preserveScroll: true,
+        preserveState: false,
+        onSuccess: () => {
+            playerToSwap.value = null;
+            replacementPlayer.value = null;
         },
     });
 };
@@ -101,28 +176,93 @@ const confirmRemove = () => {
 
                     <span class="rplayer__chevron" aria-hidden="true" />
 
-                    <button v-if="editable" type="button" class="rplayer__remove" :title="`Remover ${player.name}`"
-                        @click="askRemove(player)">
-                        <i class="fa-solid fa-xmark" aria-hidden="true" />
-                    </button>
+                    <template v-if="editable">
+                        <button type="button" class="rplayer__swap" :title="`Alterar ${player.name}`"
+                            :disabled="swapForm.processing" @click="askSwap(player)">
+                            <i class="fa-solid fa-right-left" aria-hidden="true" />
+                        </button>
+                        <button type="button" class="rplayer__remove" :title="`Remover ${player.name}`"
+                            :disabled="removeForm.processing" @click="askRemove(player)">
+                            <i class="fa-solid fa-xmark" aria-hidden="true" />
+                        </button>
+                    </template>
                 </article>
             </div>
         </div>
-
-        <Dialog v-model:visible="confirmVisible" modal header="Remover jogador" :style="{ width: '20rem' }">
-            <p class="text-sm text-gray-700">
-                Remover <span class="font-semibold">{{ playerToRemove?.name }}</span> da lista?
-            </p>
-            <p class="mt-1 text-xs text-gray-500">O jogador não poderá se inscrever novamente.</p>
-            <template #footer>
-                <div class="flex justify-end gap-2">
-                    <Button label="Cancelar" severity="secondary" size="small" @click="confirmVisible = false" />
-                    <Button label="Remover" severity="danger" size="small" :loading="removeForm.processing"
-                        @click="confirmRemove" />
-                </div>
-            </template>
-        </Dialog>
     </section>
+
+    <ConfirmationModal :show="playerToRemove !== null" max-width="lg" @close="closeRemoveModal">
+        <template #title>Remover jogador</template>
+        <template #content>
+            Remover <strong>{{ playerToRemove?.name }}</strong> da lista? O jogador não poderá se inscrever novamente.
+            <InputError :message="removeForm.errors.remove || removeForm.errors.user_id" class="mt-2" />
+        </template>
+        <template #footer>
+            <SecondaryButton :disabled="removeForm.processing" @click="closeRemoveModal">Cancelar</SecondaryButton>
+            <PrimaryButton
+                type="button"
+                class="ms-3 !bg-red-600 hover:!bg-red-500"
+                :disabled="removeForm.processing"
+                @click="confirmRemove"
+            >
+                {{ removeForm.processing ? 'Removendo...' : 'Sim, remover' }}
+            </PrimaryButton>
+        </template>
+    </ConfirmationModal>
+
+    <DialogModal :show="playerToSwap !== null" max-width="lg" @close="closeSwapModal">
+        <template #title>Alterar jogador</template>
+        <template #content>
+            <p class="mb-3">
+                Escolha um {{ swapRoleLabel }} que não está na lista para substituir
+                <strong>{{ playerToSwap ? firstName(playerToSwap.name) : '' }}</strong>
+                nesta rodada.
+            </p>
+            <TextInput
+                v-model="nameFilter"
+                type="search"
+                placeholder="Filtrar pelo nome..."
+                class="mb-3 w-full text-sm"
+            />
+            <div
+                v-if="swapCandidates.length"
+                class="max-h-64 overflow-y-auto rounded-md border border-gray-200"
+            >
+                <button
+                    v-for="user in swapCandidates"
+                    :key="user.id"
+                    type="button"
+                    class="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm transition hover:bg-gray-50"
+                    :class="replacementPlayer?.id === user.id ? 'bg-indigo-50 text-indigo-900' : 'text-gray-800'"
+                    @click="replacementPlayer = user"
+                >
+                    <span class="font-medium">{{ user.name }}</span>
+                    <span class="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-700">
+                        {{ user.position_label }}
+                    </span>
+                </button>
+            </div>
+            <p v-else-if="eligibleCandidates.length" class="rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-500">
+                Nenhum {{ swapRoleLabel }} encontrado com esse nome.
+            </p>
+            <p v-else class="rounded-md bg-gray-50 px-3 py-2 text-sm text-gray-500">
+                Nenhum {{ swapRoleLabel }} disponível fora da lista atual.
+            </p>
+            <InputError :message="swapForm.errors.replacement_user_id" class="mt-2" />
+            <InputError :message="swapForm.errors.user_id" class="mt-2" />
+        </template>
+        <template #footer>
+            <SecondaryButton :disabled="swapForm.processing" @click="closeSwapModal">Cancelar</SecondaryButton>
+            <PrimaryButton
+                type="button"
+                class="ms-3"
+                :disabled="swapForm.processing || !replacementPlayer"
+                @click="confirmSwap"
+            >
+                {{ swapForm.processing ? 'Alterando...' : 'Alterar' }}
+            </PrimaryButton>
+        </template>
+    </DialogModal>
 </template>
 
 <style scoped>
@@ -528,10 +668,10 @@ const confirmRemove = () => {
     clip-path: polygon(0 0, 100% 0, 50% 100%);
 }
 
+.rplayer__swap,
 .rplayer__remove {
     position: absolute;
     top: -6px;
-    right: -6px;
     z-index: 6;
     display: flex;
     align-items: center;
@@ -539,16 +679,36 @@ const confirmRemove = () => {
     width: 26px;
     height: 26px;
     border: 0;
-    background: linear-gradient(180deg, #ef4444, #991b1b);
-    box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
     color: #fff;
     font-size: 0.75rem;
     cursor: pointer;
     clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
 }
 
+.rplayer__swap {
+    left: -6px;
+    background: linear-gradient(180deg, #38bdf8, #1d4ed8);
+    box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+}
+
+.rplayer__remove {
+    right: -6px;
+    background: linear-gradient(180deg, #ef4444, #991b1b);
+    box-shadow: 0 0 10px rgba(239, 68, 68, 0.5);
+}
+
+.rplayer__swap:hover {
+    background: linear-gradient(180deg, #7dd3fc, #2563eb);
+}
+
 .rplayer__remove:hover {
     background: linear-gradient(180deg, #f87171, #b91c1c);
+}
+
+.rplayer__swap:disabled,
+.rplayer__remove:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
 }
 
 @media (min-width: 640px) {
