@@ -76,6 +76,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
 
         Route::post('/players/{user}/suspend', [AdminPlayerController::class, 'suspend'])->name('admin.players.suspend');
         Route::post('/players/{user}/unsuspend', [AdminPlayerController::class, 'unsuspend'])->name('admin.players.unsuspend');
+        Route::post('/players/{user}/reset-password', [AdminPlayerController::class, 'resetPassword'])->name('admin.players.reset-password');
         Route::post('/players/{user}/cards', [AdminPlayerController::class, 'storeCard'])->name('admin.players.cards.store');
         Route::delete('/players/{user}', [AdminPlayerController::class, 'destroy'])->name('admin.players.destroy');
     });

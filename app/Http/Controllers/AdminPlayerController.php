@@ -124,6 +124,7 @@ class AdminPlayerController extends Controller
             'position' => $validated['position'],
             'ability' => $validated['ability'] ?? $user->ability,
             'active' => $validated['active'] ?? true,
+            'guest' => $request->exists('guest') ? $request->boolean('guest') : $user->guest,
             'instagram_username' => $validated['instagram_username'] ?? null,
             'customizations' => $validated['customizations'] ?? null,
         ]);
@@ -231,6 +232,18 @@ class AdminPlayerController extends Controller
         abort_unless($request->user()->role === 'admin', 403);
 
         $user->update(['suspended_until_round' => null]);
+
+        return back();
+    }
+
+    public function resetPassword(Request $request, User $user): RedirectResponse
+    {
+        abort_unless($request->user()->role === 'admin', 403);
+        abort_if($user->role === 'admin', 403);
+
+        $user->update([
+            'password' => Hash::make('qnf'),
+        ]);
 
         return back();
     }

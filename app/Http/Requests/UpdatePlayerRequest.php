@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Http\Requests\Concerns\ValidatesPlayerFields;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 class UpdatePlayerRequest extends FormRequest
 {
@@ -16,13 +17,28 @@ class UpdatePlayerRequest extends FormRequest
 
     public function rules(): array
     {
-        return [
-            ...$this->basePlayerRules($this->route('user')?->id),
+        $userId = $this->route('user')?->id;
+
+        $rules = [
+            ...$this->basePlayerRules($userId),
             'active' => ['boolean'],
+            'guest' => ['boolean'],
             'ability' => ['nullable', 'integer', 'min:1', 'max:10'],
             ...$this->customizationRules(),
             ...$this->photoRules(),
         ];
+
+        if ($this->boolean('guest')) {
+            $unique = Rule::unique('users', 'phone');
+
+            if ($userId) {
+                $unique->ignore($userId);
+            }
+
+            $rules['phone'] = ['required', 'string', 'max:255', $unique];
+        }
+
+        return $rules;
     }
 
     public function messages(): array

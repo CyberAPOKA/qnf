@@ -10,7 +10,7 @@ import InputError from '@/Components/InputError.vue';
 import InputLabel from '@/Components/InputLabel.vue';
 import SecondaryButton from '@/Components/SecondaryButton.vue';
 import TextInput from '@/Components/TextInput.vue';
-import { router, useForm } from '@inertiajs/vue3';
+import { useForm } from '@inertiajs/vue3';
 
 const props = defineProps({
     players: Array,
@@ -172,34 +172,6 @@ const submitCard = (type) => {
         onSuccess: () => closeCards(),
     });
 };
-
-// --- Delete player ---
-const showDeleteModal = ref(false);
-const deletingPlayer = ref(null);
-const playerToDelete = ref(null);
-
-const openDelete = (player) => {
-    playerToDelete.value = player;
-    showDeleteModal.value = true;
-};
-
-const closeDelete = () => {
-    showDeleteModal.value = false;
-    playerToDelete.value = null;
-};
-
-const submitDelete = () => {
-    if (!playerToDelete.value) return;
-
-    deletingPlayer.value = playerToDelete.value.id;
-    router.delete(route('admin.players.destroy', playerToDelete.value.id), {
-        preserveScroll: true,
-        onSuccess: () => closeDelete(),
-        onFinish: () => {
-            deletingPlayer.value = null;
-        },
-    });
-};
 </script>
 
 <template>
@@ -211,11 +183,11 @@ const submitDelete = () => {
         <div class="p-1 lg:p-4">
             <div class="mx-auto max-w-4xl space-y-4">
                 <div class="rounded-xl bg-white p-4 shadow">
-                    <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+                    <div class="mb-4 flex flex-col lg:flex-row items-center justify-between gap-2">
                         <h3 class="text-base font-semibold text-gray-900">Jogadores</h3>
-                        <div class="flex flex-1 items-center justify-end gap-2">
+                        <div class="flex flex-wrap items-center justify-end gap-2 w-full lg:w-auto">
                             <TextInput v-model="search" type="search" placeholder="Buscar por nome..."
-                                class="w-full max-w-xs text-sm" />
+                                class="w-full lg:max-w-xs text-sm" />
                             <select v-if="guests.length" @change="onSelectGuest"
                                 class="rounded-lg border-gray-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500">
                                 <option value="">Converter convidado...</option>
@@ -278,25 +250,33 @@ const submitDelete = () => {
                         </template>
 
                         <template #cell-actions="{ row }">
-                            <div class="flex flex-wrap items-center justify-center gap-2">
-                                <button @click="openEdit(row)"
-                                    class="text-sm font-medium text-indigo-600 hover:text-indigo-500">
-                                    Editar
-                                </button>
-                                <button @click="openCards(row)"
-                                    class="text-sm font-medium text-amber-600 hover:text-amber-500">
-                                    Cartões
-                                </button>
-                                <button @click="openSuspend(row)"
-                                    class="text-sm font-medium text-red-600 hover:text-red-500">
-                                    Suspender
+                            <div class="flex items-center justify-center gap-1">
+                                <button
+                                    type="button"
+                                    title="Editar"
+                                    class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-indigo-600 hover:bg-indigo-50"
+                                    @click="openEdit(row)"
+                                >
+                                    <i class="fa-solid fa-pen" aria-hidden="true" />
+                                    <span class="sr-only">Editar</span>
                                 </button>
                                 <button
-                                    @click="openDelete(row)"
-                                    :disabled="deletingPlayer === row.id"
-                                    class="text-sm font-medium text-gray-500 hover:text-gray-700 disabled:opacity-50"
+                                    type="button"
+                                    title="Cartões"
+                                    class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-amber-600 hover:bg-amber-50"
+                                    @click="openCards(row)"
                                 >
-                                    Excluir
+                                    <i class="fa-solid fa-clone" aria-hidden="true" />
+                                    <span class="sr-only">Cartões</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    title="Suspender"
+                                    class="inline-flex h-8 w-8 items-center justify-center rounded-lg text-red-600 hover:bg-red-50"
+                                    @click="openSuspend(row)"
+                                >
+                                    <i class="fa-solid fa-ban" aria-hidden="true" />
+                                    <span class="sr-only">Suspender</span>
                                 </button>
                             </div>
                             <span v-if="suspensionLabel(row)"
@@ -310,49 +290,6 @@ const submitDelete = () => {
         </div>
 
         <PlayerFormModal ref="playerFormModal" />
-
-        <!-- Modal Excluir -->
-        <DialogModal :show="showDeleteModal" @close="closeDelete">
-            <template #title>Excluir jogador</template>
-
-            <template #content>
-                <div v-if="playerToDelete" class="space-y-4">
-                    <div class="flex flex-col items-center gap-3">
-                        <div class="relative flex h-24 w-24 items-center justify-center overflow-hidden rounded-lg bg-gray-100">
-                            <PlayerPhoto
-                                :src="playerToDelete.photo_front"
-                                :initial="playerToDelete.name.charAt(0)"
-                                :alt="playerToDelete.name"
-                                size="md"
-                            />
-                        </div>
-                        <p class="text-base font-semibold text-gray-900">{{ playerToDelete.name }}</p>
-                    </div>
-
-                    <div class="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-                        <p class="font-semibold">Tem certeza que deseja excluir este jogador?</p>
-                        <p class="mt-2">
-                            O jogador será removido da lista, junto com inscrições, pagamentos, cartões e demais vínculos.
-                            Os dados não são apagados permanentemente do sistema.
-                        </p>
-                    </div>
-                </div>
-            </template>
-
-            <template #footer>
-                <div class="flex gap-2">
-                    <SecondaryButton @click="closeDelete">Cancelar</SecondaryButton>
-                    <button
-                        type="button"
-                        @click="submitDelete"
-                        :disabled="deletingPlayer !== null"
-                        class="rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-red-500 disabled:opacity-50"
-                    >
-                        {{ deletingPlayer !== null ? 'Excluindo...' : 'Excluir jogador' }}
-                    </button>
-                </div>
-            </template>
-        </DialogModal>
 
         <!-- Modal Cartões -->
         <DialogModal :show="showCardsModal" @close="closeCards">

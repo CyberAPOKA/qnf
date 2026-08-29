@@ -27,9 +27,12 @@ trait ValidatesPlayerFields
     protected function prepareForValidation(): void
     {
         if ($this->has('phone')) {
-            $this->merge([
-                'phone' => PhoneNumber::normalize($this->input('phone')),
-            ]);
+            $raw = (string) $this->input('phone');
+            $normalized = PhoneNumber::normalize($raw);
+
+            if (! ($this->boolean('guest') && ! PhoneNumber::isValid($normalized))) {
+                $this->merge(['phone' => $normalized]);
+            }
         }
 
         if ($this->exists('instagram_username')) {
@@ -135,6 +138,7 @@ trait ValidatesPlayerFields
             'password' => 'senha',
             'ability' => 'habilidade',
             'active' => 'ativo',
+            'guest' => 'convidado',
             'photo_front' => 'foto frente',
             'photo_side' => 'foto lado',
             'customizations' => 'customizações',

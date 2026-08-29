@@ -4,6 +4,7 @@ import AppLayout from '@/Layouts/AppLayout.vue';
 import TitleCard from '@/Components/Game/TitleCard.vue';
 import TeamsBoard from '@/Components/Game/TeamsBoard.vue';
 import TeamColorStatsCard from '@/Components/Game/TeamColorStatsCard.vue';
+import CaptainsLeaderboardCard from '@/Components/Game/CaptainsLeaderboardCard.vue';
 
 const props = defineProps({
     rounds: {
@@ -11,6 +12,10 @@ const props = defineProps({
         default: () => [],
     },
     current_user_id: Number,
+    top_captains: {
+        type: Array,
+        default: () => [],
+    },
 });
 
 const formatDate = (date) => {
@@ -86,6 +91,7 @@ const resultConfig = {
         <div class="px-1 py-3 pb-24 sm:px-4 lg:px-8 lg:py-6">
             <div class="mx-auto max-w-3xl space-y-2">
                 <TeamColorStatsCard :rounds="rounds" />
+                <CaptainsLeaderboardCard :captains="top_captains" />
 
                 <p v-if="!hasRounds" class="rounds__empty">
                     Nenhuma rodada com times formados ainda.

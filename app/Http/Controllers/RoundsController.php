@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Enums\GameStatus;
 use App\Models\Game;
+use App\Services\CaptainLeaderboardService;
 use App\Services\DraftService;
 use Illuminate\Http\Request;
 use Inertia\Inertia;
@@ -13,6 +14,7 @@ class RoundsController extends Controller
 {
     public function __construct(
         private readonly DraftService $draftService,
+        private readonly CaptainLeaderboardService $captainLeaderboardService,
     ) {}
 
     public function index(Request $request): Response
@@ -33,6 +35,7 @@ class RoundsController extends Controller
 
         return Inertia::render('Rounds', [
             'rounds' => $rounds,
+            'top_captains' => $this->captainLeaderboardService->top(10),
             'current_user_id' => $request->user()->id,
         ]);
     }

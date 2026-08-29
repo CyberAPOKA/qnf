@@ -21,6 +21,8 @@ const targetPlayer = ref(null);
 const form = shallowRef(null);
 const photoFrontPreview = ref(null);
 const photoSidePreview = ref(null);
+const passwordResetDone = ref(false);
+const resetPasswordForm = useForm({});
 
 const isCreate = computed(() => mode.value === 'create');
 const isEdit = computed(() => mode.value === 'edit');
@@ -69,6 +71,7 @@ const defaultFormData = () => ({
     ability: 5,
     password: '',
     active: true,
+    guest: false,
     instagram_username: '',
     customizations: '',
     photo_front: null,
@@ -96,6 +99,7 @@ const buildForm = (formMode, player = null) => {
         data.position = player.position;
         data.ability = player.ability ?? 5;
         data.active = player.active;
+        data.guest = !!player.guest;
         data.instagram_username = player.instagram_username ?? '';
         data.customizations = formatCustomizations(player.customizations);
     }
@@ -117,6 +121,9 @@ const open = (formMode, player = null) => {
     photoFrontPreview.value = player?.photo_front ?? null;
     photoSidePreview.value = player?.photo_side ?? null;
     form.value = buildForm(formMode, player);
+    passwordResetDone.value = false;
+    resetPasswordForm.reset();
+    resetPasswordForm.clearErrors();
     show.value = true;
 };
 
@@ -127,6 +134,7 @@ const close = () => {
     form.value = null;
     photoFrontPreview.value = null;
     photoSidePreview.value = null;
+    passwordResetDone.value = false;
 };
 
 const onFileChange = (field, event) => {
@@ -159,7 +167,13 @@ const onPhoneChange = () => {
         return;
     }
 
-    form.value.phone = normalizePhone(form.value.phone);
+    const digits = normalizePhone(form.value.phone);
+    const keepGuestPhone = form.value.guest && ! /^55\d{10}$/.test(digits);
+
+    if (! keepGuestPhone) {
+        form.value.phone = digits;
+    }
+
     form.value.validate('phone');
 };
 
@@ -185,10 +199,16 @@ const sendForm = () => {
     };
 
     if (isEdit.value) {
-        form.value.post(route('admin.players.update', targetPlayer.value.id), {
-            ...options,
-            _method: 'put',
-        });
+        form.value
+            .transform((data) => ({
+                ...data,
+                active: data.active ? 1 : 0,
+                guest: data.guest ? 1 : 0,
+            }))
+            .post(route('admin.players.update', targetPlayer.value.id), {
+                ...options,
+                _method: 'put',
+            });
 
         return;
     }
@@ -200,6 +220,19 @@ const sendForm = () => {
     }
 
     form.value.post(route('admin.players.store'), options);
+};
+
+const resetPassword = () => {
+    if (!targetPlayer.value || resetPasswordForm.processing) {
+        return;
+    }
+
+    resetPasswordForm.post(route('admin.players.reset-password', targetPlayer.value.id), {
+        preserveScroll: true,
+        onSuccess: () => {
+            passwordResetDone.value = true;
+        },
+    });
 };
 
 const submit = () => {
@@ -327,19 +360,56 @@ defineExpose({
                     <InputError :message="form.errors.password" class="mt-2" />
                 </div>
 
-                <div v-if="isCreate || isEdit" class="flex items-center gap-3">
-                    <button
-                        type="button"
-                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
-                        :class="form.active ? 'bg-indigo-600' : 'bg-gray-200'"
-                        @click="form.active = !form.active"
-                    >
-                        <span
-                            class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
-                            :class="form.active ? 'translate-x-5' : 'translate-x-0'"
-                        />
-                    </button>
-                    <InputLabel value="Ativo" class="cursor-pointer" @click="form.active = !form.active" />
+                <div v-if="isCreate || isEdit" class="space-y-3">
+                    <div class="flex items-center gap-3">
+                        <button
+                            type="button"
+                            class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            :class="form.active ? 'bg-indigo-600' : 'bg-gray-200'"
+                            @click="form.active = !form.active"
+                        >
+                            <span
+                                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                                :class="form.active ? 'translate-x-5' : 'translate-x-0'"
+                            />
+                        </button>
+                        <InputLabel value="Ativo" class="cursor-pointer" @click="form.active = !form.active" />
+                    </div>
+
+                    <div v-if="isEdit" class="flex items-center gap-3">
+                        <button
+                            type="button"
+                            class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2"
+                            :class="form.guest ? 'bg-orange-500' : 'bg-gray-200'"
+                            @click="form.guest = !form.guest"
+                        >
+                            <span
+                                class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out"
+                                :class="form.guest ? 'translate-x-5' : 'translate-x-0'"
+                            />
+                        </button>
+                        <InputLabel value="Convidado" class="cursor-pointer" @click="form.guest = !form.guest" />
+                    </div>
+                </div>
+
+                <div v-if="isEdit" class="rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <p class="text-sm text-gray-700">
+                            Redefine a senha de acesso para <span class="font-semibold">qnf</span>.
+                        </p>
+                        <button
+                            type="button"
+                            class="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50 disabled:opacity-50"
+                            :disabled="resetPasswordForm.processing"
+                            @click="resetPassword"
+                        >
+                            {{ resetPasswordForm.processing ? 'Resetando...' : 'Resetar senha' }}
+                        </button>
+                    </div>
+                    <p v-if="passwordResetDone" class="mt-2 text-sm font-medium text-green-600">
+                        Senha redefinida para qnf.
+                    </p>
+                    <InputError :message="resetPasswordForm.errors.password" class="mt-2" />
                 </div>
 
                 <div v-if="isCreate || isEdit">
