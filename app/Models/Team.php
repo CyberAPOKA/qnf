@@ -6,6 +6,7 @@ use App\Enums\TeamColor;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Team extends Model
 {
@@ -40,5 +41,10 @@ class Team extends Model
     public function firstPick(): BelongsTo
     {
         return $this->belongsTo(User::class, 'first_pick_user_id');
+    }
+
+    public function draftNarrations(): HasMany
+    {
+        return $this->hasMany(DraftNarration::class);
     }
 }

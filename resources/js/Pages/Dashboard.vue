@@ -16,6 +16,7 @@ import PixPaymentCard from '@/Components/Game/PixPaymentCard.vue';
 import AddPlayersCard from '@/Components/Game/AddPlayersCard.vue';
 import AdminTeamTools from '@/Components/Game/AdminTeamTools.vue';
 import AdminMediaTools from '@/Components/Game/AdminMediaTools.vue';
+import AdminVoiceMessageCard from '@/Components/Game/AdminVoiceMessageCard.vue';
 import WeekTeamGenerator from '@/Components/Game/WeekTeamGenerator.vue';
 import WeekTeamCard from '@/Components/Game/WeekTeamCard.vue';
 import AddGuestModal from '@/Components/Game/AddGuestModal.vue';
@@ -317,6 +318,8 @@ const showTeams = computed(
 
                         <PixPaymentCard v-if="!is_admin && payment && isCurrentRound" :payment="payment" />
                     </template>
+                    
+                    <AdminVoiceMessageCard v-if="is_admin" />
 
                     <!-- Admin: extra tools (current round only) -->
                     <AdminMediaTools v-if="is_admin && isCurrentRound" />

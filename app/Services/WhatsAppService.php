@@ -8,8 +8,11 @@ use Illuminate\Support\Facades\Log;
 class WhatsAppService
 {
     private bool $active;
+
     private bool $playerActive;
+
     private string $serviceUrl;
+
     private ?string $groupId;
 
     public function __construct()
@@ -55,13 +58,30 @@ class WhatsAppService
         return $this->sendImage($this->groupId, $imagePath, $caption);
     }
 
+    public function sendAudioToGroup(string $audioPath, string $caption = ''): bool
+    {
+        if (! $this->active) {
+            Log::info('[WhatsApp] (inactive) Group audio:', ['audio' => $audioPath, 'caption' => $caption]);
+
+            return true;
+        }
+
+        if (! $this->groupId) {
+            Log::warning('WhatsApp group ID not configured.');
+
+            return false;
+        }
+
+        return $this->sendAudio($this->groupId, $audioPath, $caption);
+    }
+
     public function sendToPhone(string $phone, string $message): bool
     {
         if (! $this->active || ! $this->playerActive) {
             return true;
         }
 
-        $chatId = preg_replace('/\D/', '', $phone) . '@c.us';
+        $chatId = preg_replace('/\D/', '', $phone).'@c.us';
 
         return $this->send($chatId, $message);
     }
@@ -91,6 +111,35 @@ class WhatsAppService
             return false;
         } catch (\Exception $e) {
             Log::error('WhatsApp image service error', ['to' => $to, 'error' => $e->getMessage()]);
+
+            return false;
+        }
+    }
+
+    private function sendAudio(string $to, string $audioPath, string $caption): bool
+    {
+        try {
+            $response = Http::timeout(90)->post("{$this->serviceUrl}/send-audio", [
+                'to' => $to,
+                'audioPath' => $audioPath,
+                'caption' => $caption,
+            ]);
+
+            if ($response->successful()) {
+                return true;
+            }
+
+            Log::error('WhatsApp send audio failed', [
+                'to' => $to,
+                'status' => $response->status(),
+                'body' => $response->body(),
+                'audioPath' => $audioPath,
+                'audioExists' => file_exists($audioPath),
+            ]);
+
+            return false;
+        } catch (\Exception $e) {
+            Log::error('WhatsApp audio service error', ['to' => $to, 'error' => $e->getMessage()]);
 
             return false;
         }

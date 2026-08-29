@@ -14,7 +14,6 @@ use App\Models\DraftPick;
 use App\Models\Game;
 use App\Models\Team;
 use App\Models\User;
-use App\Support\GamePayload;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -115,7 +114,7 @@ class DraftService
         $groupMessage = implode("\n", $lines);
 
         if ($imagePath) {
-            $fullImagePath = storage_path('app/public/' . $imagePath);
+            $fullImagePath = storage_path('app/public/'.$imagePath);
             rescue(fn () => $this->whatsAppService->sendImageToGroup($fullImagePath, $groupMessage), report: false);
         } else {
             rescue(fn () => $this->whatsAppService->sendToGroup($groupMessage), report: false);
@@ -419,7 +418,7 @@ class DraftService
         ];
 
         $teamsByColor = $game->teams->keyBy(fn ($team) => $team->color->value);
-        $lines = ["*📋 TIMES*", '', '•••••••••••••••••••••••••••••••••••••', ''];
+        $lines = ['*📋 TIMES*', '', '•••••••••••••••••••••••••••••••••••••', ''];
 
         foreach (TeamColor::cases() as $color) {
             $emoji = $colorEmojis[$color->value];

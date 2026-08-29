@@ -65,6 +65,11 @@ class Game extends Model
         return $this->hasMany(DraftPick::class);
     }
 
+    public function draftNarrations(): HasMany
+    {
+        return $this->hasMany(DraftNarration::class);
+    }
+
     public function weekTeamMusics(): HasMany
     {
         return $this->hasMany(GameWeekTeamMusic::class)->orderBy('sort_order');
