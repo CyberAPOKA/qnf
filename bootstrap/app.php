@@ -18,8 +18,13 @@ return Application::configure(basePath: dirname(__DIR__))
             \Illuminate\Http\Middleware\AddLinkHeadersForPreloadedAssets::class,
         ]);
 
+        $middleware->alias([
+            'whatsapp.webhook' => \App\Http\Middleware\VerifyWhatsAppWebhook::class,
+        ]);
+
         $middleware->validateCsrfTokens(except: [
             'webhooks/mercadopago',
+            'webhooks/whatsapp',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

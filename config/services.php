@@ -40,6 +40,10 @@ return [
         'player_active' => env('WHATSAPP_PLAYER_ACTIVE', false),
         'url' => env('WHATSAPP_SERVICE_URL', 'http://127.0.0.1:3001'),
         'group_id' => env('WHATSAPP_GROUP_ID'),
+        'webhook_secret' => env('WHATSAPP_WEBHOOK_SECRET'),
+        'command_cooldown_seconds' => (int) env('WHATSAPP_COMMAND_COOLDOWN_SECONDS', 10),
+        'commands_global_cooldown_seconds' => (int) env('WHATSAPP_COMMANDS_GLOBAL_COOLDOWN_SECONDS', 3600),
+        'idempotency_ttl_seconds' => (int) env('WHATSAPP_IDEMPOTENCY_TTL_SECONDS', 86400),
     ],
 
     'pix' => [

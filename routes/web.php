@@ -15,6 +15,7 @@ use App\Http\Controllers\RoundsController;
 use App\Http\Controllers\StatisticsController;
 use App\Http\Controllers\TimelineController;
 use App\Http\Controllers\WhatsAppController;
+use App\Http\Controllers\WhatsAppWebhookController;
 use App\Http\Controllers\YouTubeController;
 use Illuminate\Foundation\Http\Middleware\HandlePrecognitiveRequests;
 use Illuminate\Support\Facades\Route;
@@ -22,6 +23,10 @@ use Illuminate\Support\Facades\Route;
 // Mercado Pago webhook (public, no auth, no CSRF)
 Route::post('/webhooks/mercadopago', [MercadoPagoWebhookController::class, 'handle'])
     ->name('webhooks.mercadopago');
+
+Route::post('/webhooks/whatsapp', [WhatsAppWebhookController::class, 'handle'])
+    ->middleware('whatsapp.webhook')
+    ->name('webhooks.whatsapp');
 
 Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(function () {
 

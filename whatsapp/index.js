@@ -1,63 +1,150 @@
+import './loadEnv.js';
 import pkg from 'whatsapp-web.js';
 import qrcode from 'qrcode-terminal';
 import express from 'express';
+import {
+    buildCommandPayload,
+    createCommandForwarder,
+    isSupportedCommand,
+} from './commands.js';
 
 const { Client, LocalAuth, MessageMedia } = pkg;
 
 const PORT = process.env.WHATSAPP_PORT || 3001;
 const MAX_SEND_ATTEMPTS = 3;
+const MAX_INIT_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1500;
+const GROUP_ID = process.env.WHATSAPP_GROUP_ID || '';
+const LARAVEL_WEBHOOK_URL = process.env.WHATSAPP_LARAVEL_WEBHOOK_URL || '';
+const WEBHOOK_SECRET = process.env.WHATSAPP_WEBHOOK_SECRET || '';
 
-const client = new Client({
-    // Snap Chromium cannot lock a profile under /var/www; keep the session in $HOME.
-    authStrategy: new LocalAuth({
-        dataPath: process.env.WWEBJS_AUTH_PATH || './.wwebjs_auth',
-    }),
-    webVersionCache: {
-        type: 'remote',
-        remotePath: 'https://raw.githubusercontent.com/nicomeyer96/whatsapp-web.js-version-fix/main/bypass/webVersion',
-    },
-    puppeteer: {
-        headless: true,
-        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-        args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            // Chrome may detach idle frames; keep the WhatsApp Web page alive.
-            '--disable-features=IsolateOrigins,site-per-process,MemorySaverMode',
-            '--memory-pressure-off',
-            '--disable-dev-shm-usage',
-        ],
-    },
-});
-
+let client = null;
 let isReady = false;
 let sendQueue = Promise.resolve();
 
-client.on('qr', (qr) => {
-    console.log('Scan the QR code below to authenticate:');
-    qrcode.generate(qr, { small: true });
+const forwardCommand = createCommandForwarder({
+    laravelWebhookUrl: LARAVEL_WEBHOOK_URL,
+    webhookSecret: WEBHOOK_SECRET,
+    groupId: GROUP_ID,
 });
 
-client.on('authenticated', () => {
-    console.log('Authenticated successfully.');
-});
+function createWhatsAppClient() {
+    return new Client({
+        // Snap Chromium cannot lock a profile under /var/www; keep the session in $HOME.
+        authStrategy: new LocalAuth({
+            dataPath: process.env.WWEBJS_AUTH_PATH || './.wwebjs_auth',
+        }),
+        webVersionCache: {
+            type: 'local',
+        },
+        puppeteer: {
+            headless: true,
+            protocolTimeout: 120000,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+            ],
+        },
+    });
+}
 
-client.on('auth_failure', (msg) => {
-    console.error('Authentication failed:', msg);
-});
+function attachClientEvents(instance) {
+    instance.on('qr', (qr) => {
+        console.log('Scan the QR code below to authenticate:');
+        qrcode.generate(qr, { small: true });
+    });
 
-client.on('ready', () => {
-    isReady = true;
-    console.log('WhatsApp client ready!');
-});
+    instance.on('authenticated', () => {
+        console.log('Authenticated successfully.');
+    });
 
-client.on('disconnected', (reason) => {
-    isReady = false;
-    console.log('Client disconnected:', reason);
-});
+    instance.on('auth_failure', (msg) => {
+        console.error('Authentication failed:', msg);
+    });
 
-client.initialize();
+    instance.on('ready', () => {
+        isReady = true;
+        console.log('WhatsApp client ready!');
+    });
+
+    instance.on('disconnected', (reason) => {
+        isReady = false;
+        console.log('Client disconnected:', reason);
+    });
+
+    instance.on('message_create', async (msg) => {
+        try {
+            if (msg.isStatus || !isSupportedCommand(msg.body)) {
+                return;
+            }
+
+            const chatId = msg.fromMe ? msg.to : msg.from;
+            if (GROUP_ID && chatId !== GROUP_ID) {
+                console.log(`Ignoring command from other chat: ${chatId}`);
+                return;
+            }
+
+            console.log(`Command received: ${String(msg.body).trim()} chat=${chatId} fromMe=${Boolean(msg.fromMe)}`);
+
+            const payload = await buildCommandPayload(msg, client);
+            payload.chat_id = chatId;
+            payload.from_me = false;
+
+            const result = await forwardCommand(payload);
+
+            if (result?.reply) {
+                await enqueueSend(() =>
+                    sendWithRetry(() => client.sendMessage(chatId, result.reply), 'Command reply'),
+                );
+            } else {
+                console.log('No reply from Laravel for this command.', result);
+            }
+        } catch (err) {
+            console.error('Command handling failed:', err.message);
+        }
+    });
+}
+
+async function startWhatsAppClient() {
+    for (let attempt = 1; attempt <= MAX_INIT_ATTEMPTS; attempt++) {
+        if (client) {
+            isReady = false;
+            try {
+                await client.destroy();
+            } catch {
+                // The previous browser may already be gone after a crashed inject().
+            }
+            client = null;
+        }
+
+        client = createWhatsAppClient();
+        attachClientEvents(client);
+
+        try {
+            await client.initialize();
+            return;
+        } catch (err) {
+            console.error(
+                `WhatsApp initialize failed (attempt ${attempt}/${MAX_INIT_ATTEMPTS}):`,
+                err.message,
+            );
+
+            if (attempt === MAX_INIT_ATTEMPTS) {
+                console.error(
+                    'Could not start WhatsApp Web. Delete whatsapp/.wwebjs_auth and whatsapp/.wwebjs_cache if they exist, then run again.',
+                );
+                return;
+            }
+
+            await sleep(RETRY_DELAY_MS * attempt);
+        }
+    }
+}
+
+startWhatsAppClient();
 
 function sleep(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
@@ -180,4 +267,7 @@ app.get('/groups', async (_req, res) => {
 
 app.listen(PORT, '127.0.0.1', () => {
     console.log(`WhatsApp service listening on http://127.0.0.1:${PORT}`);
+    console.log(
+        `Commands: group=${GROUP_ID || '(not set)'} webhook=${LARAVEL_WEBHOOK_URL || '(not set)'} secret=${WEBHOOK_SECRET ? 'yes' : 'no'}`,
+    );
 });

@@ -14,6 +14,7 @@ use App\Models\GamePlayer;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\DraftService;
+use App\Services\GameParticipationService;
 use App\Services\GamePlayerSwapService;
 use App\Services\GameService;
 use App\Services\PaymentService;
@@ -36,6 +37,7 @@ class AdminGameController extends Controller
         private readonly WaitlistService $waitlistService,
         private readonly PaymentService $paymentService,
         private readonly GamePlayerSwapService $gamePlayerSwapService,
+        private readonly GameParticipationService $participationService,
     ) {}
 
     public function addPlayers(Request $request, Game $game): RedirectResponse
@@ -431,38 +433,11 @@ class AdminGameController extends Controller
             'user_id' => ['required', 'integer', 'exists:users,id'],
         ]);
 
-        DB::transaction(function () use ($game, $validated): void {
-            $lockedGame = Game::whereKey($game->id)->lockForUpdate()->firstOrFail();
-
-            if (! in_array($lockedGame->status, [GameStatus::SCHEDULED, GameStatus::OPEN, GameStatus::FULL, GameStatus::DRAFTING, GameStatus::DRAFTED])) {
-                throw ValidationException::withMessages(['remove' => 'Não é possível remover jogadores neste momento.']);
-            }
-
-            $gamePlayer = GamePlayer::where('game_id', $lockedGame->id)
-                ->where('user_id', $validated['user_id'])
-                ->where('dropped_out', false)
-                ->firstOrFail();
-
-            $gamePlayer->update(['dropped_out' => true]);
-
-            if (in_array($lockedGame->status, [GameStatus::OPEN, GameStatus::FULL])) {
-                $promoted = $this->waitlistService->promoteFromWaitlistBeforeDraft($lockedGame);
-                if (! $promoted && $lockedGame->status === GameStatus::FULL) {
-                    $lockedGame->update(['status' => GameStatus::OPEN]);
-                }
-            }
-
-            if ($lockedGame->status === GameStatus::DRAFTED) {
-                $this->waitlistService->promoteFromWaitlist($lockedGame, (int) $validated['user_id']);
-            }
-        });
-
-        $freshGame = Game::findOrFail($game->id);
-
-        rescue(fn () => $this->paymentService->cancelPaymentForPlayer($freshGame->id, (int) $validated['user_id']), report: false);
-
-        $payload = GamePayload::fromGame($freshGame, $this->draftService);
-        rescue(fn () => broadcast(new GamePlayerJoined($freshGame->id, $payload))->toOthers(), report: false);
+        try {
+            $this->participationService->removePlayer($game, User::findOrFail($validated['user_id']));
+        } catch (ValidationException $exception) {
+            return back()->withErrors($exception->errors());
+        }
 
         return back();
     }
