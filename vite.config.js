@@ -118,4 +118,13 @@ export default defineConfig(({ isSsrBuild }) => ({
             },
         }),
     ],
+    server: {
+        watch: {
+            ignored: [
+                '**/whatsapp/**',
+                '**/public/assets/**',
+                '**/storage/**',
+            ],
+        },
+    },
 }));

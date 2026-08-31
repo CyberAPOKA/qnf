@@ -91,6 +91,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
         Route::get('/youtube/search', [YouTubeController::class, 'search'])->name('api.youtube.search');
         Route::get('/youtube/videos/{videoId}', [YouTubeController::class, 'show'])->name('api.youtube.show');
         Route::post('/whatsapp/send-test', [WhatsAppController::class, 'sendTest'])->name('api.whatsapp.send-test');
+        Route::post('/whatsapp/send-voice', [WhatsAppController::class, 'sendVoice'])->name('api.whatsapp.send-voice');
         Route::post('/week-team/random', [GameController::class, 'generateRandomWeekTeam'])->name('api.week-team.random');
         Route::post('/captains/generate', [GameController::class, 'generateCaptainsImage'])->name('api.captains.generate');
         Route::post('/lineups/generate', [GameController::class, 'generateLineupsImage'])->name('api.lineups.generate');
