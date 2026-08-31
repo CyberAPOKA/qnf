@@ -202,26 +202,36 @@ class WhatsAppCommandsTest extends TestCase
         $this->assertNotNull(GamePlayer::where('game_id', $game->id)->where('user_id', $waiting->id)->first()->joined_at);
     }
 
-    public function test_commands_is_silent(): void
+    public function test_commands_lists_player_commands(): void
     {
         $player = $this->player();
         $this->openGame();
 
-        $this->postCommand('/commands', $player)
+        $reply = $this->postCommand('/commands', $player)
             ->assertOk()
             ->assertJsonPath('status', 'ok')
-            ->assertJsonPath('reply', null);
+            ->json('reply');
+
+        $this->assertStringContainsString('/jogar ou /play', $reply);
+        $this->assertStringContainsString('/desistir ou /quit', $reply);
+        $this->assertStringContainsString('/comandos ou /commands', $reply);
+        $this->assertStringContainsString('/lineup {cor} {voz}', $reply);
+        $this->assertStringNotContainsString('/add', $reply);
+        $this->assertStringNotContainsString('/ping', $reply);
     }
 
-    public function test_comandos_is_an_alias_and_is_silent_for_admins(): void
+    public function test_comandos_lists_admin_commands_for_admins(): void
     {
         $admin = $this->admin(['name' => 'Admin']);
         $this->openGame();
 
-        $this->postCommand('/comandos', $admin)
+        $reply = $this->postCommand('/comandos', $admin)
             ->assertOk()
-            ->assertJsonPath('status', 'ok')
-            ->assertJsonPath('reply', null);
+            ->json('reply');
+
+        $this->assertStringContainsString('/add {número}', $reply);
+        $this->assertStringContainsString('/remove {número}', $reply);
+        $this->assertStringNotContainsString('/ping', $reply);
     }
 
     public function test_ping_replies_pong_without_timeout(): void
