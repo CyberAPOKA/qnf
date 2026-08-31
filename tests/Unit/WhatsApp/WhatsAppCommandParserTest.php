@@ -30,6 +30,7 @@ class WhatsAppCommandParserTest extends TestCase
         $this->assertSame(WhatsAppCommandType::Lineup, $this->parser->parse($this->message('/lineup blue lula'))?->type);
         $this->assertSame('blue lula', $this->parser->parse($this->message('/lineup blue lula'))?->argument);
         $this->assertSame('--blue --lula', $this->parser->parse($this->message('/lineup --blue --lula'))?->argument);
+        $this->assertSame(WhatsAppCommandType::Ping, $this->parser->parse($this->message('/ping'))?->type);
     }
 
     public function test_it_parses_admin_commands_with_arguments(): void
@@ -59,6 +60,10 @@ class WhatsAppCommandParserTest extends TestCase
         $this->assertSame('555199294672', PhoneNumber::digits($jid));
         $this->assertSame('555199294672', PhoneNumber::digits('+55 51 9929-4672'));
         $this->assertSame('99294672', PhoneNumber::lastEight('5199294672'));
+        $this->assertTrue(PhoneNumber::sameLastEight('+55 51 9930-4836', '555199304836'));
+        $this->assertTrue(PhoneNumber::sameLastEight('5199304836', '555199304836@c.us'));
+        $this->assertTrue(PhoneNumber::sameLastEight('99304836', '555199304836'));
+        $this->assertFalse(PhoneNumber::sameLastEight('555199304836', '555199294672'));
     }
 
     private function message(string $body): IncomingWhatsAppMessage

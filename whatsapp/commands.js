@@ -1,4 +1,4 @@
-const COMMAND_PATTERN = /^\/(play|jogar|desistir|quit|commands|comandos|add|remove|lineup)(\s|$)/i;
+const COMMAND_PATTERN = /^\/(play|jogar|desistir|quit|commands|comandos|add|remove|lineup|ping)(\s|$)/i;
 
 export function isSupportedCommand(body) {
     return COMMAND_PATTERN.test(String(body || '').trim());
@@ -87,7 +87,7 @@ function resolveAuthorId(msg, client) {
 async function safeGetContact(client, contactId) {
     const serialized = serializeWhatsAppId(contactId);
 
-    if (!client || !serialized || !serialized.endsWith('@c.us')) {
+    if (!client || !serialized || serialized.endsWith('@g.us')) {
         return null;
     }
 
@@ -118,9 +118,9 @@ export async function buildCommandPayload(msg, client = null) {
         }
     }
 
-    const authorPhone = phoneFromWhatsAppId(sessionId)
-        || (await extractPhone(contact))
-        || phoneFromWhatsAppId(authorId);
+    const authorPhone = (await extractPhone(contact))
+        || phoneFromWhatsAppId(authorId)
+        || (msg.fromMe ? phoneFromWhatsAppId(sessionId) : null);
 
     return {
         message_id: msg.id?._serialized || '',

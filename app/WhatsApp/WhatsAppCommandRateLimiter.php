@@ -52,14 +52,24 @@ class WhatsAppCommandRateLimiter
         return (int) config('services.whatsapp.command_cooldown_seconds', 3600);
     }
 
-    public function isUnlimited(?string $phone): bool
+    public function isUnlimited(?string ...$phones): bool
     {
         $configured = config('services.whatsapp.lineup_unlimited_phone', '555199304836');
-        $configuredEight = PhoneNumber::lastEight(is_string($configured) ? $configured : null);
-        $senderEight = PhoneNumber::lastEight($phone);
 
-        return $configuredEight !== null
-            && $senderEight !== null
-            && $configuredEight === $senderEight;
+        if (is_int($configured) || is_float($configured)) {
+            $configured = (string) $configured;
+        }
+
+        if (! is_string($configured) || $configured === '') {
+            return false;
+        }
+
+        foreach ($phones as $phone) {
+            if (PhoneNumber::sameLastEight($configured, $phone)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

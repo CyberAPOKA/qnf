@@ -44,6 +44,16 @@ class PhoneNumber
         return substr($digits, -8);
     }
 
+    public static function sameLastEight(?string $left, ?string $right): bool
+    {
+        $leftEight = self::lastEight($left);
+        $rightEight = self::lastEight($right);
+
+        return $leftEight !== null
+            && $rightEight !== null
+            && $leftEight === $rightEight;
+    }
+
     public static function findUser(?string $phone): ?User
     {
         $digits = self::digits($phone);

@@ -224,6 +224,31 @@ class WhatsAppCommandsTest extends TestCase
             ->assertJsonPath('reply', null);
     }
 
+    public function test_ping_replies_pong_without_timeout(): void
+    {
+        $player = $this->player();
+
+        $this->postCommand('/ping', $player)
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', 'pong');
+
+        $this->postCommand('/ping', $player, ['message_id' => 'ping-2'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'pong');
+    }
+
+    public function test_unknown_number_can_ping(): void
+    {
+        $this->postCommand('/ping', null, [
+            'author_phone' => '555199000000',
+            'author_id' => 'xavier.y@example.org',
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', 'pong');
+    }
+
     public function test_play_and_jogar_share_the_same_cooldown(): void
     {
         $player = $this->player();
@@ -731,6 +756,25 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/add 555199666666', $unlimited, [
             'author_phone' => '+55 51 9930-4836',
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
+
+        $this->assertTrue(
+            GamePlayer::where('game_id', $game->id)->where('user_id', $target->id)->exists()
+        );
+    }
+
+    public function test_unlimited_phone_matches_only_the_last_eight_digits(): void
+    {
+        $unlimited = $this->player(['phone' => '5199304836']);
+        $target = $this->player(['phone' => '555199777777']);
+        $game = $this->openGame();
+
+        $this->postCommand('/add 555199777777', $unlimited, [
+            'author_phone' => null,
+            'author_id' => '99304836@c.us',
         ])
             ->assertOk()
             ->assertJsonPath('status', 'ok')

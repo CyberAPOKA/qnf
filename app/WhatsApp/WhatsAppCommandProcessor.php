@@ -2,10 +2,12 @@
 
 namespace App\WhatsApp;
 
+use App\Models\User;
 use App\Support\PhoneNumber;
 use App\WhatsApp\Commands\AddPlayerCommand;
 use App\WhatsApp\Commands\HelpCommand;
 use App\WhatsApp\Commands\LineupCommand;
+use App\WhatsApp\Commands\PingCommand;
 use App\WhatsApp\Commands\PlayCommand;
 use App\WhatsApp\Commands\QuitCommand;
 use App\WhatsApp\Commands\RemovePlayerCommand;
@@ -26,6 +28,7 @@ class WhatsAppCommandProcessor
         private readonly AddPlayerCommand $addPlayerCommand,
         private readonly RemovePlayerCommand $removePlayerCommand,
         private readonly LineupCommand $lineupCommand,
+        private readonly PingCommand $pingCommand,
     ) {}
 
     /**
@@ -53,9 +56,14 @@ class WhatsAppCommandProcessor
             return ['status' => 'duplicate', 'reply' => null, 'audio_path' => null, 'cleanup_audio' => false];
         }
 
+        if ($parsed->type === WhatsAppCommandType::Ping) {
+            return $this->fromResult($this->pingCommand->handle($message, $parsed, new User));
+        }
+
         $senderPhone = $message->authorPhone ?? $message->authorId;
-        $sender = PhoneNumber::findUser($senderPhone);
-        $unlimited = $this->rateLimiter->isUnlimited($senderPhone);
+        $sender = PhoneNumber::findUser($message->authorPhone)
+            ?? PhoneNumber::findUser($message->authorId);
+        $unlimited = $this->rateLimiter->isUnlimited($message->authorPhone, $message->authorId);
         $isAdmin = $sender?->role === 'admin' || $unlimited;
         $rateLimitPhone = $this->rateLimitPhone($senderPhone, $sender?->id);
         $bypassRateLimit = $unlimited || $parsed->type->isAdmin();
@@ -103,13 +111,14 @@ class WhatsAppCommandProcessor
             WhatsAppCommandType::Add => $this->addPlayerCommand,
             WhatsAppCommandType::Remove => $this->removePlayerCommand,
             WhatsAppCommandType::Lineup => $this->lineupCommand,
+            WhatsAppCommandType::Ping => $this->pingCommand,
         };
     }
 
     private function shouldHit(WhatsAppCommandType $type, WhatsAppCommandResult $handled): bool
     {
         return match ($type) {
-            WhatsAppCommandType::Add, WhatsAppCommandType::Remove => false,
+            WhatsAppCommandType::Add, WhatsAppCommandType::Remove, WhatsAppCommandType::Ping => false,
             WhatsAppCommandType::Lineup => $handled->audioPath !== null,
             default => true,
         };
@@ -155,7 +164,7 @@ class WhatsAppCommandProcessor
     {
         return [
             'status' => 'ok',
-            'reply' => null,
+            'reply' => $result->reply,
             'audio_path' => $result->audioPath,
             'cleanup_audio' => $result->cleanupAudio,
         ];
