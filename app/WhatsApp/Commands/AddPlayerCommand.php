@@ -8,6 +8,7 @@ use App\Services\GameParticipationService;
 use App\Services\GameService;
 use App\WhatsApp\Data\IncomingWhatsAppMessage;
 use App\WhatsApp\Data\ParsedWhatsAppCommand;
+use App\WhatsApp\Data\WhatsAppCommandResult;
 use App\WhatsApp\Support\MentionedPlayerResolver;
 use App\WhatsApp\WhatsAppCommandMessages;
 use Illuminate\Validation\ValidationException;
@@ -20,16 +21,16 @@ class AddPlayerCommand implements WhatsAppCommand
         private readonly MentionedPlayerResolver $playerResolver,
     ) {}
 
-    public function handle(IncomingWhatsAppMessage $message, ParsedWhatsAppCommand $command, User $sender): string
+    public function handle(IncomingWhatsAppMessage $message, ParsedWhatsAppCommand $command, User $sender): WhatsAppCommandResult
     {
         if (! $this->playerResolver->hasTargetHint($message, $command)) {
-            return WhatsAppCommandMessages::invalidNumber();
+            return WhatsAppCommandResult::text(WhatsAppCommandMessages::invalidNumber());
         }
 
         $target = $this->playerResolver->resolve($message, $command);
 
         if (! $target) {
-            return WhatsAppCommandMessages::playerNotFound();
+            return WhatsAppCommandResult::text(WhatsAppCommandMessages::playerNotFound());
         }
 
         $adminName = WhatsAppCommandMessages::firstName($sender->name);
@@ -41,8 +42,10 @@ class AddPlayerCommand implements WhatsAppCommand
                 $target,
             );
         } catch (ValidationException $exception) {
-            return collect($exception->errors())->flatten()->first()
-                ?: WhatsAppCommandMessages::gameUnavailable();
+            return WhatsAppCommandResult::text(
+                collect($exception->errors())->flatten()->first()
+                    ?: WhatsAppCommandMessages::gameUnavailable()
+            );
         }
 
         $waitlisted = in_array($result->outcome, [
@@ -51,18 +54,18 @@ class AddPlayerCommand implements WhatsAppCommand
         ], true);
 
         if ($result->outcome === ParticipationOutcome::AlreadyJoined) {
-            return WhatsAppCommandMessages::alreadyJoined($playerName);
+            return WhatsAppCommandResult::text(WhatsAppCommandMessages::alreadyJoined($playerName));
         }
 
         if ($result->outcome === ParticipationOutcome::AlreadyWaitlisted) {
-            return WhatsAppCommandMessages::alreadyWaitlisted($playerName, $result->waitlistPosition);
+            return WhatsAppCommandResult::text(WhatsAppCommandMessages::alreadyWaitlisted($playerName, $result->waitlistPosition));
         }
 
-        return WhatsAppCommandMessages::added(
+        return WhatsAppCommandResult::text(WhatsAppCommandMessages::added(
             $adminName,
             $playerName,
             $waitlisted,
             $result->waitlistPosition,
-        );
+        ));
     }
 }

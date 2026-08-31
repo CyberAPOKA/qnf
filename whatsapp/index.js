@@ -139,7 +139,21 @@ function attachClientEvents(instance) {
                 await enqueueSend(() =>
                     sendWithRetry(() => client.sendMessage(chatId, result.reply), 'Command reply'),
                 );
-            } else {
+            }
+
+            if (result?.audio_path) {
+                try {
+                    await enqueueSend(() =>
+                        sendWithRetry(() => sendVoiceNote(chatId, result.audio_path), 'Command voice note'),
+                    );
+                } finally {
+                    if (result.cleanup_audio) {
+                        fs.unlink(result.audio_path, () => {});
+                    }
+                }
+            }
+
+            if (!result?.reply && !result?.audio_path) {
                 console.log('No reply from Laravel for this command.', result);
             }
         } catch (err) {

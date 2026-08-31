@@ -27,6 +27,9 @@ class WhatsAppCommandParserTest extends TestCase
         $this->assertSame(WhatsAppCommandType::Quit, $this->parser->parse($this->message('/quit'))?->type);
         $this->assertSame(WhatsAppCommandType::Commands, $this->parser->parse($this->message('/comandos'))?->type);
         $this->assertSame(WhatsAppCommandType::Commands, $this->parser->parse($this->message('/commands'))?->type);
+        $this->assertSame(WhatsAppCommandType::Lineup, $this->parser->parse($this->message('/lineup blue lula'))?->type);
+        $this->assertSame('blue lula', $this->parser->parse($this->message('/lineup blue lula'))?->argument);
+        $this->assertSame('--blue --lula', $this->parser->parse($this->message('/lineup --blue --lula'))?->argument);
     }
 
     public function test_it_parses_admin_commands_with_arguments(): void

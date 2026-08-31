@@ -8,6 +8,7 @@ use App\Services\GameParticipationService;
 use App\Services\GameService;
 use App\WhatsApp\Data\IncomingWhatsAppMessage;
 use App\WhatsApp\Data\ParsedWhatsAppCommand;
+use App\WhatsApp\Data\WhatsAppCommandResult;
 use App\WhatsApp\WhatsAppCommandMessages;
 use Illuminate\Validation\ValidationException;
 
@@ -18,7 +19,7 @@ class PlayCommand implements WhatsAppCommand
         private readonly GameParticipationService $participationService,
     ) {}
 
-    public function handle(IncomingWhatsAppMessage $message, ParsedWhatsAppCommand $command, User $sender): string
+    public function handle(IncomingWhatsAppMessage $message, ParsedWhatsAppCommand $command, User $sender): WhatsAppCommandResult
     {
         $name = WhatsAppCommandMessages::firstName($sender->name);
 
@@ -28,16 +29,18 @@ class PlayCommand implements WhatsAppCommand
                 $sender,
             );
         } catch (ValidationException $exception) {
-            return $this->firstError($exception) ?? WhatsAppCommandMessages::gameUnavailable();
+            return WhatsAppCommandResult::text($this->firstError($exception) ?? WhatsAppCommandMessages::gameUnavailable());
         }
 
-        return match ($result->outcome) {
+        $reply = match ($result->outcome) {
             ParticipationOutcome::Joined => WhatsAppCommandMessages::joined($name),
             ParticipationOutcome::Waitlisted => WhatsAppCommandMessages::waitlisted($name, $result->waitlistPosition ?? 1),
             ParticipationOutcome::AlreadyJoined => WhatsAppCommandMessages::alreadyJoined($name),
             ParticipationOutcome::AlreadyWaitlisted => WhatsAppCommandMessages::alreadyWaitlisted($name, $result->waitlistPosition),
             default => WhatsAppCommandMessages::gameUnavailable(),
         };
+
+        return WhatsAppCommandResult::text($reply);
     }
 
     private function firstError(ValidationException $exception): ?string

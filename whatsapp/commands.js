@@ -1,4 +1,4 @@
-const COMMAND_PATTERN = /^\/(play|jogar|desistir|quit|commands|comandos|add|remove)(\s|$)/i;
+const COMMAND_PATTERN = /^\/(play|jogar|desistir|quit|commands|comandos|add|remove|lineup)(\s|$)/i;
 
 export function isSupportedCommand(body) {
     return COMMAND_PATTERN.test(String(body || '').trim());
@@ -152,7 +152,8 @@ export function createCommandForwarder({
         }
 
         const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 15000);
+        const timeoutMs = Number(process.env.WHATSAPP_WEBHOOK_TIMEOUT_MS || 120000);
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
         try {
             const response = await fetchImpl(laravelWebhookUrl, {

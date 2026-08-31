@@ -9,6 +9,7 @@ enum WhatsAppCommandType: string
     case Commands = 'commands';
     case Add = 'add';
     case Remove = 'remove';
+    case Lineup = 'lineup';
 
     public function isAdmin(): bool
     {
@@ -31,6 +32,7 @@ enum WhatsAppCommandType: string
             self::Commands => ['commands', 'comandos'],
             self::Add => ['add'],
             self::Remove => ['remove'],
+            self::Lineup => ['lineup'],
         };
     }
 

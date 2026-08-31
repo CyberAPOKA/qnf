@@ -6,6 +6,7 @@ enum NarratorVoice: string
 {
     case LULA = 'lula';
     case BOLSONARO = 'bolsonaro';
+    case NEYMAR = 'neymar';
 
     public static function values(): array
     {

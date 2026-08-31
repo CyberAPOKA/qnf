@@ -2,6 +2,7 @@
 
 namespace App\WhatsApp;
 
+use App\Support\PhoneNumber;
 use App\WhatsApp\Enums\WhatsAppCommandType;
 use Illuminate\Support\Facades\RateLimiter;
 
@@ -31,6 +32,10 @@ class WhatsAppCommandRateLimiter
             return 'whatsapp:commands:global';
         }
 
+        if ($type === WhatsAppCommandType::Lineup) {
+            return 'whatsapp:lineup:global';
+        }
+
         return 'whatsapp:'.$type->rateLimitBucket().':'.$phone;
     }
 
@@ -40,6 +45,21 @@ class WhatsAppCommandRateLimiter
             return (int) config('services.whatsapp.commands_global_cooldown_seconds', 3600);
         }
 
+        if ($type === WhatsAppCommandType::Lineup) {
+            return (int) config('services.whatsapp.lineup_cooldown_seconds', 3600);
+        }
+
         return (int) config('services.whatsapp.command_cooldown_seconds', 10);
+    }
+
+    public function isLineupUnlimited(?string $phone): bool
+    {
+        $configured = config('services.whatsapp.lineup_unlimited_phone', '555199304836');
+        $configuredEight = PhoneNumber::lastEight(is_string($configured) ? $configured : null);
+        $senderEight = PhoneNumber::lastEight($phone);
+
+        return $configuredEight !== null
+            && $senderEight !== null
+            && $configuredEight === $senderEight;
     }
 }

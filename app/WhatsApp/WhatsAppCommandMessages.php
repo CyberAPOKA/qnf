@@ -2,6 +2,7 @@
 
 namespace App\WhatsApp;
 
+use App\Enums\TeamColor;
 use App\Support\PersonName;
 use App\WhatsApp\Enums\WhatsAppCommandType;
 
@@ -115,6 +116,8 @@ class WhatsAppCommandMessages
             'Comandos QNF:',
             '/jogar ou /play — entrar na partida ou na fila',
             '/desistir ou /quit — desistir da partida ou sair da fila',
+            '/comandos ou /commands — mostrar os comandos disponíveis',
+            '/lineup {cor} {voz} — narrar a escalação em áudio',
         ];
 
         if ($isAdmin) {
@@ -130,11 +133,43 @@ class WhatsAppCommandMessages
         return PersonName::split($fullName)['first_name'] ?? 'Jogador';
     }
 
+    public static function lineupUsage(): string
+    {
+        return 'Use /lineup {cor} {voz}. Cores: blue, yellow, green. Vozes: lula, bolsonaro, neymar.';
+    }
+
+    public static function lineupUnavailable(): string
+    {
+        return 'A narração de áudio está indisponível no momento.';
+    }
+
+    public static function lineupTeamMissing(TeamColor $color): string
+    {
+        return 'O time '.mb_strtolower($color->label()).' ainda não foi definido nesta rodada.';
+    }
+
+    public static function lineupTeamEmpty(TeamColor $color): string
+    {
+        return 'O time '.mb_strtolower($color->label()).' ainda não tem jogadores.';
+    }
+
+    public static function lineupFailed(): string
+    {
+        return 'Não consegui gerar o áudio da escalação. Tente de novo mais tarde.';
+    }
+
+    public static function lineupCooldown(): string
+    {
+        return 'A escalação já foi narrada recentemente. Tente de novo mais tarde.';
+    }
+
     public static function rateLimited(WhatsAppCommandType $type): string
     {
-        return $type === WhatsAppCommandType::Commands
-            ? self::commandsCooldown()
-            : self::cooldown();
+        return match ($type) {
+            WhatsAppCommandType::Commands => self::commandsCooldown(),
+            WhatsAppCommandType::Lineup => self::lineupCooldown(),
+            default => self::cooldown(),
+        };
     }
 
     private static function withName(string $name, string $message): string

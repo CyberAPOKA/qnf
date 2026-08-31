@@ -12,7 +12,7 @@ return [
 
     /*
     | Narrator used after a draft is finalized.
-    | Allowed values: lula, bolsonaro
+    | Allowed values: lula, bolsonaro, neymar
     | "random" is reserved for a future per-draft/per-team picker and
     | currently falls back to lula.
     */
@@ -21,6 +21,7 @@ return [
     'voices' => [
         'lula' => env('FISH_AUDIO_VOICE_LULA'),
         'bolsonaro' => env('FISH_AUDIO_VOICE_BOLSONARO'),
+        'neymar' => env('FISH_AUDIO_VOICE_NEYMAR'),
     ],
 
     'disk' => env('FISH_AUDIO_DISK', 'local'),

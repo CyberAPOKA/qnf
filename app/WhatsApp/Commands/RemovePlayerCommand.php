@@ -8,6 +8,7 @@ use App\Services\GameParticipationService;
 use App\Services\GameService;
 use App\WhatsApp\Data\IncomingWhatsAppMessage;
 use App\WhatsApp\Data\ParsedWhatsAppCommand;
+use App\WhatsApp\Data\WhatsAppCommandResult;
 use App\WhatsApp\Support\MentionedPlayerResolver;
 use App\WhatsApp\WhatsAppCommandMessages;
 use Illuminate\Validation\ValidationException;
@@ -20,16 +21,16 @@ class RemovePlayerCommand implements WhatsAppCommand
         private readonly MentionedPlayerResolver $playerResolver,
     ) {}
 
-    public function handle(IncomingWhatsAppMessage $message, ParsedWhatsAppCommand $command, User $sender): string
+    public function handle(IncomingWhatsAppMessage $message, ParsedWhatsAppCommand $command, User $sender): WhatsAppCommandResult
     {
         if (! $this->playerResolver->hasTargetHint($message, $command)) {
-            return WhatsAppCommandMessages::invalidNumber();
+            return WhatsAppCommandResult::text(WhatsAppCommandMessages::invalidNumber());
         }
 
         $target = $this->playerResolver->resolve($message, $command);
 
         if (! $target) {
-            return WhatsAppCommandMessages::playerNotFound();
+            return WhatsAppCommandResult::text(WhatsAppCommandMessages::playerNotFound());
         }
 
         $adminName = WhatsAppCommandMessages::firstName($sender->name);
@@ -41,19 +42,21 @@ class RemovePlayerCommand implements WhatsAppCommand
                 $target,
             );
         } catch (ValidationException $exception) {
-            return collect($exception->errors())->flatten()->first()
-                ?: WhatsAppCommandMessages::playerNotFound();
+            return WhatsAppCommandResult::text(
+                collect($exception->errors())->flatten()->first()
+                    ?: WhatsAppCommandMessages::playerNotFound()
+            );
         }
 
         $promotedName = $result->promoted
             ? WhatsAppCommandMessages::firstName($result->promoted->name)
             : null;
 
-        return WhatsAppCommandMessages::removed(
+        return WhatsAppCommandResult::text(WhatsAppCommandMessages::removed(
             $adminName,
             $playerName,
             $result->outcome === ParticipationOutcome::RemovedFromWaitlist,
             $promotedName,
-        );
+        ));
     }
 }

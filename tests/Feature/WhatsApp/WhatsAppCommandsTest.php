@@ -4,12 +4,16 @@ namespace Tests\Feature\WhatsApp;
 
 use App\Enums\GameStatus;
 use App\Enums\Position;
+use App\Enums\TeamColor;
+use App\Models\DraftPick;
 use App\Models\Game;
 use App\Models\GamePlayer;
+use App\Models\Team;
 use App\Models\User;
 use App\Support\PhoneNumber;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
 class WhatsAppCommandsTest extends TestCase
@@ -31,6 +35,8 @@ class WhatsAppCommandsTest extends TestCase
             'services.whatsapp.group_id' => self::GROUP_ID,
             'services.whatsapp.command_cooldown_seconds' => 10,
             'services.whatsapp.commands_global_cooldown_seconds' => 3600,
+            'services.whatsapp.lineup_cooldown_seconds' => 3600,
+            'services.whatsapp.lineup_unlimited_phone' => '555199304836',
         ]);
     }
 
@@ -203,6 +209,7 @@ class WhatsAppCommandsTest extends TestCase
         $this->assertStringContainsString('/jogar ou /play', $reply);
         $this->assertStringContainsString('/desistir ou /quit', $reply);
         $this->assertStringContainsString('/comandos ou /commands', $reply);
+        $this->assertStringContainsString('/lineup {cor} {voz}', $reply);
         $this->assertStringNotContainsString('/add', $reply);
     }
 
@@ -501,6 +508,166 @@ class WhatsAppCommandsTest extends TestCase
             ->assertJsonPath('reply', 'Informe um número válido. Ex.: /add 51999999999');
     }
 
+    public function test_lineup_returns_generated_audio_path_for_the_current_round(): void
+    {
+        $this->enableFishAudio();
+        $this->fakeFishAudio('ID3lineup-audio');
+        $player = $this->player();
+        $this->draftedBlueTeam();
+
+        $response = $this->postCommand('/lineup blue lula', $player)
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null)
+            ->assertJsonPath('cleanup_audio', true);
+
+        $path = $response->json('audio_path');
+
+        $this->assertIsString($path);
+        $this->assertFileExists($path);
+        $this->assertSame('ID3lineup-audio', file_get_contents($path));
+
+        Http::assertSent(function ($request) {
+            return $request->url() === 'https://api.fish.audio/v1/tts'
+                && $request['reference_id'] === 'voice-lula-id'
+                && str_contains($request['text'], 'Escalação do time azul:')
+                && str_contains($request['text'], 'Christian, Daniel, Gustavo Mendes, Rodrigo Lima e no gol João.')
+                && str_contains($request['text'], 'Se esse time ganhar eu vou liberar picanha para toda a QNF.');
+        });
+
+        @unlink($path);
+    }
+
+    public function test_lineup_accepts_dashed_arguments(): void
+    {
+        $this->enableFishAudio();
+        $this->fakeFishAudio('ID3lineup-audio');
+        $player = $this->player();
+        $this->draftedBlueTeam();
+
+        $path = $this->postCommand('/lineup --blue --lula', $player)
+            ->assertOk()
+            ->json('audio_path');
+
+        $this->assertIsString($path);
+        $this->assertFileExists($path);
+        @unlink($path);
+    }
+
+    public function test_lineup_without_arguments_returns_usage(): void
+    {
+        $player = $this->player();
+        $this->draftedBlueTeam();
+
+        $this->postCommand('/lineup', $player)
+            ->assertOk()
+            ->assertJsonPath('reply', 'Use /lineup {cor} {voz}. Cores: blue, yellow, green. Vozes: lula, bolsonaro, neymar.')
+            ->assertJsonPath('audio_path', null);
+    }
+
+    public function test_lineup_missing_team_returns_an_error(): void
+    {
+        $this->enableFishAudio();
+        $player = $this->player();
+        $this->draftedBlueTeam();
+
+        $this->postCommand('/lineup yellow bolsonaro', $player)
+            ->assertOk()
+            ->assertJsonPath('reply', 'O time amarelo ainda não foi definido nesta rodada.')
+            ->assertJsonPath('audio_path', null);
+
+        Http::assertNothingSent();
+    }
+
+    public function test_lineup_is_unavailable_when_fish_audio_is_disabled(): void
+    {
+        $player = $this->player();
+        $this->draftedBlueTeam();
+
+        $this->postCommand('/lineup blue lula', $player)
+            ->assertOk()
+            ->assertJsonPath('reply', 'A narração de áudio está indisponível no momento.')
+            ->assertJsonPath('audio_path', null);
+    }
+
+    public function test_lineup_has_a_global_one_hour_cooldown(): void
+    {
+        $this->enableFishAudio();
+        $this->fakeFishAudio('ID3lineup-audio');
+        $first = $this->player();
+        $second = $this->player();
+        $this->draftedBlueTeam();
+
+        $path = $this->postCommand('/lineup blue lula', $first)->assertOk()->json('audio_path');
+        @unlink($path);
+
+        $this->postCommand('/lineup green neymar', $second, ['message_id' => 'lineup-second'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'A escalação já foi narrada recentemente. Tente de novo mais tarde.')
+            ->assertJsonPath('audio_path', null);
+    }
+
+    public function test_admin_does_not_bypass_the_lineup_cooldown(): void
+    {
+        $this->enableFishAudio();
+        $this->fakeFishAudio('ID3lineup-audio');
+        $player = $this->player();
+        $admin = $this->admin();
+        $this->draftedBlueTeam();
+
+        $path = $this->postCommand('/lineup blue lula', $player)->assertOk()->json('audio_path');
+        @unlink($path);
+
+        $this->postCommand('/lineup blue bolsonaro', $admin, ['message_id' => 'lineup-admin'])
+            ->assertOk()
+            ->assertJsonPath('reply', 'A escalação já foi narrada recentemente. Tente de novo mais tarde.');
+    }
+
+    public function test_unlimited_phone_bypasses_the_lineup_cooldown(): void
+    {
+        $this->enableFishAudio();
+        $this->fakeFishAudio('ID3lineup-audio');
+        $player = $this->player();
+        $unlimited = $this->player(['phone' => '555199304836']);
+        $this->draftedBlueTeam();
+
+        $firstPath = $this->postCommand('/lineup blue lula', $player)->assertOk()->json('audio_path');
+        @unlink($firstPath);
+
+        $secondPath = $this->postCommand('/lineup blue neymar', $unlimited, [
+            'message_id' => 'lineup-unlimited',
+            'author_phone' => '+55 51 9930-4836',
+            'author_id' => '555199304836@c.us',
+        ])
+            ->assertOk()
+            ->json('audio_path');
+
+        $this->assertIsString($secondPath);
+        $this->assertFileExists($secondPath);
+        @unlink($secondPath);
+    }
+
+    public function test_lineup_cooldown_expires_after_one_hour(): void
+    {
+        $this->enableFishAudio();
+        $this->fakeFishAudio('ID3lineup-audio');
+        $first = $this->player();
+        $second = $this->player();
+        $this->draftedBlueTeam();
+
+        $path = $this->postCommand('/lineup blue lula', $first)->assertOk()->json('audio_path');
+        @unlink($path);
+
+        $this->travel(1)->hours();
+
+        $secondPath = $this->postCommand('/lineup blue bolsonaro', $second, ['message_id' => 'lineup-later'])
+            ->assertOk()
+            ->json('audio_path');
+
+        $this->assertIsString($secondPath);
+        @unlink($secondPath);
+    }
+
     public function test_phone_matcher_finds_users_by_local_and_formatted_numbers(): void
     {
         $player = $this->player(['phone' => '555199294672']);
@@ -585,5 +752,69 @@ class WhatsAppCommandsTest extends TestCase
         });
 
         return $game->fresh();
+    }
+
+    private function enableFishAudio(): void
+    {
+        config([
+            'fish-audio.enabled' => true,
+            'fish-audio.api_key' => 'test-fish-key',
+            'fish-audio.model' => 's2.1-pro-free',
+            'fish-audio.base_url' => 'https://api.fish.audio',
+            'fish-audio.voices.lula' => 'voice-lula-id',
+            'fish-audio.voices.bolsonaro' => 'voice-bolsonaro-id',
+            'fish-audio.voices.neymar' => 'voice-neymar-id',
+            'fish-audio.http.connect_timeout' => 10,
+            'fish-audio.http.timeout' => 60,
+            'fish-audio.http.retries' => 1,
+            'fish-audio.http.retry_sleep_ms' => 0,
+        ]);
+    }
+
+    private function fakeFishAudio(string $body = 'ID3lineup-audio'): void
+    {
+        Http::fake([
+            'https://api.fish.audio/v1/tts' => Http::response($body, 200, [
+                'Content-Type' => 'audio/mpeg',
+            ]),
+        ]);
+    }
+
+    private function draftedBlueTeam(): Game
+    {
+        $game = Game::create([
+            'date' => now()->toDateString(),
+            'opens_at' => now()->subHour(),
+            'round' => 20,
+            'status' => GameStatus::DRAFTED,
+        ]);
+
+        $captain = User::factory()->create(['name' => 'Christian', 'position' => Position::FIXED]);
+        $team = Team::create([
+            'game_id' => $game->id,
+            'color' => TeamColor::BLUE,
+            'captain_user_id' => $captain->id,
+            'pick_order' => 1,
+        ]);
+
+        foreach ([
+            ['name' => 'Daniel', 'position' => Position::WINGER],
+            ['name' => 'Gustavo Mendes', 'position' => Position::WINGER],
+            ['name' => 'Rodrigo Lima', 'position' => Position::PIVOT],
+            ['name' => 'João', 'position' => Position::GOALKEEPER],
+        ] as $index => $attributes) {
+            $user = User::factory()->create($attributes);
+
+            DraftPick::create([
+                'game_id' => $game->id,
+                'round' => intdiv($index, 3) + 1,
+                'pick_in_round' => ($index % 3) + 1,
+                'team_color' => $team->color,
+                'picked_user_id' => $user->id,
+                'picked_at' => now(),
+            ]);
+        }
+
+        return $game->fresh(['teams.captain', 'draftPicks.pickedUser']);
     }
 }

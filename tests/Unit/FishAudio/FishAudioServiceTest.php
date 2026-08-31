@@ -23,6 +23,7 @@ class FishAudioServiceTest extends TestCase
             'fish-audio.base_url' => 'https://api.fish.audio',
             'fish-audio.voices.lula' => 'voice-lula-id',
             'fish-audio.voices.bolsonaro' => 'voice-bolsonaro-id',
+            'fish-audio.voices.neymar' => 'voice-neymar-id',
             'fish-audio.http.connect_timeout' => 10,
             'fish-audio.http.timeout' => 60,
             'fish-audio.http.retries' => 3,
@@ -68,6 +69,19 @@ class FishAudioServiceTest extends TestCase
         $this->service->generate('Texto.', 'bolsonaro');
 
         Http::assertSent(fn ($request) => $request['reference_id'] === 'voice-bolsonaro-id');
+    }
+
+    public function test_it_sends_the_configured_reference_id_for_neymar(): void
+    {
+        Http::fake([
+            'https://api.fish.audio/v1/tts' => Http::response('ID3fake-mp3-bytes', 200, [
+                'Content-Type' => 'audio/mpeg',
+            ]),
+        ]);
+
+        $this->service->generate('Texto.', 'neymar');
+
+        Http::assertSent(fn ($request) => $request['reference_id'] === 'voice-neymar-id');
     }
 
     public function test_it_rejects_an_unknown_voice_without_calling_the_api(): void
