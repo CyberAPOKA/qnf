@@ -316,7 +316,11 @@ const showTeams = computed(
                         <AdminTeamTools v-if="is_admin" :game="effectiveGame" :payments="effectivePayments || []"
                             :is-current-round="isCurrentRound" />
 
-                        <PixPaymentCard v-if="!is_admin && payment && isCurrentRound" :payment="payment" />
+                        <PixPaymentCard
+                            v-if="!is_admin && !is_goalkeeper && isCurrentRound && !dropped_out"
+                            :payment="payment"
+                            :game-id="effectiveGame?.id"
+                        />
                     </template>
 
                     <!-- Admin: extra tools (current round only) -->

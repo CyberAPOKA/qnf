@@ -9,12 +9,14 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Payment extends Model
 {
     use SoftDeletes;
+
     protected $fillable = [
         'game_id',
         'user_id',
         'amount',
         'pix_payload',
         'external_id',
+        'idempotency_key',
         'qr_code_base64',
         'paid_at',
         'method',
@@ -22,6 +24,7 @@ class Payment extends Model
     ];
 
     public const METHOD_SYSTEM = 'system';
+
     public const METHOD_MANUAL = 'manual';
 
     protected function casts(): array

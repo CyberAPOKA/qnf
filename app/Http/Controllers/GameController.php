@@ -5,25 +5,24 @@ namespace App\Http\Controllers;
 use App\Enums\GameStatus;
 use App\Enums\Position;
 use App\Events\GamePlayerJoined;
-use App\Jobs\CreatePlayerPaymentJob;
 use App\Models\Game;
 use App\Models\GamePlayer;
 use App\Models\User;
+use App\Services\CaptainsImageService;
 use App\Services\DraftService;
-use App\Services\GameService;
-use App\Services\PaymentService;
 use App\Services\GamePredictionService;
+use App\Services\GameService;
+use App\Services\LineupsImageService;
+use App\Services\PaymentService;
+use App\Services\RankingImageService;
 use App\Services\RoundWinsRankingService;
 use App\Services\ScoringService;
 use App\Services\WaitlistService;
-use App\Services\CaptainsImageService;
-use App\Services\LineupsImageService;
-use App\Services\RankingImageService;
 use App\Services\WeekTeamImageService;
 use App\Services\WeekTeamMusicService;
-use Illuminate\Http\JsonResponse;
 use App\Support\GamePayload;
 use App\Support\PublicStorage;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -92,14 +91,7 @@ class GameController extends Controller
             'prediction' => $prediction,
             'week_teams' => $weekTeams,
             'rounds' => $rounds,
-            'payment' => $payment ? [
-                'id' => $payment->id,
-                'amount' => $payment->amount,
-                'pix_payload' => $payment->pix_payload,
-                'qr_code_base64' => $payment->qr_code_base64,
-                'paid_at' => $payment->paid_at?->toIso8601String(),
-                'penalty_rounds' => $payment->penalty_rounds,
-            ] : null,
+            'payment' => $this->paymentService->playerPayload($payment),
         ];
 
         if ($isAdmin) {
@@ -177,8 +169,6 @@ class GameController extends Controller
         }
 
         $freshGame = Game::findOrFail($game->id);
-
-        rescue(fn () => CreatePlayerPaymentJob::dispatchSync($freshGame->id, $request->user()->id), report: false);
 
         if ($freshGame->status === GameStatus::FULL) {
             $this->gameService->handleGameBecameFull($freshGame, $this->draftService);

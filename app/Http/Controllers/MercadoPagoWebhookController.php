@@ -27,7 +27,7 @@ class MercadoPagoWebhookController extends Controller
         $mpPaymentId = $request->input('data.id') ?? $request->input('id');
 
         if (! $mpPaymentId) {
-            return response()->json(['status' => 'no_id'], 400);
+            return response()->json(['status' => 'no_id']);
         }
 
         $mpData = $this->mercadoPagoService->getPayment($mpPaymentId);
@@ -35,33 +35,23 @@ class MercadoPagoWebhookController extends Controller
         if (! $mpData) {
             Log::warning('MP webhook: could not fetch payment', ['mp_id' => $mpPaymentId]);
 
-            return response()->json(['status' => 'fetch_failed'], 404);
+            return response()->json(['status' => 'fetch_failed'], 503);
         }
 
         $status = $mpData['status'] ?? '';
+        $statusDetail = $mpData['status_detail'] ?? null;
 
         if ($status !== 'approved') {
             Log::info('MP webhook: payment not approved', [
                 'mp_id' => $mpPaymentId,
                 'status' => $status,
+                'status_detail' => $statusDetail,
             ]);
 
             return response()->json(['status' => 'not_approved']);
         }
 
-        // Match by external_id (MP payment ID stored in our DB)
-        $payment = Payment::where('external_id', (string) $mpPaymentId)->first();
-
-        // Fallback: match by external_reference
-        if (! $payment && isset($mpData['external_reference'])) {
-            $ref = $mpData['external_reference'];
-            // Format: QNF-G{game_id}-U{user_id}
-            if (preg_match('/^QNF-G(\d+)-U(\d+)$/', $ref, $matches)) {
-                $payment = Payment::where('game_id', (int) $matches[1])
-                    ->where('user_id', (int) $matches[2])
-                    ->first();
-            }
-        }
+        $payment = $this->findLocalPayment($mpData, $mpPaymentId);
 
         if (! $payment) {
             Log::warning('MP webhook: no matching payment found', [
@@ -69,7 +59,7 @@ class MercadoPagoWebhookController extends Controller
                 'external_reference' => $mpData['external_reference'] ?? null,
             ]);
 
-            return response()->json(['status' => 'not_found'], 404);
+            return response()->json(['status' => 'not_found']);
         }
 
         if ($payment->isPaid()) {
@@ -84,5 +74,22 @@ class MercadoPagoWebhookController extends Controller
         ]);
 
         return response()->json(['status' => 'confirmed']);
+    }
+
+    private function findLocalPayment(array $mpData, int|string $mpPaymentId): ?Payment
+    {
+        $payment = Payment::where('external_id', (string) $mpPaymentId)->first();
+
+        if ($payment || ! isset($mpData['external_reference'])) {
+            return $payment;
+        }
+
+        if (! preg_match('/^QNF-G(\d+)-U(\d+)$/', $mpData['external_reference'], $matches)) {
+            return null;
+        }
+
+        return Payment::where('game_id', (int) $matches[1])
+            ->where('user_id', (int) $matches[2])
+            ->first();
     }
 }

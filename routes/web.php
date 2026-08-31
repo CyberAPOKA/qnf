@@ -60,6 +60,7 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
 
     Route::get('/rec/clips/{clip}/download', [RecClipController::class, 'download'])->name('rec.clips.download');
 
+    Route::post('/payments/pix', [PaymentController::class, 'ensure'])->name('payments.pix.ensure');
     Route::post('/payments/{payment}/confirm', [PaymentController::class, 'confirm'])->name('payments.confirm');
 
     Route::prefix('admin')->group(function () {
