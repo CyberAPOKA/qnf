@@ -55,37 +55,39 @@ class WhatsAppCommandProcessor
 
         $senderPhone = $message->authorPhone ?? $message->authorId;
         $sender = PhoneNumber::findUser($senderPhone);
-        $isAdmin = $sender?->role === 'admin';
+        $unlimited = $this->rateLimiter->isUnlimited($senderPhone);
+        $isAdmin = $sender?->role === 'admin' || $unlimited;
         $rateLimitPhone = $this->rateLimitPhone($senderPhone, $sender?->id);
-        $bypassRateLimit = $parsed->type === WhatsAppCommandType::Lineup
-            ? $this->rateLimiter->isLineupUnlimited($senderPhone)
-            : $isAdmin;
+        $bypassRateLimit = $unlimited || $parsed->type->isAdmin();
 
         if (! $sender) {
-            if (! in_array($parsed->type, [WhatsAppCommandType::Commands, WhatsAppCommandType::Lineup], true)) {
-                if ($this->rateLimiter->tooManyAttempts($parsed->type, $rateLimitPhone, false)) {
-                    return $this->replied(WhatsAppCommandMessages::rateLimited($parsed->type));
+            if (! in_array($parsed->type, [
+                WhatsAppCommandType::Commands,
+                WhatsAppCommandType::Lineup,
+                WhatsAppCommandType::Add,
+                WhatsAppCommandType::Remove,
+            ], true)) {
+                if ($this->rateLimiter->tooManyAttempts($parsed->type, $rateLimitPhone, $unlimited)) {
+                    return $this->rateLimited();
                 }
 
-                $this->rateLimiter->hit($parsed->type, $rateLimitPhone, false);
+                $this->rateLimiter->hit($parsed->type, $rateLimitPhone, $unlimited);
             }
 
-            return $this->replied(WhatsAppCommandMessages::unknownPlayer());
+            return $this->ignored();
         }
 
         if ($parsed->type->isAdmin() && ! $isAdmin) {
-            return $this->replied(WhatsAppCommandMessages::unauthorized());
+            return $this->ignored();
         }
 
         if ($this->rateLimiter->tooManyAttempts($parsed->type, $rateLimitPhone, $bypassRateLimit)) {
-            return $this->replied(WhatsAppCommandMessages::rateLimited($parsed->type));
+            return $this->rateLimited();
         }
 
         $handled = $this->command($parsed->type)->handle($message, $parsed, $sender);
 
-        $shouldHit = $parsed->type !== WhatsAppCommandType::Lineup || $handled->audioPath !== null;
-
-        if ($shouldHit) {
+        if ($this->shouldHit($parsed->type, $handled)) {
             $this->rateLimiter->hit($parsed->type, $rateLimitPhone, $bypassRateLimit);
         }
 
@@ -101,6 +103,15 @@ class WhatsAppCommandProcessor
             WhatsAppCommandType::Add => $this->addPlayerCommand,
             WhatsAppCommandType::Remove => $this->removePlayerCommand,
             WhatsAppCommandType::Lineup => $this->lineupCommand,
+        };
+    }
+
+    private function shouldHit(WhatsAppCommandType $type, WhatsAppCommandResult $handled): bool
+    {
+        return match ($type) {
+            WhatsAppCommandType::Add, WhatsAppCommandType::Remove => false,
+            WhatsAppCommandType::Lineup => $handled->audioPath !== null,
+            default => true,
         };
     }
 
@@ -130,11 +141,11 @@ class WhatsAppCommandProcessor
     }
 
     /**
-     * @return array{status: string, reply: string, audio_path: string|null, cleanup_audio: bool}
+     * @return array{status: string, reply: string|null, audio_path: string|null, cleanup_audio: bool}
      */
-    private function replied(string $reply): array
+    private function rateLimited(): array
     {
-        return $this->fromResult(WhatsAppCommandResult::text($reply));
+        return ['status' => 'rate_limited', 'reply' => null, 'audio_path' => null, 'cleanup_audio' => false];
     }
 
     /**
@@ -144,7 +155,7 @@ class WhatsAppCommandProcessor
     {
         return [
             'status' => 'ok',
-            'reply' => $result->reply,
+            'reply' => null,
             'audio_path' => $result->audioPath,
             'cleanup_audio' => $result->cleanupAudio,
         ];

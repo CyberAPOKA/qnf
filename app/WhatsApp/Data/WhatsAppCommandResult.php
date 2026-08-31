@@ -10,6 +10,11 @@ readonly class WhatsAppCommandResult
         public bool $cleanupAudio = false,
     ) {}
 
+    public static function silent(): self
+    {
+        return new self;
+    }
+
     public static function text(string $reply): self
     {
         return new self(reply: $reply);

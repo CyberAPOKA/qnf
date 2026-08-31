@@ -6,6 +6,12 @@ use App\Enums\TeamColor;
 use App\Support\PersonName;
 use App\WhatsApp\Enums\WhatsAppCommandType;
 
+/**
+ * Text templates for WhatsApp commands.
+ *
+ * These strings are not sent back to the group: commands run silently
+ * so the chat is not flooded. Only /lineup delivers audio.
+ */
 class WhatsAppCommandMessages
 {
     public static function joined(string $name): string

@@ -49,10 +49,10 @@ class WhatsAppCommandRateLimiter
             return (int) config('services.whatsapp.lineup_cooldown_seconds', 3600);
         }
 
-        return (int) config('services.whatsapp.command_cooldown_seconds', 10);
+        return (int) config('services.whatsapp.command_cooldown_seconds', 3600);
     }
 
-    public function isLineupUnlimited(?string $phone): bool
+    public function isUnlimited(?string $phone): bool
     {
         $configured = config('services.whatsapp.lineup_unlimited_phone', '555199304836');
         $configuredEight = PhoneNumber::lastEight(is_string($configured) ? $configured : null);

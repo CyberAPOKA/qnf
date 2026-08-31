@@ -41,7 +41,7 @@ return [
         'url' => env('WHATSAPP_SERVICE_URL', 'http://127.0.0.1:3001'),
         'group_id' => env('WHATSAPP_GROUP_ID'),
         'webhook_secret' => env('WHATSAPP_WEBHOOK_SECRET'),
-        'command_cooldown_seconds' => (int) env('WHATSAPP_COMMAND_COOLDOWN_SECONDS', 10),
+        'command_cooldown_seconds' => (int) env('WHATSAPP_COMMAND_COOLDOWN_SECONDS', 3600),
         'commands_global_cooldown_seconds' => (int) env('WHATSAPP_COMMANDS_GLOBAL_COOLDOWN_SECONDS', 3600),
         'lineup_cooldown_seconds' => (int) env('WHATSAPP_LINEUP_COOLDOWN_SECONDS', 3600),
         'lineup_unlimited_phone' => env('WHATSAPP_LINEUP_UNLIMITED_PHONE', '555199304836'),

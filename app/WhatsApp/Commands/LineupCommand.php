@@ -13,7 +13,6 @@ use App\WhatsApp\Data\ParsedWhatsAppCommand;
 use App\WhatsApp\Data\WhatsAppCommandResult;
 use App\WhatsApp\Support\LineupArguments;
 use App\WhatsApp\Support\LineupNarrationBuilder;
-use App\WhatsApp\WhatsAppCommandMessages;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -33,17 +32,17 @@ class LineupCommand implements WhatsAppCommand
         $arguments = LineupArguments::parse($command->argument);
 
         if (! $arguments) {
-            return WhatsAppCommandResult::text(WhatsAppCommandMessages::lineupUsage());
+            return WhatsAppCommandResult::silent();
         }
 
         if (! config('fish-audio.enabled')) {
-            return WhatsAppCommandResult::text(WhatsAppCommandMessages::lineupUnavailable());
+            return WhatsAppCommandResult::silent();
         }
 
         try {
             $game = $this->gameService->getOrCreateThisWeekGame();
         } catch (ModelNotFoundException) {
-            return WhatsAppCommandResult::text(WhatsAppCommandMessages::gameUnavailable());
+            return WhatsAppCommandResult::silent();
         }
 
         $game->loadMissing(['teams.captain', 'draftPicks.pickedUser']);
@@ -53,13 +52,13 @@ class LineupCommand implements WhatsAppCommand
         );
 
         if (! $team) {
-            return WhatsAppCommandResult::text(WhatsAppCommandMessages::lineupTeamMissing($arguments->color));
+            return WhatsAppCommandResult::silent();
         }
 
         $script = $this->narrationBuilder->build($game, $team, $arguments->voice);
 
         if ($script === null) {
-            return WhatsAppCommandResult::text(WhatsAppCommandMessages::lineupTeamEmpty($arguments->color));
+            return WhatsAppCommandResult::silent();
         }
 
         try {
@@ -71,7 +70,7 @@ class LineupCommand implements WhatsAppCommand
                 'error' => $exception->getMessage(),
             ]);
 
-            return WhatsAppCommandResult::text(WhatsAppCommandMessages::lineupFailed());
+            return WhatsAppCommandResult::silent();
         } catch (Throwable $exception) {
             Log::error('[WhatsApp] lineup unexpected error', [
                 'voice' => $arguments->voice->value,
@@ -79,7 +78,7 @@ class LineupCommand implements WhatsAppCommand
                 'error' => $exception->getMessage(),
             ]);
 
-            return WhatsAppCommandResult::text(WhatsAppCommandMessages::lineupFailed());
+            return WhatsAppCommandResult::silent();
         }
 
         return WhatsAppCommandResult::audio($this->storeTemp($audio));

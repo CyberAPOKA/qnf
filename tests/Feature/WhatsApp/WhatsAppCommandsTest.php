@@ -33,7 +33,7 @@ class WhatsAppCommandsTest extends TestCase
         config([
             'services.whatsapp.webhook_secret' => self::SECRET,
             'services.whatsapp.group_id' => self::GROUP_ID,
-            'services.whatsapp.command_cooldown_seconds' => 10,
+            'services.whatsapp.command_cooldown_seconds' => 3600,
             'services.whatsapp.commands_global_cooldown_seconds' => 3600,
             'services.whatsapp.lineup_cooldown_seconds' => 3600,
             'services.whatsapp.lineup_unlimited_phone' => '555199304836',
@@ -48,7 +48,7 @@ class WhatsAppCommandsTest extends TestCase
         $this->postCommand('/play', $player)
             ->assertOk()
             ->assertJsonPath('status', 'ok')
-            ->assertJsonPath('reply', 'Joao, você entrou na partida.');
+            ->assertJsonPath('reply', null);
 
         $this->assertTrue(
             GamePlayer::where('game_id', $game->id)->where('user_id', $player->id)->whereNull('waitlist_at')->exists()
@@ -76,7 +76,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/play', $player)
             ->assertOk()
-            ->assertJsonPath('reply', 'Maria, você está na fila de espera (1º).');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
 
         $record = GamePlayer::where('game_id', $game->id)->where('user_id', $player->id)->first();
 
@@ -97,7 +98,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/play', $player)
             ->assertOk()
-            ->assertJsonPath('reply', 'Pedro, você já está inscrito nesta partida.');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
     }
 
     public function test_desistir_marks_the_player_as_dropped_out(): void
@@ -113,7 +115,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/desistir', $player)
             ->assertOk()
-            ->assertJsonPath('reply', 'Ana, você desistiu da partida.');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
 
         $this->assertTrue(
             GamePlayer::where('game_id', $game->id)->where('user_id', $player->id)->first()->dropped_out
@@ -157,7 +160,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/quit', $player)
             ->assertOk()
-            ->assertJsonPath('reply', 'Carla, você saiu da fila de espera.');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
 
         $this->assertTrue(
             GamePlayer::where('game_id', $game->id)->where('user_id', $player->id)->first()->dropped_out
@@ -190,38 +194,34 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/desistir', $leaving)
             ->assertOk()
-            ->assertJsonPath('reply', 'Joao, você desistiu da partida. Maria subiu da fila.');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
 
         $this->assertTrue(GamePlayer::where('game_id', $game->id)->where('user_id', $leaving->id)->first()->dropped_out);
         $this->assertNull(GamePlayer::where('game_id', $game->id)->where('user_id', $waiting->id)->first()->waitlist_at);
         $this->assertNotNull(GamePlayer::where('game_id', $game->id)->where('user_id', $waiting->id)->first()->joined_at);
     }
 
-    public function test_commands_lists_player_commands(): void
+    public function test_commands_is_silent(): void
     {
         $player = $this->player();
         $this->openGame();
 
-        $reply = $this->postCommand('/commands', $player)
+        $this->postCommand('/commands', $player)
             ->assertOk()
-            ->json('reply');
-
-        $this->assertStringContainsString('/jogar ou /play', $reply);
-        $this->assertStringContainsString('/desistir ou /quit', $reply);
-        $this->assertStringContainsString('/comandos ou /commands', $reply);
-        $this->assertStringContainsString('/lineup {cor} {voz}', $reply);
-        $this->assertStringNotContainsString('/add', $reply);
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
     }
 
-    public function test_comandos_is_an_alias_and_lists_admin_commands_for_admins(): void
+    public function test_comandos_is_an_alias_and_is_silent_for_admins(): void
     {
         $admin = $this->admin(['name' => 'Admin']);
         $this->openGame();
 
-        $reply = $this->postCommand('/comandos', $admin)->assertOk()->json('reply');
-
-        $this->assertStringContainsString('/add {número}', $reply);
-        $this->assertStringContainsString('/remove {número}', $reply);
+        $this->postCommand('/comandos', $admin)
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
     }
 
     public function test_play_and_jogar_share_the_same_cooldown(): void
@@ -233,7 +233,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/jogar', $player, ['message_id' => 'second'])
             ->assertOk()
-            ->assertJsonPath('reply', 'Aguarde um pouco antes de enviar este comando de novo.');
+            ->assertJsonPath('status', 'rate_limited')
+            ->assertJsonPath('reply', null);
     }
 
     public function test_quit_and_desistir_share_the_same_cooldown(): void
@@ -251,35 +252,64 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/quit', $player, ['message_id' => 'second-quit'])
             ->assertOk()
-            ->assertJsonPath('reply', 'Aguarde um pouco antes de enviar este comando de novo.');
+            ->assertJsonPath('status', 'rate_limited')
+            ->assertJsonPath('reply', null);
     }
 
-    public function test_commands_has_a_global_cooldown_for_regular_players(): void
+    public function test_play_cooldown_is_per_player(): void
     {
         $first = $this->player();
         $second = $this->player();
+        $game = $this->openGame();
+
+        $this->postCommand('/play', $first)->assertOk()->assertJsonPath('status', 'ok');
+        $this->postCommand('/play', $second)->assertOk()->assertJsonPath('status', 'ok');
+
+        $this->assertTrue(
+            GamePlayer::where('game_id', $game->id)->where('user_id', $first->id)->exists()
+        );
+        $this->assertTrue(
+            GamePlayer::where('game_id', $game->id)->where('user_id', $second->id)->exists()
+        );
+    }
+
+    public function test_play_cooldown_expires_after_one_hour(): void
+    {
+        $player = $this->player();
+        $this->openGame();
+
+        $this->postCommand('/play', $player)->assertOk()->assertJsonPath('status', 'ok');
+
+        $this->postCommand('/jogar', $player, ['message_id' => 'too-soon'])
+            ->assertOk()
+            ->assertJsonPath('status', 'rate_limited');
+
+        $this->travel(1)->hours();
+
+        $this->postCommand('/jogar', $player, ['message_id' => 'after-hour'])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
+    }
+
+    public function test_commands_has_a_global_cooldown_for_the_whole_group(): void
+    {
+        $first = $this->player();
+        $second = $this->player();
+        $admin = $this->admin();
         $this->openGame();
 
         $this->postCommand('/commands', $first)->assertOk()->assertJsonPath('status', 'ok');
 
         $this->postCommand('/comandos', $second)
             ->assertOk()
-            ->assertJsonPath('reply', 'Os comandos já foram listados recentemente. Tente de novo mais tarde.');
-    }
+            ->assertJsonPath('status', 'rate_limited')
+            ->assertJsonPath('reply', null);
 
-    public function test_admin_bypasses_the_global_commands_cooldown(): void
-    {
-        $player = $this->player();
-        $admin = $this->admin();
-        $this->openGame();
-
-        $this->postCommand('/commands', $player)->assertOk();
-
-        $this->postCommand('/comandos', $admin)
+        $this->postCommand('/comandos', $admin, ['message_id' => 'admin-commands'])
             ->assertOk()
-            ->assertJsonPath('status', 'ok');
-
-        $this->assertStringContainsString('/add', $this->postCommand('/comandos', $admin, ['message_id' => 'admin-2'])->json('reply'));
+            ->assertJsonPath('status', 'rate_limited')
+            ->assertJsonPath('reply', null);
     }
 
     public function test_commands_global_cooldown_expires_after_one_hour(): void
@@ -305,7 +335,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/add +55 51 9911-1111', $admin)
             ->assertOk()
-            ->assertJsonPath('reply', 'Chefe, Rafael foi adicionado à partida.');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
 
         $this->assertTrue(
             GamePlayer::where('game_id', $game->id)->where('user_id', $target->id)->whereNull('waitlist_at')->exists()
@@ -326,7 +357,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/remove 5199222222', $admin)
             ->assertOk()
-            ->assertJsonPath('reply', 'Chefe, Rafael foi removido da partida.');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
 
         $this->assertTrue(
             GamePlayer::where('game_id', $game->id)->where('user_id', $target->id)->first()->dropped_out
@@ -344,7 +376,8 @@ class WhatsAppCommandsTest extends TestCase
             'mentioned_ids' => ['xavier.y@example.org'],
         ])
             ->assertOk()
-            ->assertJsonPath('reply', 'Chefe, Lucas foi adicionado à partida.');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
 
         $this->assertTrue(
             GamePlayer::where('game_id', $game->id)->where('user_id', $target->id)->exists()
@@ -368,7 +401,8 @@ class WhatsAppCommandsTest extends TestCase
             'mentioned_ids' => ['xavier.y@example.org'],
         ])
             ->assertOk()
-            ->assertJsonPath('reply', 'Chefe, Lucas foi removido da partida.');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
     }
 
     public function test_regular_player_cannot_run_admin_commands(): void
@@ -379,7 +413,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/add 555199555555', $player)
             ->assertOk()
-            ->assertJsonPath('reply', 'Você não tem permissão para este comando.');
+            ->assertJsonPath('status', 'ignored')
+            ->assertJsonPath('reply', null);
 
         $this->assertFalse(
             GamePlayer::where('user_id', $target->id)->exists()
@@ -395,7 +430,8 @@ class WhatsAppCommandsTest extends TestCase
             'author_id' => 'xavier.y@example.org',
         ])
             ->assertOk()
-            ->assertJsonPath('reply', 'Este número não está cadastrado no QNF.');
+            ->assertJsonPath('status', 'ignored')
+            ->assertJsonPath('reply', null);
 
         $this->assertSame(0, GamePlayer::count());
     }
@@ -461,11 +497,16 @@ class WhatsAppCommandsTest extends TestCase
     public function test_thirteenth_line_player_is_rejected_while_the_list_is_open(): void
     {
         $player = $this->player(['name' => 'Treze']);
-        $this->fullGameWithLinePlayers(12, GameStatus::OPEN);
+        $game = $this->fullGameWithLinePlayers(12, GameStatus::OPEN);
 
         $this->postCommand('/play', $player)
             ->assertOk()
-            ->assertJsonPath('reply', 'As vagas para jogadores de linha estão esgotadas.');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
+
+        $this->assertFalse(
+            GamePlayer::where('game_id', $game->id)->where('user_id', $player->id)->exists()
+        );
     }
 
     public function test_two_waitlist_joins_keep_order(): void
@@ -474,8 +515,8 @@ class WhatsAppCommandsTest extends TestCase
         $second = $this->player(['name' => 'Segundo']);
         $game = $this->fullGameWithLinePlayers(12);
 
-        $this->postCommand('/play', $first)->assertOk()->assertJsonPath('reply', 'Primeiro, você está na fila de espera (1º).');
-        $this->postCommand('/play', $second)->assertOk()->assertJsonPath('reply', 'Segundo, você está na fila de espera (2º).');
+        $this->postCommand('/play', $first)->assertOk()->assertJsonPath('status', 'ok')->assertJsonPath('reply', null);
+        $this->postCommand('/play', $second)->assertOk()->assertJsonPath('status', 'ok')->assertJsonPath('reply', null);
 
         $ordered = GamePlayer::where('game_id', $game->id)
             ->whereNotNull('waitlist_at')
@@ -498,14 +539,17 @@ class WhatsAppCommandsTest extends TestCase
         $this->assertSame(0, GamePlayer::count());
     }
 
-    public function test_add_without_a_number_returns_an_invalid_number_message(): void
+    public function test_add_without_a_number_is_silent_and_does_not_change_the_game(): void
     {
         $admin = $this->admin();
         $this->openGame();
 
         $this->postCommand('/add', $admin)
             ->assertOk()
-            ->assertJsonPath('reply', 'Informe um número válido. Ex.: /add 51999999999');
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
+
+        $this->assertSame(0, GamePlayer::count());
     }
 
     public function test_lineup_returns_generated_audio_path_for_the_current_round(): void
@@ -554,18 +598,19 @@ class WhatsAppCommandsTest extends TestCase
         @unlink($path);
     }
 
-    public function test_lineup_without_arguments_returns_usage(): void
+    public function test_lineup_without_arguments_is_silent(): void
     {
         $player = $this->player();
         $this->draftedBlueTeam();
 
         $this->postCommand('/lineup', $player)
             ->assertOk()
-            ->assertJsonPath('reply', 'Use /lineup {cor} {voz}. Cores: blue, yellow, green. Vozes: lula, bolsonaro, neymar.')
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null)
             ->assertJsonPath('audio_path', null);
     }
 
-    public function test_lineup_missing_team_returns_an_error(): void
+    public function test_lineup_missing_team_is_silent(): void
     {
         $this->enableFishAudio();
         $player = $this->player();
@@ -573,20 +618,22 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/lineup yellow bolsonaro', $player)
             ->assertOk()
-            ->assertJsonPath('reply', 'O time amarelo ainda não foi definido nesta rodada.')
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null)
             ->assertJsonPath('audio_path', null);
 
         Http::assertNothingSent();
     }
 
-    public function test_lineup_is_unavailable_when_fish_audio_is_disabled(): void
+    public function test_lineup_is_silent_when_fish_audio_is_disabled(): void
     {
         $player = $this->player();
         $this->draftedBlueTeam();
 
         $this->postCommand('/lineup blue lula', $player)
             ->assertOk()
-            ->assertJsonPath('reply', 'A narração de áudio está indisponível no momento.')
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null)
             ->assertJsonPath('audio_path', null);
     }
 
@@ -603,7 +650,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/lineup green neymar', $second, ['message_id' => 'lineup-second'])
             ->assertOk()
-            ->assertJsonPath('reply', 'A escalação já foi narrada recentemente. Tente de novo mais tarde.')
+            ->assertJsonPath('status', 'rate_limited')
+            ->assertJsonPath('reply', null)
             ->assertJsonPath('audio_path', null);
     }
 
@@ -620,7 +668,8 @@ class WhatsAppCommandsTest extends TestCase
 
         $this->postCommand('/lineup blue bolsonaro', $admin, ['message_id' => 'lineup-admin'])
             ->assertOk()
-            ->assertJsonPath('reply', 'A escalação já foi narrada recentemente. Tente de novo mais tarde.');
+            ->assertJsonPath('status', 'rate_limited')
+            ->assertJsonPath('reply', null);
     }
 
     public function test_unlimited_phone_bypasses_the_lineup_cooldown(): void
@@ -645,6 +694,68 @@ class WhatsAppCommandsTest extends TestCase
         $this->assertIsString($secondPath);
         $this->assertFileExists($secondPath);
         @unlink($secondPath);
+    }
+
+    public function test_unlimited_phone_bypasses_play_and_commands_cooldown(): void
+    {
+        $player = $this->player();
+        $unlimited = $this->player(['phone' => '555199304836']);
+        $game = $this->openGame();
+
+        $this->postCommand('/play', $player)->assertOk()->assertJsonPath('status', 'ok');
+        $this->postCommand('/commands', $player, ['message_id' => 'commands-first'])->assertOk()->assertJsonPath('status', 'ok');
+
+        $this->postCommand('/play', $unlimited, ['message_id' => 'unlimited-play'])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
+
+        $this->postCommand('/jogar', $unlimited, ['message_id' => 'unlimited-play-again'])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok');
+
+        $this->postCommand('/commands', $unlimited, ['message_id' => 'unlimited-commands'])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok');
+
+        $this->assertTrue(
+            GamePlayer::where('game_id', $game->id)->where('user_id', $unlimited->id)->exists()
+        );
+    }
+
+    public function test_unlimited_phone_can_run_admin_commands(): void
+    {
+        $unlimited = $this->player(['phone' => '555199304836']);
+        $target = $this->player(['phone' => '555199666666']);
+        $game = $this->openGame();
+
+        $this->postCommand('/add 555199666666', $unlimited, [
+            'author_phone' => '+55 51 9930-4836',
+        ])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
+
+        $this->assertTrue(
+            GamePlayer::where('game_id', $game->id)->where('user_id', $target->id)->exists()
+        );
+    }
+
+    public function test_admin_add_has_no_timeout(): void
+    {
+        $admin = $this->admin();
+        $first = $this->player(['phone' => '555199111111']);
+        $second = $this->player(['phone' => '555199222222']);
+        $game = $this->openGame();
+
+        $this->postCommand('/add 555199111111', $admin)->assertOk()->assertJsonPath('status', 'ok');
+        $this->postCommand('/add 555199222222', $admin, ['message_id' => 'admin-add-2'])
+            ->assertOk()
+            ->assertJsonPath('status', 'ok')
+            ->assertJsonPath('reply', null);
+
+        $this->assertTrue(GamePlayer::where('game_id', $game->id)->where('user_id', $first->id)->exists());
+        $this->assertTrue(GamePlayer::where('game_id', $game->id)->where('user_id', $second->id)->exists());
     }
 
     public function test_lineup_cooldown_expires_after_one_hour(): void
