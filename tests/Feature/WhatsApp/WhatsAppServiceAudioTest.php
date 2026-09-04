@@ -31,13 +31,18 @@ class WhatsAppServiceAudioTest extends TestCase
 
         $this->assertTrue($sent);
 
-        Http::assertSent(function ($request) use ($path) {
+        Http::assertSent(function ($request) {
+            $staged = $request['audioPath'] ?? '';
+
             return $request->url() === 'http://127.0.0.1:3001/send-audio'
                 && $request['to'] === '120363407629757550@g.us'
-                && $request['audioPath'] === $path
+                && is_string($staged)
+                && str_starts_with($staged, storage_path('app/tmp'))
                 && $request['audioFilename'] === 'qnf-voice-test.mp3'
                 && $request['audioBase64'] === base64_encode('ID3fake-mp3-bytes')
                 && $request['caption'] === 'Time Azul';
         });
+
+        $this->assertSame([], glob(storage_path('app/tmp/send-*.mp3')) ?: []);
     }
 }

@@ -4,8 +4,7 @@ namespace App\Services;
 
 use App\Enums\NarratorVoice;
 use App\Services\FishAudio\FishAudioService;
-use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Str;
+use App\WhatsApp\Support\WhatsAppAudioTempFile;
 use RuntimeException;
 
 class WhatsAppVoiceMessageService
@@ -18,22 +17,16 @@ class WhatsAppVoiceMessageService
     public function sendToGroup(string $text, NarratorVoice $voice): void
     {
         $audio = $this->fishAudio->generate($text, $voice->value);
-
-        $disk = (string) config('fish-audio.disk', 'local');
-        $path = 'whatsapp/voice-'.Str::uuid().'.mp3';
-
-        Storage::disk($disk)->put($path, $audio->contents);
+        $path = WhatsAppAudioTempFile::put($audio->contents);
 
         try {
-            $sent = $this->whatsApp->sendAudioToGroup(
-                Storage::disk($disk)->path($path),
-            );
+            $sent = $this->whatsApp->sendAudioToGroup($path);
 
             if (! $sent) {
                 throw new RuntimeException('WhatsApp voice message send failed.');
             }
         } finally {
-            Storage::disk($disk)->delete($path);
+            @unlink($path);
         }
     }
 }

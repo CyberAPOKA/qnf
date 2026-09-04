@@ -6,13 +6,13 @@ use App\Exceptions\FishAudio\FishAudioException;
 use App\Models\Team;
 use App\Models\User;
 use App\Services\FishAudio\FishAudioService;
-use App\Services\FishAudio\GeneratedAudio;
 use App\Services\GameService;
 use App\WhatsApp\Data\IncomingWhatsAppMessage;
 use App\WhatsApp\Data\ParsedWhatsAppCommand;
 use App\WhatsApp\Data\WhatsAppCommandResult;
 use App\WhatsApp\Support\LineupArguments;
 use App\WhatsApp\Support\LineupNarrationBuilder;
+use App\WhatsApp\Support\WhatsAppAudioTempFile;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -81,21 +81,6 @@ class LineupCommand implements WhatsAppCommand
             return WhatsAppCommandResult::silent();
         }
 
-        return WhatsAppCommandResult::audio($this->storeTemp($audio));
-    }
-
-    private function storeTemp(GeneratedAudio $audio): string
-    {
-        $directory = storage_path('app/tmp');
-
-        if (! is_dir($directory)) {
-            mkdir($directory, 0755, true);
-        }
-
-        $path = $directory.DIRECTORY_SEPARATOR.'lineup-'.uniqid('', true).'.mp3';
-
-        file_put_contents($path, $audio->contents);
-
-        return $path;
+        return WhatsAppCommandResult::audio(WhatsAppAudioTempFile::put($audio->contents, 'lineup'));
     }
 }

@@ -69,6 +69,7 @@ class SendWhatsAppVoiceMessageTest extends TestCase
             && $request['reference_id'] === 'voice-bolsonaro-id');
 
         $this->assertSame([], Storage::disk('local')->allFiles('whatsapp'));
+        $this->assertSame([], glob(storage_path('app/tmp/voice-*.mp3')) ?: []);
     }
 
     public function test_player_cannot_send_a_voice_message(): void

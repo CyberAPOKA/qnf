@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\WhatsApp\Support\WhatsAppAudioTempFile;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 
@@ -118,19 +119,22 @@ class WhatsAppService
 
     private function sendAudio(string $to, string $audioPath, string $caption): bool
     {
+        $stagedPath = null;
+
         try {
-            // The Node process often runs as a different user than PHP and cannot
-            // read storage/app/private, so send the bytes instead of a file path.
+            // Node often runs as another user and cannot read storage/app/private.
+            // Stage a 0644 copy under storage/app/tmp (same place /lineup uses) and
+            // also send the bytes so a restarted Node does not need the file at all.
+            $readablePath = WhatsAppAudioTempFile::copyFrom($audioPath);
+            $stagedPath = $readablePath;
+
             $payload = [
                 'to' => $to,
-                'audioPath' => $audioPath,
+                'audioPath' => $readablePath,
                 'caption' => $caption,
+                'audioBase64' => base64_encode((string) file_get_contents($readablePath)),
+                'audioFilename' => basename($audioPath),
             ];
-
-            if (is_file($audioPath) && is_readable($audioPath)) {
-                $payload['audioBase64'] = base64_encode((string) file_get_contents($audioPath));
-                $payload['audioFilename'] = basename($audioPath);
-            }
 
             $response = Http::timeout(90)->post("{$this->serviceUrl}/send-audio", $payload);
 
@@ -143,7 +147,9 @@ class WhatsAppService
                 'status' => $response->status(),
                 'body' => $response->body(),
                 'audioPath' => $audioPath,
+                'stagedPath' => $readablePath,
                 'audioExists' => file_exists($audioPath),
+                'stagedExists' => file_exists($readablePath),
             ]);
 
             return false;
@@ -151,6 +157,10 @@ class WhatsAppService
             Log::error('WhatsApp audio service error', ['to' => $to, 'error' => $e->getMessage()]);
 
             return false;
+        } finally {
+            if ($stagedPath) {
+                @unlink($stagedPath);
+            }
         }
     }
 
