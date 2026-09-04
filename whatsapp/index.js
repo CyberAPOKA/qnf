@@ -416,8 +416,22 @@ app.get('/groups', async (_req, res) => {
     }
 });
 
+let httpServer = null;
+let httpRetryTimer = null;
+
 function startHttpServer() {
+    if (httpServer) {
+        return;
+    }
+
     const server = app.listen(PORT, '127.0.0.1', () => {
+        httpServer = server;
+
+        if (httpRetryTimer) {
+            clearTimeout(httpRetryTimer);
+            httpRetryTimer = null;
+        }
+
         console.log(`WhatsApp service listening on http://127.0.0.1:${PORT}`);
         console.log(
             `Commands: group=${GROUP_ID || '(not set)'} webhook=${LARAVEL_WEBHOOK_URL || '(not set)'} secret=${WEBHOOK_SECRET ? 'yes' : 'no'}`,
@@ -427,7 +441,13 @@ function startHttpServer() {
     server.on('error', (err) => {
         if (err.code === 'EADDRINUSE') {
             console.error(`Port ${PORT} in use, retrying in 3s...`);
-            setTimeout(startHttpServer, 3000);
+
+            if (! httpRetryTimer) {
+                httpRetryTimer = setTimeout(() => {
+                    httpRetryTimer = null;
+                    startHttpServer();
+                }, 3000);
+            }
 
             return;
         }
