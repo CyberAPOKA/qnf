@@ -111,7 +111,7 @@ class LineupNarrationBuilder
         return match ($voice) {
             NarratorVoice::LULA => 'Se esse time ganhar eu vou liberar picanha para toda a QNF.',
             NarratorVoice::BOLSONARO => 'Brasil acima de tudo, Deus acima de todos, ihuuuuu hahahaha ta ok!',
-            NarratorVoice::NEYMAR => 'Fiquei muito triste que meu menino Salenave não vai jogar hoje, que decepção!',
+            NarratorVoice::NEYMAR => '',
         };
     }
 

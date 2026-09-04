@@ -416,9 +416,25 @@ app.get('/groups', async (_req, res) => {
     }
 });
 
-app.listen(PORT, '127.0.0.1', () => {
-    console.log(`WhatsApp service listening on http://127.0.0.1:${PORT}`);
-    console.log(
-        `Commands: group=${GROUP_ID || '(not set)'} webhook=${LARAVEL_WEBHOOK_URL || '(not set)'} secret=${WEBHOOK_SECRET ? 'yes' : 'no'}`,
-    );
-});
+function startHttpServer() {
+    const server = app.listen(PORT, '127.0.0.1', () => {
+        console.log(`WhatsApp service listening on http://127.0.0.1:${PORT}`);
+        console.log(
+            `Commands: group=${GROUP_ID || '(not set)'} webhook=${LARAVEL_WEBHOOK_URL || '(not set)'} secret=${WEBHOOK_SECRET ? 'yes' : 'no'}`,
+        );
+    });
+
+    server.on('error', (err) => {
+        if (err.code === 'EADDRINUSE') {
+            console.error(`Port ${PORT} in use, retrying in 3s...`);
+            setTimeout(startHttpServer, 3000);
+
+            return;
+        }
+
+        console.error('HTTP server error:', err);
+        process.exit(1);
+    });
+}
+
+startHttpServer();

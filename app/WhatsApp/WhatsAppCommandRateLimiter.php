@@ -32,10 +32,6 @@ class WhatsAppCommandRateLimiter
             return 'whatsapp:commands:global';
         }
 
-        if ($type === WhatsAppCommandType::Lineup) {
-            return 'whatsapp:lineup:global';
-        }
-
         return 'whatsapp:'.$type->rateLimitBucket().':'.$phone;
     }
 

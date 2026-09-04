@@ -672,7 +672,7 @@ class WhatsAppCommandsTest extends TestCase
             ->assertJsonPath('audio_path', null);
     }
 
-    public function test_lineup_has_a_global_one_hour_cooldown(): void
+    public function test_lineup_cooldown_is_per_player(): void
     {
         $this->enableFishAudio();
         $this->fakeFishAudio('ID3lineup-audio');
@@ -680,10 +680,17 @@ class WhatsAppCommandsTest extends TestCase
         $second = $this->player();
         $this->draftedBlueTeam();
 
-        $path = $this->postCommand('/lineup blue lula', $first)->assertOk()->json('audio_path');
-        @unlink($path);
+        $firstPath = $this->postCommand('/lineup blue lula', $first)->assertOk()->json('audio_path');
+        @unlink($firstPath);
 
-        $this->postCommand('/lineup green neymar', $second, ['message_id' => 'lineup-second'])
+        $secondPath = $this->postCommand('/lineup blue neymar', $second, ['message_id' => 'lineup-second'])
+            ->assertOk()
+            ->json('audio_path');
+
+        $this->assertIsString($secondPath);
+        @unlink($secondPath);
+
+        $this->postCommand('/lineup blue bolsonaro', $first, ['message_id' => 'lineup-first-again'])
             ->assertOk()
             ->assertJsonPath('status', 'rate_limited')
             ->assertJsonPath('reply', null)
@@ -694,11 +701,10 @@ class WhatsAppCommandsTest extends TestCase
     {
         $this->enableFishAudio();
         $this->fakeFishAudio('ID3lineup-audio');
-        $player = $this->player();
         $admin = $this->admin();
         $this->draftedBlueTeam();
 
-        $path = $this->postCommand('/lineup blue lula', $player)->assertOk()->json('audio_path');
+        $path = $this->postCommand('/lineup blue lula', $admin)->assertOk()->json('audio_path');
         @unlink($path);
 
         $this->postCommand('/lineup blue bolsonaro', $admin, ['message_id' => 'lineup-admin'])
@@ -711,11 +717,10 @@ class WhatsAppCommandsTest extends TestCase
     {
         $this->enableFishAudio();
         $this->fakeFishAudio('ID3lineup-audio');
-        $player = $this->player();
         $unlimited = $this->player(['phone' => '555199304836']);
         $this->draftedBlueTeam();
 
-        $firstPath = $this->postCommand('/lineup blue lula', $player)->assertOk()->json('audio_path');
+        $firstPath = $this->postCommand('/lineup blue lula', $unlimited)->assertOk()->json('audio_path');
         @unlink($firstPath);
 
         $secondPath = $this->postCommand('/lineup blue neymar', $unlimited, [
@@ -816,16 +821,19 @@ class WhatsAppCommandsTest extends TestCase
     {
         $this->enableFishAudio();
         $this->fakeFishAudio('ID3lineup-audio');
-        $first = $this->player();
-        $second = $this->player();
+        $player = $this->player();
         $this->draftedBlueTeam();
 
-        $path = $this->postCommand('/lineup blue lula', $first)->assertOk()->json('audio_path');
+        $path = $this->postCommand('/lineup blue lula', $player)->assertOk()->json('audio_path');
         @unlink($path);
+
+        $this->postCommand('/lineup blue bolsonaro', $player, ['message_id' => 'lineup-too-soon'])
+            ->assertOk()
+            ->assertJsonPath('status', 'rate_limited');
 
         $this->travel(1)->hours();
 
-        $secondPath = $this->postCommand('/lineup blue bolsonaro', $second, ['message_id' => 'lineup-later'])
+        $secondPath = $this->postCommand('/lineup blue bolsonaro', $player, ['message_id' => 'lineup-later'])
             ->assertOk()
             ->json('audio_path');
 
