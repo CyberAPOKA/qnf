@@ -248,9 +248,35 @@ async function sendWithRetry(fn, label) {
     throw lastError;
 }
 
+function materializeAudioInput(audioPath, audioBase64, audioFilename) {
+    if (typeof audioBase64 === 'string' && audioBase64.length > 0) {
+        const ext = path.extname(String(audioFilename || '')) || '.mp3';
+        const inputPath = path.join(os.tmpdir(), `qnf-in-${randomUUID()}${ext}`);
+        fs.writeFileSync(inputPath, Buffer.from(audioBase64, 'base64'));
+
+        return { inputPath, cleanup: true };
+    }
+
+    if (!audioPath) {
+        throw new Error('Missing "audioPath" or "audioBase64"');
+    }
+
+    try {
+        fs.accessSync(audioPath, fs.constants.R_OK);
+    } catch (err) {
+        const code = err?.code ? ` (${err.code})` : '';
+        throw new Error(`Audio file not found: ${audioPath}${code}`);
+    }
+
+    return { inputPath: audioPath, cleanup: false };
+}
+
 async function convertToVoiceNote(inputPath) {
-    if (!fs.existsSync(inputPath)) {
-        throw new Error(`Audio file not found: ${inputPath}`);
+    try {
+        fs.accessSync(inputPath, fs.constants.R_OK);
+    } catch (err) {
+        const code = err?.code ? ` (${err.code})` : '';
+        throw new Error(`Audio file not found: ${inputPath}${code}`);
     }
 
     const outputPath = path.join(os.tmpdir(), `qnf-voice-${randomUUID()}.ogg`);
@@ -280,21 +306,29 @@ function loadVoiceMedia(oggPath) {
     return new MessageMedia('audio/ogg; codecs=opus', data, path.basename(oggPath));
 }
 
-async function sendVoiceNote(to, audioPath) {
-    const oggPath = await convertToVoiceNote(audioPath);
+async function sendVoiceNote(to, audioPath, audioBase64, audioFilename) {
+    const { inputPath, cleanup } = materializeAudioInput(audioPath, audioBase64, audioFilename);
 
     try {
-        const media = loadVoiceMedia(oggPath);
+        const oggPath = await convertToVoiceNote(inputPath);
 
-        return await client.sendMessage(to, media, { sendAudioAsVoice: true });
+        try {
+            const media = loadVoiceMedia(oggPath);
+
+            return await client.sendMessage(to, media, { sendAudioAsVoice: true });
+        } finally {
+            fs.unlink(oggPath, () => {});
+        }
     } finally {
-        fs.unlink(oggPath, () => {});
+        if (cleanup) {
+            fs.unlink(inputPath, () => {});
+        }
     }
 }
 
 // Express API
 const app = express();
-app.use(express.json({ limit: '2mb' }));
+app.use(express.json({ limit: '8mb' }));
 
 app.get('/status', (_req, res) => {
     res.json({ ready: isReady, hasQr: Boolean(lastQr) });
@@ -383,14 +417,17 @@ app.post('/send-audio', async (req, res) => {
         return res.status(503).json({ error: 'WhatsApp client not ready' });
     }
 
-    const { to, audioPath } = req.body;
-    if (!to || !audioPath) {
-        return res.status(400).json({ error: 'Missing "to" or "audioPath"' });
+    const { to, audioPath, audioBase64, audioFilename } = req.body;
+    if (!to || (!audioPath && !audioBase64)) {
+        return res.status(400).json({ error: 'Missing "to" or audio payload' });
     }
 
     try {
         await enqueueSend(() =>
-            sendWithRetry(() => sendVoiceNote(to, audioPath), 'Send voice note'),
+            sendWithRetry(
+                () => sendVoiceNote(to, audioPath, audioBase64, audioFilename),
+                'Send voice note',
+            ),
         );
         console.log(`Voice note sent to ${to}`);
         res.json({ success: true });

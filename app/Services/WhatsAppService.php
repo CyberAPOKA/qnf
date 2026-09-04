@@ -119,11 +119,20 @@ class WhatsAppService
     private function sendAudio(string $to, string $audioPath, string $caption): bool
     {
         try {
-            $response = Http::timeout(90)->post("{$this->serviceUrl}/send-audio", [
+            // The Node process often runs as a different user than PHP and cannot
+            // read storage/app/private, so send the bytes instead of a file path.
+            $payload = [
                 'to' => $to,
                 'audioPath' => $audioPath,
                 'caption' => $caption,
-            ]);
+            ];
+
+            if (is_file($audioPath) && is_readable($audioPath)) {
+                $payload['audioBase64'] = base64_encode((string) file_get_contents($audioPath));
+                $payload['audioFilename'] = basename($audioPath);
+            }
+
+            $response = Http::timeout(90)->post("{$this->serviceUrl}/send-audio", $payload);
 
             if ($response->successful()) {
                 return true;
