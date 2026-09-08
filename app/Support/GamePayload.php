@@ -78,6 +78,7 @@ class GamePayload
         return [
             'id' => $game->id,
             'date' => optional($game->date)->toDateString(),
+            'starts_at' => optional($game->starts_at)->toIso8601String(),
             'round' => $game->round,
             'status' => $game->status->value,
             'status_label' => $game->status->label(),

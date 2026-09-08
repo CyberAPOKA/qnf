@@ -19,7 +19,7 @@ class OpenWeekGameCommand extends Command
      *
      * @var string
      */
-    protected $description = 'Abre ou cria a partida semanal de futsal';
+    protected $description = 'Abre o mercado da partida semanal de futsal';
 
     /**
      * Execute the console command.

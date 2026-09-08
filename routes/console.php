@@ -8,6 +8,10 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
+Schedule::command('futsal:create-week-game')
+    ->everyMinute()
+    ->timezone('America/Sao_Paulo');
+
 Schedule::command('futsal:open-week-game')
     ->everyMinute()
     ->timezone('America/Sao_Paulo');

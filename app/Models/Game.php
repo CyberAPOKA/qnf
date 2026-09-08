@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Game extends Model
 {
@@ -16,6 +17,7 @@ class Game extends Model
 
     protected $fillable = [
         'date',
+        'starts_at',
         'opens_at',
         'closes_at',
         'round',
@@ -29,11 +31,17 @@ class Game extends Model
     {
         return [
             'date' => 'date',
+            'starts_at' => 'datetime',
             'opens_at' => 'datetime',
             'closes_at' => 'datetime',
             'status' => GameStatus::class,
             'week_team_images' => 'array',
         ];
+    }
+
+    public function schedule(): HasOne
+    {
+        return $this->hasOne(GameSchedule::class);
     }
 
     public function creator(): BelongsTo

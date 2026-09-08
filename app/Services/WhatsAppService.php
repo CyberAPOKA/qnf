@@ -90,8 +90,8 @@ class WhatsAppService
     private function sendImage(string $to, string $imagePath, string $caption): bool
     {
         try {
-            // Image uploads via Puppeteer can take longer, especially after retries.
-            $response = Http::timeout(90)->post("{$this->serviceUrl}/send-image", [
+            // Image uploads via Puppeteer can take longer, especially after a client restart.
+            $response = Http::timeout(120)->post("{$this->serviceUrl}/send-image", [
                 'to' => $to,
                 'imagePath' => $imagePath,
                 'caption' => $caption,
@@ -136,7 +136,7 @@ class WhatsAppService
                 'audioFilename' => basename($audioPath),
             ];
 
-            $response = Http::timeout(90)->post("{$this->serviceUrl}/send-audio", $payload);
+            $response = Http::timeout(120)->post("{$this->serviceUrl}/send-audio", $payload);
 
             if ($response->successful()) {
                 return true;
@@ -167,7 +167,8 @@ class WhatsAppService
     private function send(string $to, string $message): bool
     {
         try {
-            $response = Http::timeout(30)->post("{$this->serviceUrl}/send", [
+            // Client recovery (destroy + initialize + ready) can exceed 30s.
+            $response = Http::timeout(120)->post("{$this->serviceUrl}/send", [
                 'to' => $to,
                 'message' => $message,
             ]);

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AdminGameController;
 use App\Http\Controllers\AdminInstagramController;
+use App\Http\Controllers\AdminMercadoController;
 use App\Http\Controllers\AdminPaymentController;
 use App\Http\Controllers\AdminPlayerController;
 use App\Http\Controllers\DraftController;
@@ -69,6 +70,11 @@ Route::middleware(['auth:sanctum', config('jetstream.auth_session')])->group(fun
     Route::post('/payments/{payment}/confirm', [PaymentController::class, 'confirm'])->name('payments.confirm');
 
     Route::prefix('admin')->group(function () {
+        Route::get('/mercado', [AdminMercadoController::class, 'index'])->name('admin.mercado');
+        Route::post('/mercado', [AdminMercadoController::class, 'store'])->name('admin.mercado.store');
+        Route::post('/mercado/create-game', [AdminMercadoController::class, 'createGame'])->name('admin.mercado.create-game');
+        Route::post('/mercado/{game}', [AdminMercadoController::class, 'updateGame'])->name('admin.mercado.update-game');
+
         Route::get('/players', [AdminPlayerController::class, 'index'])->name('admin.players');
         Route::get('/payments', [AdminPaymentController::class, 'index'])->name('admin.payments');
         Route::get('/instagram', [AdminInstagramController::class, 'index'])->name('admin.instagram');

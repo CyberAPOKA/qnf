@@ -24,20 +24,121 @@ const PORT = process.env.WHATSAPP_PORT || 3001;
 const MAX_SEND_ATTEMPTS = 3;
 const MAX_INIT_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1500;
+const READY_WAIT_MS = 60000;
+const DESTROY_TIMEOUT_MS = 8000;
+const BROWSER_CLOSE_TIMEOUT_MS = 3000;
+const PROFILE_RELEASE_WAIT_MS = 1000;
+const INITIALIZE_TIMEOUT_MS = 90000;
+const PROBE_TIMEOUT_MS = 8000;
+const WATCHDOG_INTERVAL_MS = 45000;
+const UNHEALTHY_WA_STATES = new Set([
+    'TIMEOUT',
+    'UNLAUNCHED',
+    'CONFLICT',
+    'UNPAIRED',
+    'UNPAIRED_IDLE',
+]);
 const GROUP_ID = process.env.WHATSAPP_GROUP_ID || '';
 const LARAVEL_WEBHOOK_URL = process.env.WHATSAPP_LARAVEL_WEBHOOK_URL || '';
 const WEBHOOK_SECRET = process.env.WHATSAPP_WEBHOOK_SECRET || '';
 
 let client = null;
+let clientGeneration = 0;
 let isReady = false;
+let isAuthenticated = false;
+let loggedOut = false;
+let shuttingDown = false;
 let lastQr = null;
 let sendQueue = Promise.resolve();
+let startPromise = null;
+let bootReason = 'startup';
+let watchdogTimer = null;
+let httpServer = null;
+let httpRetryTimer = null;
 
 const forwardCommand = createCommandForwarder({
     laravelWebhookUrl: LARAVEL_WEBHOOK_URL,
     webhookSecret: WEBHOOK_SECRET,
     groupId: GROUP_ID,
 });
+
+function sleep(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout(promise, ms, message) {
+    let timer;
+
+    try {
+        return await Promise.race([
+            promise,
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(message)), ms);
+            }),
+        ]);
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function currentClient() {
+    if (!client) {
+        throw new Error('WhatsApp client is not available');
+    }
+
+    return client;
+}
+
+function generationOf(instance) {
+    return instance?.generation || clientGeneration || 0;
+}
+
+function isTransientPuppeteerError(err) {
+    const name = err?.name || '';
+    const message = err?.message || String(err);
+
+    if (/TargetCloseError|ProtocolError/i.test(name)) {
+        return true;
+    }
+
+    return /detached Frame|Execution context was destroyed|Session closed|Target closed|Target page, context or browser has been closed|Protocol error|Navigation failed because browser has disconnected|Most likely the page has been closed|browser has disconnected/i.test(message);
+}
+
+function isRecoverableSendError(err) {
+    const message = err?.message || String(err);
+
+    if (/WhatsApp client is not available|client\.initialize\(\) timed out|page probe failed/i.test(message)) {
+        return true;
+    }
+
+    return isTransientPuppeteerError(err);
+}
+
+function isBrowserConnected(instance = client) {
+    try {
+        const browser = instance?.pupBrowser;
+
+        if (!browser) {
+            return false;
+        }
+
+        if (typeof browser.connected === 'boolean') {
+            return browser.connected;
+        }
+
+        if (typeof browser.isConnected === 'function') {
+            return browser.isConnected();
+        }
+
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function isCurrentInstance(instance) {
+    return Boolean(instance) && client === instance;
+}
 
 function resolveChromePath() {
     if (process.env.PUPPETEER_EXECUTABLE_PATH) {
@@ -61,9 +162,11 @@ function resolveChromePath() {
 }
 
 function createWhatsAppClient() {
+    clientGeneration += 1;
+    const generation = clientGeneration;
     const chromePath = resolveChromePath();
 
-    return new Client({
+    const instance = new Client({
         // Snap Chromium cannot lock a profile under /var/www; keep the session in $HOME.
         authStrategy: new LocalAuth({
             dataPath: process.env.WWEBJS_AUTH_PATH || './.wwebjs_auth',
@@ -80,43 +183,126 @@ function createWhatsAppClient() {
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
                 '--disable-gpu',
-                // Chrome may detach idle frames; keep the WhatsApp Web page alive.
-                '--disable-features=IsolateOrigins,site-per-process,MemorySaverMode',
+                // Keep WhatsApp Web in one renderer so Chrome does not discard idle iframes.
+                '--disable-features=IsolateOrigins,site-per-process,Translate,BackForwardCache,MediaRouter,MemorySaverMode',
+                '--disable-site-isolation-trials',
+                '--renderer-process-limit=1',
                 '--memory-pressure-off',
             ],
         },
     });
+
+    instance.generation = generation;
+
+    return instance;
 }
 
 function attachClientEvents(instance) {
+    const generation = generationOf(instance);
+
     instance.on('qr', (qr) => {
+        if (!isCurrentInstance(instance)) {
+            return;
+        }
+
         lastQr = qr;
-        console.log('Scan the QR code below to authenticate:');
+        console.log(`Scan the QR code below to authenticate: generation=${generation}`);
         qrcode.generate(qr, { small: true });
         console.log(`Or open http://127.0.0.1:${PORT}/qr in your browser.`);
     });
 
     instance.on('authenticated', () => {
-        console.log('Authenticated successfully.');
+        if (!isCurrentInstance(instance)) {
+            return;
+        }
+
+        isAuthenticated = true;
+        loggedOut = false;
+        lastQr = null;
+        console.log(`WhatsApp authenticated successfully generation=${generation}`);
     });
 
     instance.on('auth_failure', (msg) => {
-        console.error('Authentication failed:', msg);
+        if (!isCurrentInstance(instance)) {
+            return;
+        }
+
+        isReady = false;
+        isAuthenticated = false;
+        console.error(`Authentication failed generation=${generation}:`, msg);
     });
 
     instance.on('ready', () => {
+        if (!isCurrentInstance(instance)) {
+            return;
+        }
+
         isReady = true;
+        isAuthenticated = true;
+        loggedOut = false;
         lastQr = null;
-        console.log('WhatsApp client ready!');
+        console.log('WhatsApp new client ready');
+        console.log(`WhatsApp client generation=${generation} ready`);
+    });
+
+    instance.on('change_state', (state) => {
+        if (!isCurrentInstance(instance)) {
+            return;
+        }
+
+        console.log(`WhatsApp state changed generation=${generation}: ${state}`);
+
+        if (String(state).toUpperCase() !== 'TIMEOUT') {
+            return;
+        }
+
+        isReady = false;
+        recoverClient(`change_state: ${state}`).catch((err) => {
+            console.error('Reconnect after state change failed:', err.message);
+        });
     });
 
     instance.on('disconnected', (reason) => {
+        if (!isCurrentInstance(instance)) {
+            return;
+        }
+
         isReady = false;
-        console.log('Client disconnected:', reason);
+        console.log(`Client disconnected generation=${generation}:`, reason);
+
+        if (String(reason).toUpperCase() === 'LOGOUT') {
+            loggedOut = true;
+            isAuthenticated = false;
+            lastQr = null;
+            console.log('WhatsApp logged out; waiting for a new QR scan.');
+            return;
+        }
+
+        setTimeout(() => {
+            if (shuttingDown || loggedOut) {
+                return;
+            }
+
+            if (client !== instance && client !== null) {
+                return;
+            }
+
+            if (isReady && !startPromise) {
+                return;
+            }
+
+            recoverClient(`disconnected: ${reason}`).catch((err) => {
+                console.error('Reconnect after disconnect failed:', err.message);
+            });
+        }, 2000);
     });
 
     instance.on('message_create', async (msg) => {
         try {
+            if (!isCurrentInstance(instance)) {
+                return;
+            }
+
             if (msg.isStatus || !isSupportedCommand(msg.body)) {
                 return;
             }
@@ -129,7 +315,7 @@ function attachClientEvents(instance) {
 
             console.log(`Command received: ${String(msg.body).trim()} chat=${chatId} fromMe=${Boolean(msg.fromMe)}`);
 
-            const payload = await buildCommandPayload(msg, client);
+            const payload = await buildCommandPayload(msg, currentClient());
             payload.chat_id = chatId;
             payload.from_me = false;
 
@@ -137,7 +323,7 @@ function attachClientEvents(instance) {
 
             if (result?.reply) {
                 await enqueueSend(() =>
-                    sendWithRetry(() => client.sendMessage(chatId, result.reply), 'Command reply'),
+                    sendWithRetry(() => currentClient().sendMessage(chatId, result.reply), 'Command reply'),
                 );
             }
 
@@ -162,35 +348,160 @@ function attachClientEvents(instance) {
     });
 }
 
-async function startWhatsAppClient() {
-    for (let attempt = 1; attempt <= MAX_INIT_ATTEMPTS; attempt++) {
-        if (client) {
-            isReady = false;
-            try {
-                await client.destroy();
-            } catch {
-                // The previous browser may already be gone after a crashed inject().
-            }
-            client = null;
+function startWhatsAppClient() {
+    if (shuttingDown) {
+        return Promise.reject(new Error('WhatsApp service is shutting down'));
+    }
+
+    if (startPromise) {
+        return startPromise;
+    }
+
+    const pending = bootWhatsAppClient().finally(() => {
+        if (startPromise === pending) {
+            startPromise = null;
+        }
+    });
+
+    startPromise = pending;
+
+    return startPromise;
+}
+
+function killBrowserProcess(instance) {
+    try {
+        const proc = instance?.pupBrowser?.process?.();
+
+        if (proc && !proc.killed) {
+            proc.kill('SIGKILL');
+            return true;
+        }
+    } catch {
+        // Browser already gone.
+    }
+
+    return false;
+}
+
+async function destroyClient() {
+    const instance = client;
+    const generation = generationOf(instance);
+
+    client = null;
+    isReady = false;
+
+    if (!instance) {
+        return;
+    }
+
+    await Promise.race([
+        instance.destroy().catch(() => {}),
+        sleep(DESTROY_TIMEOUT_MS),
+    ]);
+
+    if (isBrowserConnected(instance)) {
+        try {
+            await Promise.race([
+                instance.pupBrowser.close().catch(() => {}),
+                sleep(BROWSER_CLOSE_TIMEOUT_MS),
+            ]);
+        } catch {
+            // Browser already gone.
+        }
+    }
+
+    let killed = false;
+
+    if (isBrowserConnected(instance)) {
+        killed = killBrowserProcess(instance);
+    }
+
+    try {
+        instance.removeAllListeners();
+    } catch {
+        // Instance already torn down.
+    }
+
+    console.log(`WhatsApp old client destroyed generation=${generation}`);
+
+    if (killed) {
+        await sleep(PROFILE_RELEASE_WAIT_MS);
+    }
+}
+
+async function waitForReadyOrQr(timeoutMs = READY_WAIT_MS) {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        if (shuttingDown) {
+            throw new Error('WhatsApp service is shutting down');
         }
 
+        if (isReady && await probePage()) {
+            return 'ready';
+        }
+
+        if (lastQr && !isReady && !isAuthenticated) {
+            return 'qr';
+        }
+
+        await sleep(500);
+    }
+
+    throw new Error('WhatsApp client not ready');
+}
+
+async function bootWhatsAppClient() {
+    const isRecovery = bootReason !== 'startup';
+
+    for (let attempt = 1; attempt <= MAX_INIT_ATTEMPTS; attempt++) {
+        if (shuttingDown) {
+            throw new Error('WhatsApp service is shutting down');
+        }
+
+        isReady = false;
+        lastQr = null;
+        await destroyClient();
+
         client = createWhatsAppClient();
+        const generation = generationOf(client);
         attachClientEvents(client);
 
+        console.log(
+            `WhatsApp new client initializing generation=${generation} (attempt ${attempt}/${MAX_INIT_ATTEMPTS})`,
+        );
+
         try {
-            await client.initialize();
+            await withTimeout(
+                client.initialize(),
+                INITIALIZE_TIMEOUT_MS,
+                'client.initialize() timed out',
+            );
+
+            const outcome = await waitForReadyOrQr(READY_WAIT_MS);
+
+            if (outcome === 'qr') {
+                console.log(`WhatsApp waiting for QR scan generation=${generation}`);
+                return;
+            }
+
+            if (!(await probePage())) {
+                throw new Error('WhatsApp client initialized but page probe failed');
+            }
+
+            if (isRecovery) {
+                console.log(`WhatsApp recovery completed generation=${generation}`);
+            }
+
             return;
         } catch (err) {
             console.error(
-                `WhatsApp initialize failed (attempt ${attempt}/${MAX_INIT_ATTEMPTS}):`,
+                `WhatsApp initialize failed (attempt ${attempt}/${MAX_INIT_ATTEMPTS}) generation=${generation}:`,
                 err.message,
             );
 
             if (attempt === MAX_INIT_ATTEMPTS) {
-                console.error(
-                    'Could not start WhatsApp Web. Delete whatsapp/.wwebjs_auth and whatsapp/.wwebjs_cache if they exist, then run again.',
-                );
-                return;
+                throw err;
             }
 
             await sleep(RETRY_DELAY_MS * attempt);
@@ -198,15 +509,151 @@ async function startWhatsAppClient() {
     }
 }
 
-startWhatsAppClient();
+async function recoverClient(reason) {
+    if (shuttingDown || loggedOut) {
+        return startPromise || Promise.resolve();
+    }
 
-function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    if (startPromise) {
+        return startPromise;
+    }
+
+    isReady = false;
+    bootReason = reason || 'recovery';
+    console.error(`Recovering WhatsApp client: ${bootReason}`);
+    console.log(`WhatsApp recovery started: ${bootReason}`);
+
+    try {
+        await startWhatsAppClient();
+    } catch (err) {
+        console.error('WhatsApp recovery failed:', err.message);
+        throw err;
+    }
 }
 
-function isTransientPuppeteerError(err) {
-    const message = err?.message || String(err);
-    return /detached Frame|Execution context was destroyed|Session closed|Target closed|Protocol error/i.test(message);
+async function probePage() {
+    const instance = client;
+
+    if (!instance) {
+        return false;
+    }
+
+    const page = instance.pupPage;
+
+    if (!page) {
+        return false;
+    }
+
+    try {
+        if (page.isClosed()) {
+            return false;
+        }
+    } catch {
+        return false;
+    }
+
+    if (!isBrowserConnected(instance)) {
+        return false;
+    }
+
+    try {
+        const readyState = await withTimeout(
+            page.evaluate(() => document.readyState),
+            PROBE_TIMEOUT_MS,
+            'probe evaluate timed out',
+        );
+
+        if (!readyState) {
+            return false;
+        }
+    } catch {
+        return false;
+    }
+
+    if (!isReady || typeof instance.getState !== 'function') {
+        return true;
+    }
+
+    try {
+        const state = await withTimeout(
+            instance.getState(),
+            PROBE_TIMEOUT_MS,
+            'getState timed out',
+        );
+
+        if (!state) {
+            return true;
+        }
+
+        const normalized = String(state).toUpperCase();
+
+        if (UNHEALTHY_WA_STATES.has(normalized)) {
+            return false;
+        }
+    } catch (err) {
+        if (isTransientPuppeteerError(err) || /timed out/i.test(err?.message || '')) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+async function waitUntilReady(timeoutMs = READY_WAIT_MS) {
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+        if (shuttingDown) {
+            throw new Error('WhatsApp service is shutting down');
+        }
+
+        if (loggedOut) {
+            throw new Error('WhatsApp client logged out');
+        }
+
+        if (startPromise) {
+            await startPromise.catch(() => {});
+        }
+
+        if (isReady && await probePage()) {
+            return;
+        }
+
+        await sleep(500);
+    }
+
+    throw new Error('WhatsApp client not ready');
+}
+
+async function getHealthSnapshot() {
+    const starting = Boolean(startPromise) && bootReason === 'startup';
+    const recovering = Boolean(startPromise) && bootReason !== 'startup';
+
+    if (startPromise || shuttingDown) {
+        return {
+            ready: false,
+            authenticated: Boolean(isAuthenticated && !loggedOut),
+            pageAlive: false,
+            browserConnected: isBrowserConnected(client),
+            recovering,
+            starting,
+            hasQr: Boolean(lastQr),
+        };
+    }
+
+    const browserConnected = isBrowserConnected(client);
+    const pageAlive = await probePage();
+    const ready = Boolean(isReady && pageAlive && browserConnected && !loggedOut);
+
+    return {
+        ready,
+        authenticated: Boolean(isAuthenticated && !loggedOut),
+        pageAlive,
+        browserConnected,
+        recovering,
+        starting,
+        hasQr: Boolean(lastQr),
+    };
 }
 
 /**
@@ -219,34 +666,124 @@ function enqueueSend(task) {
     return run;
 }
 
-async function sendWithRetry(fn, label) {
+async function sendWithRetry(operation, label) {
     let lastError;
 
     for (let attempt = 1; attempt <= MAX_SEND_ATTEMPTS; attempt++) {
-        if (!isReady) {
-            throw new Error('WhatsApp client not ready');
+        if (shuttingDown) {
+            throw new Error('WhatsApp service is shutting down');
+        }
+
+        if (loggedOut) {
+            throw new Error('WhatsApp client logged out');
         }
 
         try {
-            return await fn();
+            if (startPromise) {
+                await startPromise;
+            }
+
+            if (!isReady || !(await probePage())) {
+                await recoverClient(`${label}: client not healthy`);
+            }
+
+            await waitUntilReady();
+
+            if (attempt > 1) {
+                console.log('WhatsApp send retrying after client recovery');
+            }
+
+            return await operation();
         } catch (err) {
             lastError = err;
-            const transient = isTransientPuppeteerError(err);
             console.error(
                 `${label} failed (attempt ${attempt}/${MAX_SEND_ATTEMPTS}):`,
                 err.message,
             );
 
-            if (!transient || attempt === MAX_SEND_ATTEMPTS) {
+            if (loggedOut || shuttingDown) {
                 break;
             }
 
-            await sleep(RETRY_DELAY_MS * attempt);
+            if (!isRecoverableSendError(err) || attempt === MAX_SEND_ATTEMPTS) {
+                break;
+            }
+
+            isReady = false;
+            await recoverClient(err.message);
         }
     }
 
     throw lastError;
 }
+
+function startWatchdog() {
+    if (watchdogTimer) {
+        return;
+    }
+
+    watchdogTimer = setInterval(() => {
+        if (shuttingDown || loggedOut || startPromise) {
+            return;
+        }
+
+        enqueueSend(async () => {
+            if (shuttingDown || loggedOut || startPromise) {
+                return;
+            }
+
+            if (lastQr && !isReady) {
+                return;
+            }
+
+            if (!client) {
+                await recoverClient('watchdog: client missing');
+                return;
+            }
+
+            const page = client.pupPage;
+            let reason = null;
+
+            try {
+                if (!page) {
+                    reason = 'watchdog: page missing';
+                } else if (page.isClosed()) {
+                    reason = 'watchdog: page closed';
+                } else if (!isBrowserConnected(client)) {
+                    reason = 'watchdog: browser disconnected';
+                } else if (!(await probePage())) {
+                    reason = isReady
+                        ? 'watchdog: ready but page is invalid'
+                        : 'watchdog: puppeteer is not responding';
+                }
+            } catch (err) {
+                reason = `watchdog: ${err.message}`;
+            }
+
+            if (reason) {
+                await recoverClient(reason);
+            }
+        }).catch((err) => {
+            console.error('Watchdog recovery failed:', err.message);
+        });
+    }, WATCHDOG_INTERVAL_MS);
+
+    watchdogTimer.unref?.();
+}
+
+function stopWatchdog() {
+    if (!watchdogTimer) {
+        return;
+    }
+
+    clearInterval(watchdogTimer);
+    watchdogTimer = null;
+}
+
+startWhatsAppClient().catch((err) => {
+    console.error('Initial WhatsApp start failed:', err.message);
+});
+startWatchdog();
 
 function materializeAudioInput(audioPath, audioBase64, audioFilename) {
     if (typeof audioBase64 === 'string' && audioBase64.length > 0) {
@@ -315,7 +852,7 @@ async function sendVoiceNote(to, audioPath, audioBase64, audioFilename) {
         try {
             const media = loadVoiceMedia(oggPath);
 
-            return await client.sendMessage(to, media, { sendAudioAsVoice: true });
+            return await currentClient().sendMessage(to, media, { sendAudioAsVoice: true });
         } finally {
             fs.unlink(oggPath, () => {});
         }
@@ -330,8 +867,8 @@ async function sendVoiceNote(to, audioPath, audioBase64, audioFilename) {
 const app = express();
 app.use(express.json({ limit: '8mb' }));
 
-app.get('/status', (_req, res) => {
-    res.json({ ready: isReady, hasQr: Boolean(lastQr) });
+app.get('/status', async (_req, res) => {
+    res.json(await getHealthSnapshot());
 });
 
 app.get('/qr', async (req, res) => {
@@ -366,10 +903,6 @@ app.get('/qr', async (req, res) => {
 });
 
 app.post('/send', async (req, res) => {
-    if (!isReady) {
-        return res.status(503).json({ error: 'WhatsApp client not ready' });
-    }
-
     const { to, message } = req.body;
     if (!to || !message) {
         return res.status(400).json({ error: 'Missing "to" or "message"' });
@@ -377,7 +910,7 @@ app.post('/send', async (req, res) => {
 
     try {
         await enqueueSend(() =>
-            sendWithRetry(() => client.sendMessage(to, message), 'Send'),
+            sendWithRetry(() => currentClient().sendMessage(to, message), 'Send'),
         );
         console.log(`Message sent to ${to}`);
         res.json({ success: true });
@@ -388,10 +921,6 @@ app.post('/send', async (req, res) => {
 });
 
 app.post('/send-image', async (req, res) => {
-    if (!isReady) {
-        return res.status(503).json({ error: 'WhatsApp client not ready' });
-    }
-
     const { to, imagePath, caption } = req.body;
     if (!to || !imagePath) {
         return res.status(400).json({ error: 'Missing "to" or "imagePath"' });
@@ -401,7 +930,7 @@ app.post('/send-image', async (req, res) => {
         await enqueueSend(() =>
             sendWithRetry(() => {
                 const media = MessageMedia.fromFilePath(imagePath);
-                return client.sendMessage(to, media, { caption: caption || '' });
+                return currentClient().sendMessage(to, media, { caption: caption || '' });
             }, 'Send image'),
         );
         console.log(`Image sent to ${to}`);
@@ -413,10 +942,6 @@ app.post('/send-image', async (req, res) => {
 });
 
 app.post('/send-audio', async (req, res) => {
-    if (!isReady) {
-        return res.status(503).json({ error: 'WhatsApp client not ready' });
-    }
-
     const { to, audioPath, audioBase64, audioFilename } = req.body;
     if (!to || (!audioPath && !audioBase64)) {
         return res.status(400).json({ error: 'Missing "to" or audio payload' });
@@ -438,12 +963,14 @@ app.post('/send-audio', async (req, res) => {
 });
 
 app.get('/groups', async (_req, res) => {
-    if (!isReady) {
+    const health = await getHealthSnapshot();
+
+    if (!health.ready) {
         return res.status(503).json({ error: 'WhatsApp client not ready' });
     }
 
     try {
-        const chats = await client.getChats();
+        const chats = await currentClient().getChats();
         const groups = chats
             .filter((c) => c.isGroup)
             .map((c) => ({ id: c.id._serialized, name: c.name }));
@@ -453,17 +980,12 @@ app.get('/groups', async (_req, res) => {
     }
 });
 
-let httpServer = null;
-let httpRetryTimer = null;
-
 function startHttpServer() {
-    if (httpServer) {
+    if (httpServer || shuttingDown) {
         return;
     }
 
     const server = app.listen(PORT, '127.0.0.1', () => {
-        httpServer = server;
-
         if (httpRetryTimer) {
             clearTimeout(httpRetryTimer);
             httpRetryTimer = null;
@@ -475,11 +997,14 @@ function startHttpServer() {
         );
     });
 
+    httpServer = server;
+
     server.on('error', (err) => {
         if (err.code === 'EADDRINUSE') {
             console.error(`Port ${PORT} in use, retrying in 3s...`);
+            httpServer = null;
 
-            if (! httpRetryTimer) {
+            if (!httpRetryTimer) {
                 httpRetryTimer = setTimeout(() => {
                     httpRetryTimer = null;
                     startHttpServer();
@@ -493,5 +1018,55 @@ function startHttpServer() {
         process.exit(1);
     });
 }
+
+async function shutdown(signal) {
+    if (shuttingDown) {
+        return;
+    }
+
+    shuttingDown = true;
+    console.log(`WhatsApp service shutting down (${signal})`);
+
+    stopWatchdog();
+
+    if (httpRetryTimer) {
+        clearTimeout(httpRetryTimer);
+        httpRetryTimer = null;
+    }
+
+    if (httpServer) {
+        await new Promise((resolve) => {
+            httpServer.close(() => resolve());
+            setTimeout(resolve, 3000);
+        });
+        httpServer = null;
+    }
+
+    await destroyClient();
+
+    if (startPromise) {
+        await Promise.race([
+            startPromise.catch(() => {}),
+            sleep(DESTROY_TIMEOUT_MS),
+        ]);
+    }
+
+    await destroyClient();
+    process.exit(0);
+}
+
+process.on('SIGTERM', () => {
+    shutdown('SIGTERM').catch((err) => {
+        console.error('Shutdown failed:', err.message);
+        process.exit(1);
+    });
+});
+
+process.on('SIGINT', () => {
+    shutdown('SIGINT').catch((err) => {
+        console.error('Shutdown failed:', err.message);
+        process.exit(1);
+    });
+});
 
 startHttpServer();
