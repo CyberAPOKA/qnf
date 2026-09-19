@@ -9,6 +9,7 @@ import pkg from 'whatsapp-web.js';
 import QRCode from 'qrcode';
 import qrcode from 'qrcode-terminal';
 import express from 'express';
+import { createRequire } from 'module';
 import {
     buildCommandPayload,
     createCommandForwarder,
@@ -18,10 +19,12 @@ import {
     MAX_INJECT_RETRIES,
     MAX_WATCHDOG_RESTARTS,
     RESTART_COOLDOWN_MS,
+    collectClientInfoPayload,
     createChangeLogger,
     decideRecovery,
     inspectWhatsAppRuntime,
     interpretRuntimeSnapshot,
+    needsWWebJSInjection,
     probeLogKey,
     readinessBlocker,
     shouldReuseAuthenticatedBrowser,
@@ -29,6 +32,9 @@ import {
 
 const execFileAsync = promisify(execFile);
 const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
+const nodeRequire = createRequire(import.meta.url);
+const { LoadUtils } = nodeRequire('whatsapp-web.js/src/util/Injected/Utils.js');
+const ClientInfo = nodeRequire('whatsapp-web.js/src/structures/ClientInfo.js');
 
 const { Client, LocalAuth, MessageMedia } = pkg;
 
@@ -157,6 +163,7 @@ function diagnosticState(extra = {}) {
         isAuthenticated,
         storeReady: Boolean(extra.storeReady ?? lastStoreProbe?.ok),
         missing: extra.missing ?? lastStoreProbe?.missing ?? [],
+        needsWWebJSInjection: needsWWebJSInjection(extra.snapshot ?? lastStoreProbe?.snapshot),
         injectRetries: injectRetryCount,
         restarts: watchdogRestartCount,
         msSinceLastRestart: lastRestartAt ? Date.now() - lastRestartAt : null,
@@ -245,7 +252,7 @@ async function probeWhatsAppStore() {
 
         const details = probe.ok
             ? `ok webVersion=${snapshot.webVersion || 'unknown'} authState=${snapshot.authState || 'unknown'} hasSynced=${Boolean(snapshot.hasSynced)}`
-            : `missing=${probe.missing.join(', ') || 'unknown'} webVersion=${snapshot.webVersion || 'unknown'} authState=${snapshot.authState || 'unknown'} hasSynced=${Boolean(snapshot.hasSynced)} document=${snapshot.documentReadyState || 'unknown'} require=${Boolean(snapshot.hasRequire)}`;
+            : `missing=${probe.missing.join(', ') || 'unknown'} webVersion=${snapshot.webVersion || 'unknown'} authState=${snapshot.authState || 'unknown'} hasSynced=${Boolean(snapshot.hasSynced)} document=${snapshot.documentReadyState || 'unknown'} require=${Boolean(snapshot.hasRequire)} clientInfoPn=${Boolean(snapshot.hasGetMaybeMePnUser)} clientInfoLid=${Boolean(snapshot.hasGetMaybeMeLidUser)} serialize=${Boolean(snapshot.hasConnSerialize)}`;
 
         logProbeChange(
             probeLogKey(probe),
@@ -285,10 +292,29 @@ async function markReadyIfSessionHealthy(reason, instance = client) {
         return false;
     }
 
-    const store = await probeWhatsAppStore();
+    let store = await probeWhatsAppStore();
 
     if (!isCurrentInstance(instance)) {
         return false;
+    }
+
+    if (
+        !store.ok
+        && needsWWebJSInjection(store.snapshot)
+        && injectRetryCount < MAX_INJECT_RETRIES
+        && !injectionReplayInFlight
+    ) {
+        await injectWWebJS(instance, 'Store present without WWebJS');
+
+        if (!isCurrentInstance(instance)) {
+            return false;
+        }
+
+        store = await probeWhatsAppStore();
+
+        if (!isCurrentInstance(instance)) {
+            return false;
+        }
     }
 
     if (!store.ok) {
@@ -310,9 +336,100 @@ async function markReadyIfSessionHealthy(reason, instance = client) {
     return true;
 }
 
+async function injectWWebJS(instance, reason) {
+    if (!isCurrentInstance(instance) || injectionReplayInFlight) {
+        return false;
+    }
+
+    const page = instance.pupPage;
+    const generation = generationOf(instance);
+
+    if (!page) {
+        return false;
+    }
+
+    try {
+        if (page.isClosed()) {
+            return false;
+        }
+    } catch {
+        return false;
+    }
+
+    injectionReplayInFlight = true;
+    injectRetryCount += 1;
+    lastRecoveryReason = reason;
+    console.log(
+        `WhatsApp injecting LoadUtils generation=${generation} attempt=${injectRetryCount}/${MAX_INJECT_RETRIES}: ${reason}`,
+    );
+
+    try {
+        await withTimeout(
+            page.evaluate(LoadUtils),
+            PROBE_TIMEOUT_MS,
+            'LoadUtils injection timed out',
+        );
+
+        if (!isCurrentInstance(instance)) {
+            return false;
+        }
+
+        if (!instance.info) {
+            try {
+                const infoData = await withTimeout(
+                    page.evaluate(collectClientInfoPayload),
+                    PROBE_TIMEOUT_MS,
+                    'client info probe timed out',
+                );
+                instance.info = new ClientInfo(instance, infoData);
+            } catch (err) {
+                console.error(
+                    `WhatsApp ClientInfo fallback failed generation=${generation}:`,
+                    err.message,
+                );
+            }
+        }
+
+        if (!instance._qnfListenersAttached && typeof instance.attachEventListeners === 'function') {
+            try {
+                await instance.attachEventListeners();
+                instance._qnfListenersAttached = true;
+                console.log(`WhatsApp message listeners attached generation=${generation}`);
+            } catch (err) {
+                console.error(
+                    `WhatsApp attachEventListeners failed generation=${generation}:`,
+                    err.message,
+                );
+            }
+        }
+
+        return isCurrentInstance(instance);
+    } catch (err) {
+        console.error(
+            `WhatsApp LoadUtils injection failed generation=${generation}:`,
+            err.message,
+        );
+        return false;
+    } finally {
+        injectionReplayInFlight = false;
+    }
+}
+
 async function retryLibraryInjection(instance, reason) {
     if (!isCurrentInstance(instance) || injectionReplayInFlight) {
         return false;
+    }
+
+    const probe = lastStoreProbe?.snapshot
+        ? lastStoreProbe
+        : await probeWhatsAppStore();
+
+    if (!isCurrentInstance(instance)) {
+        return false;
+    }
+
+    if (needsWWebJSInjection(probe?.snapshot)) {
+        return injectWWebJS(instance, reason);
     }
 
     const page = instance.pupPage;
@@ -1040,6 +1157,9 @@ function buildStatusDiagnostics(pageAlive, extra = {}) {
         hasSynced: Boolean(snapshot?.hasSynced),
         documentReadyState: snapshot?.documentReadyState || extra.documentReadyState || null,
         hasRequire: Boolean(snapshot?.hasRequire),
+        hasConnSerialize: Boolean(snapshot?.hasConnSerialize),
+        hasGetMaybeMePnUser: Boolean(snapshot?.hasGetMaybeMePnUser),
+        hasGetMaybeMeLidUser: Boolean(snapshot?.hasGetMaybeMeLidUser),
         injectRetries: injectRetryCount,
         ...extra,
     };
@@ -1216,7 +1336,7 @@ function startWatchdog() {
                 return;
             }
 
-            if (decision.action === 'reinject') {
+            if (decision.action === 'inject-utils' || decision.action === 'reinject') {
                 if (client) {
                     await retryLibraryInjection(client, `watchdog: ${decision.reason}`);
                     await markReadyIfSessionHealthy('watchdog after injection retry');

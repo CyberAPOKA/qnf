@@ -28,6 +28,7 @@ export function inspectWhatsAppRuntime() {
     const authState = root.AuthStore?.AppState?.state
         ?? root.Store?.AppState?.state
         ?? null;
+    const user = root.Store?.User;
 
     return {
         documentReadyState: typeof document !== 'undefined' ? document.readyState : null,
@@ -44,7 +45,69 @@ export function inspectWhatsAppRuntime() {
         hasWidFactory: Boolean(root.Store?.WidFactory),
         hasFindOrCreateChat: Boolean(root.Store?.FindOrCreateChat),
         hasAppState: Boolean(root.Store?.AppState),
+        hasConnSerialize: typeof root.Store?.Conn?.serialize === 'function',
+        hasGetMaybeMePnUser: typeof user?.getMaybeMePnUser === 'function',
+        hasGetMaybeMeLidUser: typeof user?.getMaybeMeLidUser === 'function',
+        hasGetMeUser: typeof user?.getMeUser === 'function',
     };
+}
+
+/**
+ * Collects ClientInfo fields without assuming WhatsApp Web still exposes
+ * getMaybeMePnUser(). Do not log the returned payload — it may include a wid.
+ */
+export function collectClientInfoPayload() {
+    const root = globalThis;
+    const Conn = root.Store?.Conn;
+    const User = root.Store?.User;
+    let serialized = {};
+
+    try {
+        if (typeof Conn?.serialize === 'function') {
+            serialized = Conn.serialize() || {};
+        }
+    } catch {
+        serialized = {};
+    }
+
+    const candidates = [];
+
+    try {
+        if (typeof User?.getMaybeMePnUser === 'function') {
+            candidates.push(User.getMaybeMePnUser());
+        }
+    } catch {
+        // WhatsApp Web renamed or broke this helper.
+    }
+
+    try {
+        if (typeof User?.getMaybeMeLidUser === 'function') {
+            candidates.push(User.getMaybeMeLidUser());
+        }
+    } catch {
+        // Ignore.
+    }
+
+    try {
+        if (typeof User?.getMeUser === 'function') {
+            candidates.push(User.getMeUser());
+        }
+    } catch {
+        // Ignore.
+    }
+
+    candidates.push(Conn?.wid, serialized?.wid);
+
+    return { ...serialized, wid: candidates.find(Boolean) || null };
+}
+
+export function needsWWebJSInjection(snapshot) {
+    return Boolean(
+        snapshot?.hasStore
+        && snapshot?.hasStoreChat
+        && snapshot?.hasWidFactory
+        && !snapshot?.hasWWebJS,
+    );
 }
 
 export function interpretRuntimeSnapshot(snapshot, error = null) {
@@ -200,6 +263,13 @@ export function decideRecovery(input) {
     }
 
     if (input.isAuthenticated && !input.storeReady) {
+        if (input.needsWWebJSInjection && injectRetries < maxInjectRetries) {
+            return {
+                action: 'inject-utils',
+                reason: 'Store injected but WWebJS missing',
+            };
+        }
+
         if (injectRetries < maxInjectRetries) {
             return {
                 action: 'reinject',

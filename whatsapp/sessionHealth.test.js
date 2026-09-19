@@ -3,11 +3,13 @@ import assert from 'node:assert/strict';
 import {
     interpretRuntimeSnapshot,
     probeLogKey,
+    collectClientInfoPayload,
     createChangeLogger,
     readinessBlocker,
     decideRecovery,
     shouldReuseAuthenticatedBrowser,
     inspectWhatsAppRuntime,
+    needsWWebJSInjection,
     MAX_INJECT_RETRIES,
     MAX_WATCHDOG_RESTARTS,
     RESTART_COOLDOWN_MS,
@@ -152,6 +154,61 @@ test('watchdog marks ready when send API is present even without the library eve
 
     assert.equal(decision.action, 'mark-ready');
     assert.match(decision.reason, /send API ready/);
+});
+
+test('collectClientInfoPayload falls back when getMaybeMePnUser is missing', () => {
+    const previous = {
+        Store: globalThis.Store,
+    };
+
+    globalThis.Store = {
+        Conn: {
+            serialize() {
+                return { pushname: 'QNF', platform: 'web' };
+            },
+            wid: { _serialized: '555199999999@c.us' },
+        },
+        User: {},
+    };
+
+    try {
+        const info = collectClientInfoPayload();
+        assert.equal(info.pushname, 'QNF');
+        assert.equal(info.wid._serialized, '555199999999@c.us');
+    } finally {
+        if (previous.Store === undefined) {
+            delete globalThis.Store;
+        } else {
+            globalThis.Store = previous.Store;
+        }
+    }
+});
+
+test('watchdog injects LoadUtils when Store exists without WWebJS', () => {
+    const snap = snapshot({
+        hasWWebJS: false,
+        hasGetChat: false,
+        hasSendMessage: false,
+        hasSynced: true,
+        hasGetMaybeMePnUser: false,
+    });
+
+    assert.equal(needsWWebJSInjection(snap), true);
+    assert.equal(needsWWebJSInjection(snapshot()), false);
+
+    const decision = decideRecovery({
+        isAuthenticated: true,
+        isReady: false,
+        storeReady: false,
+        pageAlive: true,
+        browserConnected: true,
+        injectRetries: 0,
+        needsWWebJSInjection: true,
+        missing: ['window.WWebJS', 'window.WWebJS.getChat', 'window.WWebJS.sendMessage'],
+    });
+
+    assert.equal(decision.action, 'inject-utils');
+    assert.match(decision.reason, /WWebJS missing/);
 });
 
 test('watchdog retries injection before destroying an authenticated live page', () => {
