@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
+    "test": "node --test sessionHealth.test.js",
     "postinstall": "patch-package"
   },
   "dependencies": {

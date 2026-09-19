@@ -14,6 +14,18 @@ import {
     createCommandForwarder,
     isSupportedCommand,
 } from './commands.js';
+import {
+    MAX_INJECT_RETRIES,
+    MAX_WATCHDOG_RESTARTS,
+    RESTART_COOLDOWN_MS,
+    createChangeLogger,
+    decideRecovery,
+    inspectWhatsAppRuntime,
+    interpretRuntimeSnapshot,
+    probeLogKey,
+    readinessBlocker,
+    shouldReuseAuthenticatedBrowser,
+} from './sessionHealth.js';
 
 const execFileAsync = promisify(execFile);
 const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
@@ -30,6 +42,8 @@ const BROWSER_CLOSE_TIMEOUT_MS = 3000;
 const PROFILE_RELEASE_WAIT_MS = 1000;
 const INITIALIZE_TIMEOUT_MS = 90000;
 const PROBE_TIMEOUT_MS = 8000;
+const INJECT_RETRY_WAIT_MS = 45000;
+const INJECT_REPLAY_TIMEOUT_MS = 35000;
 const WATCHDOG_INTERVAL_MS = 45000;
 const UNHEALTHY_WA_STATES = new Set([
     'TIMEOUT',
@@ -55,6 +69,18 @@ let bootReason = 'startup';
 let watchdogTimer = null;
 let httpServer = null;
 let httpRetryTimer = null;
+let libraryReadyEvent = false;
+let lastBlocker = null;
+let lastRecoveryReason = null;
+let lastStoreProbe = null;
+let injectRetryCount = 0;
+let watchdogRestartCount = 0;
+let lastRestartAt = 0;
+let injectionReplayInFlight = false;
+
+const logProbeChange = createChangeLogger((message) => console.log(message));
+const logBlockerChange = createChangeLogger((message) => console.log(message));
+const logRecoveryDecision = createChangeLogger((message) => console.log(message));
 
 const forwardCommand = createCommandForwarder({
     laravelWebhookUrl: LARAVEL_WEBHOOK_URL,
@@ -107,11 +133,50 @@ function isTransientPuppeteerError(err) {
 function isRecoverableSendError(err) {
     const message = err?.message || String(err);
 
-    if (/WhatsApp client is not available|client\.initialize\(\) timed out|page probe failed/i.test(message)) {
+    if (/WhatsApp client is not available|client\.initialize\(\) timed out|page probe failed|send API not ready|WhatsApp client not ready/i.test(message)) {
+        return true;
+    }
+
+    if (/Cannot read properties of undefined \(reading 'getChat'\)|Cannot read property 'getChat' of undefined/i.test(message)) {
         return true;
     }
 
     return isTransientPuppeteerError(err);
+}
+
+function diagnosticState(extra = {}) {
+    return {
+        shuttingDown,
+        loggedOut,
+        bootInProgress: Boolean(startPromise),
+        clientMissing: !client,
+        browserConnected: isBrowserConnected(client),
+        pageAlive: extra.pageAlive,
+        hasQr: Boolean(lastQr),
+        isReady,
+        isAuthenticated,
+        storeReady: Boolean(extra.storeReady ?? lastStoreProbe?.ok),
+        missing: extra.missing ?? lastStoreProbe?.missing ?? [],
+        injectRetries: injectRetryCount,
+        restarts: watchdogRestartCount,
+        msSinceLastRestart: lastRestartAt ? Date.now() - lastRestartAt : null,
+        maxInjectRetries: MAX_INJECT_RETRIES,
+        maxRestarts: MAX_WATCHDOG_RESTARTS,
+        restartCooldownMs: RESTART_COOLDOWN_MS,
+    };
+}
+
+function noteBlocker(reason) {
+    lastBlocker = reason || null;
+
+    if (!reason || isReady) {
+        return;
+    }
+
+    logBlockerChange(
+        `blocker:${reason}`,
+        `WhatsApp not ready generation=${generationOf(client)}: ${reason}`,
+    );
 }
 
 function isBrowserConnected(instance = client) {
@@ -144,6 +209,116 @@ async function probeWhatsAppStore() {
     const page = client?.pupPage;
 
     if (!page) {
+        const probe = interpretRuntimeSnapshot(null, 'page missing');
+        lastStoreProbe = probe;
+        logProbeChange(
+            probeLogKey(probe),
+            `WhatsApp send API probe generation=${generationOf(client)}: page missing`,
+        );
+        return probe;
+    }
+
+    try {
+        if (page.isClosed()) {
+            const probe = interpretRuntimeSnapshot(null, 'page closed');
+            lastStoreProbe = probe;
+            logProbeChange(
+                probeLogKey(probe),
+                `WhatsApp send API probe generation=${generationOf(client)}: page closed`,
+            );
+            return probe;
+        }
+    } catch (err) {
+        const probe = interpretRuntimeSnapshot(null, err.message);
+        lastStoreProbe = probe;
+        return probe;
+    }
+
+    try {
+        const snapshot = await withTimeout(
+            page.evaluate(inspectWhatsAppRuntime),
+            PROBE_TIMEOUT_MS,
+            'store probe timed out',
+        );
+        const probe = interpretRuntimeSnapshot(snapshot);
+        lastStoreProbe = probe;
+
+        const details = probe.ok
+            ? `ok webVersion=${snapshot.webVersion || 'unknown'} authState=${snapshot.authState || 'unknown'} hasSynced=${Boolean(snapshot.hasSynced)}`
+            : `missing=${probe.missing.join(', ') || 'unknown'} webVersion=${snapshot.webVersion || 'unknown'} authState=${snapshot.authState || 'unknown'} hasSynced=${Boolean(snapshot.hasSynced)} document=${snapshot.documentReadyState || 'unknown'} require=${Boolean(snapshot.hasRequire)}`;
+
+        logProbeChange(
+            probeLogKey(probe),
+            `WhatsApp send API probe generation=${generationOf(client)}: ${details}`,
+        );
+
+        return probe;
+    } catch (err) {
+        const probe = interpretRuntimeSnapshot(null, err.message);
+        lastStoreProbe = probe;
+        logProbeChange(
+            probeLogKey(probe),
+            `WhatsApp send API probe generation=${generationOf(client)} failed: ${err.message}`,
+        );
+        return probe;
+    }
+}
+
+async function markReadyIfSessionHealthy(reason, instance = client) {
+    if (shuttingDown || loggedOut || !instance || !isCurrentInstance(instance)) {
+        return false;
+    }
+
+    if (!isAuthenticated) {
+        noteBlocker('not authenticated');
+        return false;
+    }
+
+    const pageAlive = await probePage();
+
+    if (!isCurrentInstance(instance)) {
+        return false;
+    }
+
+    if (!pageAlive) {
+        noteBlocker('page not responding');
+        return false;
+    }
+
+    const store = await probeWhatsAppStore();
+
+    if (!isCurrentInstance(instance)) {
+        return false;
+    }
+
+    if (!store.ok) {
+        noteBlocker(`send API not ready (${store.missing.join(', ') || store.error || 'unknown'})`);
+        return false;
+    }
+
+    if (!isReady) {
+        isReady = true;
+        lastQr = null;
+        lastBlocker = null;
+        injectRetryCount = 0;
+        watchdogRestartCount = 0;
+        console.log(
+            `WhatsApp client generation=${generationOf(instance)} ready via ${reason}`,
+        );
+    }
+
+    return true;
+}
+
+async function retryLibraryInjection(instance, reason) {
+    if (!isCurrentInstance(instance) || injectionReplayInFlight) {
+        return false;
+    }
+
+    const page = instance.pupPage;
+    const generation = generationOf(instance);
+
+    if (!page) {
         return false;
     }
 
@@ -155,46 +330,71 @@ async function probeWhatsAppStore() {
         return false;
     }
 
+    injectionReplayInFlight = true;
+    injectRetryCount += 1;
+    lastRecoveryReason = reason;
+    console.log(
+        `WhatsApp retrying Store injection generation=${generation} attempt=${injectRetryCount}/${MAX_INJECT_RETRIES}: ${reason}`,
+    );
+
     try {
-        return Boolean(
+        const replay = await withTimeout(
+            page.evaluate(async () => {
+                if (typeof window.onAppStateHasSyncedEvent === 'function') {
+                    await window.onAppStateHasSyncedEvent();
+                    return 'hasSynced';
+                }
+
+                return 'missing-hasSynced-hook';
+            }),
+            INJECT_REPLAY_TIMEOUT_MS,
+            'injection replay timed out',
+        );
+
+        if (!isCurrentInstance(instance)) {
+            return false;
+        }
+
+        if (replay === 'missing-hasSynced-hook' && typeof instance.inject === 'function') {
+            console.log(`WhatsApp hasSynced hook missing generation=${generation}; calling client.inject()`);
             await withTimeout(
-                page.evaluate(() => Boolean(
-                    window.Store
-                    && window.WWebJS
-                    && typeof window.WWebJS.getChat === 'function'
-                    && window.Store.Chat
-                )),
-                PROBE_TIMEOUT_MS,
-                'store probe timed out',
-            ),
+                instance.inject(),
+                INITIALIZE_TIMEOUT_MS,
+                'client.inject() timed out',
+            );
+        }
+
+        return isCurrentInstance(instance);
+    } catch (err) {
+        if (!isCurrentInstance(instance)) {
+            return false;
+        }
+
+        console.error(
+            `WhatsApp Store injection retry failed generation=${generation}:`,
+            err.message,
         );
-    } catch {
-        return false;
-    }
-}
 
-async function markReadyIfSessionHealthy(reason) {
-    if (shuttingDown || loggedOut || !client || !isAuthenticated) {
-        return false;
-    }
+        try {
+            if (typeof instance.inject === 'function') {
+                await withTimeout(
+                    instance.inject(),
+                    INITIALIZE_TIMEOUT_MS,
+                    'client.inject() timed out',
+                );
+            }
+        } catch (injectErr) {
+            console.error(
+                `WhatsApp client.inject() retry failed generation=${generation}:`,
+                injectErr.message,
+            );
+            return false;
+        }
 
-    if (!(await probePage())) {
-        return false;
+        return isCurrentInstance(instance);
+    } finally {
+        injectionReplayInFlight = false;
     }
-
-    if (!(await probeWhatsAppStore())) {
-        return false;
-    }
-
-    if (!isReady) {
-        isReady = true;
-        lastQr = null;
-        console.log(
-            `WhatsApp client generation=${generationOf(client)} ready via ${reason}`,
-        );
-    }
-
-    return true;
 }
 
 function resolveChromePath() {
@@ -279,6 +479,12 @@ function attachClientEvents(instance) {
         loggedOut = false;
         lastQr = null;
         console.log(`WhatsApp authenticated successfully generation=${generation}`);
+        markReadyIfSessionHealthy('authenticated event', instance).catch((err) => {
+            console.error(
+                `Authenticated health check failed generation=${generation}:`,
+                err.message,
+            );
+        });
     });
 
     instance.on('auth_failure', (msg) => {
@@ -296,12 +502,17 @@ function attachClientEvents(instance) {
             return;
         }
 
-        isReady = true;
+        libraryReadyEvent = true;
         isAuthenticated = true;
         loggedOut = false;
         lastQr = null;
-        console.log('WhatsApp new client ready');
-        console.log(`WhatsApp client generation=${generation} ready`);
+        console.log(`WhatsApp library ready event generation=${generation}`);
+        markReadyIfSessionHealthy('library ready event', instance).catch((err) => {
+            console.error(
+                `Ready event health check failed generation=${generation}:`,
+                err.message,
+            );
+        });
     });
 
     instance.on('change_state', (state) => {
@@ -448,6 +659,11 @@ async function destroyClient() {
 
     client = null;
     isReady = false;
+    isAuthenticated = false;
+    libraryReadyEvent = false;
+    lastStoreProbe = null;
+    injectRetryCount = 0;
+    injectionReplayInFlight = false;
 
     if (!instance) {
         return;
@@ -490,43 +706,46 @@ async function destroyClient() {
 
 async function waitForReadyOrQr(timeoutMs = READY_WAIT_MS) {
     const deadline = Date.now() + timeoutMs;
-    let healthySince = null;
+    let lastStoreCheck = 0;
 
     while (Date.now() < deadline) {
         if (shuttingDown) {
             throw new Error('WhatsApp service is shutting down');
         }
 
-        if (isReady && await probePage()) {
-            return 'ready';
-        }
-
         if (lastQr && !isReady && !isAuthenticated) {
             return 'qr';
         }
 
-        // LocalAuth restore can skip the `ready` event. After a short healthy
-        // authenticated window, treat the session as ready instead of looping.
-        if (isAuthenticated && await probePage()) {
-            healthySince ??= Date.now();
+        if (isReady && lastStoreProbe?.ok && await probePage()) {
+            return 'ready';
+        }
 
-            if (Date.now() - healthySince >= 10000) {
-                if (await markReadyIfSessionHealthy('authenticated session settled')) {
-                    return 'ready';
-                }
+        // Avoid hammering page.evaluate() while the library injects Store/WWebJS.
+        if (Date.now() - lastStoreCheck >= 2000) {
+            lastStoreCheck = Date.now();
+
+            if (await markReadyIfSessionHealthy('send API probe')) {
+                return 'ready';
             }
-        } else {
-            healthySince = null;
         }
 
         await sleep(500);
     }
 
-    if (await markReadyIfSessionHealthy('ready-event timeout fallback')) {
+    if (await markReadyIfSessionHealthy('ready wait timeout')) {
         return 'ready';
     }
 
-    throw new Error('WhatsApp client not ready');
+    if (lastQr && !isAuthenticated) {
+        return 'qr';
+    }
+
+    if (isAuthenticated && await probePage()) {
+        return 'authenticated-pending-store';
+    }
+
+    throw new Error(lastBlocker || 'WhatsApp client not ready');
 }
 
 async function bootWhatsAppClient() {
@@ -537,49 +756,117 @@ async function bootWhatsAppClient() {
             throw new Error('WhatsApp service is shutting down');
         }
 
-        isReady = false;
-        lastQr = null;
-        await destroyClient();
+        const pageAlive = client ? await probePage() : false;
+        const reuseSession = shouldReuseAuthenticatedBrowser({
+            isAuthenticated,
+            pageAlive,
+            browserConnected: isBrowserConnected(client),
+            loggedOut,
+            clientMissing: !client,
+        });
 
-        client = createWhatsAppClient();
-        const generation = generationOf(client);
-        attachClientEvents(client);
+        if (reuseSession) {
+            console.log(
+                `WhatsApp keeping authenticated Chromium generation=${generationOf(client)} (attempt ${attempt}/${MAX_INIT_ATTEMPTS})`,
+            );
+        } else {
+            isReady = false;
+            lastQr = null;
+            await destroyClient();
 
-        console.log(
-            `WhatsApp new client initializing generation=${generation} (attempt ${attempt}/${MAX_INIT_ATTEMPTS})`,
-        );
+            client = createWhatsAppClient();
+            const generation = generationOf(client);
+            attachClientEvents(client);
 
-        try {
-            await withTimeout(
-                client.initialize(),
-                INITIALIZE_TIMEOUT_MS,
-                'client.initialize() timed out',
+            console.log(
+                `WhatsApp new client initializing generation=${generation} (attempt ${attempt}/${MAX_INIT_ATTEMPTS})`,
             );
 
-            const outcome = await waitForReadyOrQr(READY_WAIT_MS);
+            try {
+                await withTimeout(
+                    client.initialize(),
+                    INITIALIZE_TIMEOUT_MS,
+                    'client.initialize() timed out',
+                );
+            } catch (err) {
+                console.error(
+                    `WhatsApp initialize failed (attempt ${attempt}/${MAX_INIT_ATTEMPTS}) generation=${generation}:`,
+                    err.message,
+                );
+
+                if (attempt === MAX_INIT_ATTEMPTS) {
+                    lastRestartAt = Date.now();
+                    throw err;
+                }
+
+                await sleep(RETRY_DELAY_MS * attempt);
+                continue;
+            }
+        }
+
+        const generation = generationOf(client);
+
+        try {
+            let outcome = await waitForReadyOrQr(READY_WAIT_MS);
+
+            if (outcome === 'authenticated-pending-store' && isCurrentInstance(client)) {
+                const replayed = await retryLibraryInjection(
+                    client,
+                    'boot: authenticated but send API not injected',
+                );
+
+                if (replayed) {
+                    outcome = await waitForReadyOrQr(INJECT_RETRY_WAIT_MS);
+                }
+            }
 
             if (outcome === 'qr') {
                 console.log(`WhatsApp waiting for QR scan generation=${generation}`);
                 return;
             }
 
-            if (!(await probePage())) {
-                throw new Error('WhatsApp client initialized but page probe failed');
+            if (outcome === 'ready') {
+                if (!(await probePage())) {
+                    throw new Error('WhatsApp client initialized but page probe failed');
+                }
+
+                if (isRecovery) {
+                    console.log(`WhatsApp recovery completed generation=${generation}`);
+                }
+
+                return;
             }
 
-            if (isRecovery) {
-                console.log(`WhatsApp recovery completed generation=${generation}`);
-            }
-
-            return;
+            throw new Error(lastBlocker || 'WhatsApp client not ready');
         } catch (err) {
+            const pageStillAlive = await probePage();
+            const canKeepBrowser = shouldReuseAuthenticatedBrowser({
+                isAuthenticated,
+                pageAlive: pageStillAlive,
+                browserConnected: isBrowserConnected(client),
+                loggedOut,
+                clientMissing: !client,
+            });
+
             console.error(
                 `WhatsApp initialize failed (attempt ${attempt}/${MAX_INIT_ATTEMPTS}) generation=${generation}:`,
                 err.message,
             );
 
+            if (canKeepBrowser) {
+                console.log(
+                    `WhatsApp not destroying healthy Chromium generation=${generation}: authenticated page is alive`,
+                );
+            }
+
             if (attempt === MAX_INIT_ATTEMPTS) {
+                lastRestartAt = Date.now();
                 throw err;
+            }
+
+            if (canKeepBrowser) {
+                await sleep(RETRY_DELAY_MS * attempt);
+                continue;
             }
 
             await sleep(RETRY_DELAY_MS * attempt);
@@ -587,7 +874,7 @@ async function bootWhatsAppClient() {
     }
 }
 
-async function recoverClient(reason) {
+async function recoverClient(reason, { countRestart = false } = {}) {
     if (shuttingDown || loggedOut) {
         return startPromise || Promise.resolve();
     }
@@ -596,8 +883,18 @@ async function recoverClient(reason) {
         return startPromise;
     }
 
+    lastRecoveryReason = reason || 'recovery';
     isReady = false;
-    bootReason = reason || 'recovery';
+    bootReason = lastRecoveryReason;
+    lastRestartAt = Date.now();
+
+    if (countRestart) {
+        watchdogRestartCount += 1;
+    } else {
+        watchdogRestartCount = 0;
+        injectRetryCount = 0;
+    }
+
     console.error(`Recovering WhatsApp client: ${bootReason}`);
     console.log(`WhatsApp recovery started: ${bootReason}`);
 
@@ -694,7 +991,14 @@ async function waitUntilReady(timeoutMs = READY_WAIT_MS) {
         }
 
         if (isReady && await probePage()) {
-            return;
+            const store = await probeWhatsAppStore();
+
+            if (store.ok) {
+                return;
+            }
+
+            isReady = false;
+            noteBlocker(`send API not ready (${store.missing.join(', ') || store.error || 'unknown'})`);
         }
 
         if (await markReadyIfSessionHealthy('send wait')) {
@@ -708,28 +1012,65 @@ async function waitUntilReady(timeoutMs = READY_WAIT_MS) {
         return;
     }
 
-    throw new Error('WhatsApp client not ready');
+    throw new Error(lastBlocker || 'WhatsApp client not ready');
+}
+
+function buildStatusDiagnostics(pageAlive, extra = {}) {
+    const snapshot = lastStoreProbe?.snapshot || null;
+    const missing = lastStoreProbe?.missing || [];
+    const blocker = readinessBlocker(diagnosticState({
+        pageAlive,
+        storeReady: Boolean(lastStoreProbe?.ok),
+        missing,
+    }));
+
+    if (blocker) {
+        noteBlocker(blocker);
+    }
+
+    return {
+        generation: generationOf(client),
+        storeReady: Boolean(lastStoreProbe?.ok),
+        missing,
+        lastBlocker: blocker || lastBlocker,
+        lastRecoveryReason,
+        libraryReadyEvent,
+        webVersion: snapshot?.webVersion || null,
+        authState: snapshot?.authState || null,
+        hasSynced: Boolean(snapshot?.hasSynced),
+        documentReadyState: snapshot?.documentReadyState || extra.documentReadyState || null,
+        hasRequire: Boolean(snapshot?.hasRequire),
+        injectRetries: injectRetryCount,
+        ...extra,
+    };
 }
 
 async function getHealthSnapshot() {
     const starting = Boolean(startPromise) && bootReason === 'startup';
     const recovering = Boolean(startPromise) && bootReason !== 'startup';
+    const browserConnected = isBrowserConnected(client);
 
-    if (startPromise || shuttingDown) {
+    if (shuttingDown) {
         return {
             ready: false,
-            authenticated: Boolean(isAuthenticated && !loggedOut),
+            authenticated: false,
             pageAlive: false,
-            browserConnected: isBrowserConnected(client),
+            browserConnected,
             recovering,
             starting,
             hasQr: Boolean(lastQr),
+            ...buildStatusDiagnostics(false),
         };
     }
 
-    const browserConnected = isBrowserConnected(client);
-    const pageAlive = await probePage();
-    const ready = Boolean(isReady && pageAlive && browserConnected && !loggedOut);
+    const pageAlive = client ? await probePage() : false;
+
+    if (pageAlive) {
+        await probeWhatsAppStore();
+    }
+
+    const storeReady = Boolean(lastStoreProbe?.ok && !loggedOut);
+    const ready = Boolean(isReady && pageAlive && browserConnected && storeReady);
 
     return {
         ready,
@@ -739,6 +1080,7 @@ async function getHealthSnapshot() {
         recovering,
         starting,
         hasQr: Boolean(lastQr),
+        ...buildStatusDiagnostics(pageAlive),
     };
 }
 
@@ -771,11 +1113,19 @@ async function sendWithRetry(operation, label) {
 
             await markReadyIfSessionHealthy(`${label}: existing session`);
 
-            if (!isReady || !(await probePage())) {
-                await recoverClient(`${label}: client not healthy`);
+            if (!(await probePage()) || !isBrowserConnected(client)) {
+                await recoverClient(`${label}: page/browser unhealthy`);
             }
 
             await waitUntilReady();
+
+            const store = await probeWhatsAppStore();
+
+            if (!store.ok) {
+                throw new Error(
+                    `send API not ready (${store.missing.join(', ') || store.error || 'unknown'})`,
+                );
+            }
 
             if (attempt > 1) {
                 console.log('WhatsApp send retrying after client recovery');
@@ -795,6 +1145,22 @@ async function sendWithRetry(operation, label) {
 
             if (!isRecoverableSendError(err) || attempt === MAX_SEND_ATTEMPTS) {
                 break;
+            }
+
+            if (
+                /send API not ready|getChat/i.test(err.message)
+                && client
+                && await probePage()
+            ) {
+                const replayed = await retryLibraryInjection(
+                    client,
+                    `${label}: send API missing`,
+                );
+
+                if (replayed) {
+                    isReady = false;
+                    continue;
+                }
             }
 
             isReady = false;
@@ -820,40 +1186,48 @@ function startWatchdog() {
                 return;
             }
 
-            if (lastQr && !isReady) {
-                return;
-            }
+            const pageAlive = client ? await probePage() : false;
 
-            if (!client) {
-                await recoverClient('watchdog: client missing');
-                return;
+            if (pageAlive) {
+                await probeWhatsAppStore();
             }
 
             if (await markReadyIfSessionHealthy('watchdog')) {
                 return;
             }
 
-            const page = client.pupPage;
-            let reason = null;
+            const decision = decideRecovery(diagnosticState({
+                pageAlive,
+                storeReady: Boolean(lastStoreProbe?.ok),
+                missing: lastStoreProbe?.missing || [],
+            }));
 
-            try {
-                if (!page) {
-                    reason = 'watchdog: page missing';
-                } else if (page.isClosed()) {
-                    reason = 'watchdog: page closed';
-                } else if (!isBrowserConnected(client)) {
-                    reason = 'watchdog: browser disconnected';
-                } else if (!(await probePage())) {
-                    reason = isReady
-                        ? 'watchdog: ready but page is invalid'
-                        : 'watchdog: puppeteer is not responding';
-                }
-            } catch (err) {
-                reason = `watchdog: ${err.message}`;
+            logRecoveryDecision(
+                `${decision.action}:${decision.reason}`,
+                `WhatsApp watchdog generation=${generationOf(client)} action=${decision.action}: ${decision.reason}`,
+            );
+
+            if (decision.action === 'none') {
+                return;
             }
 
-            if (reason) {
-                await recoverClient(reason);
+            if (decision.action === 'mark-ready') {
+                await markReadyIfSessionHealthy('watchdog: send API ready');
+                return;
+            }
+
+            if (decision.action === 'reinject') {
+                if (client) {
+                    await retryLibraryInjection(client, `watchdog: ${decision.reason}`);
+                    await markReadyIfSessionHealthy('watchdog after injection retry');
+                }
+                return;
+            }
+
+            if (decision.action === 'restart') {
+                await recoverClient(`watchdog: ${decision.reason}`, {
+                    countRestart: Boolean(isAuthenticated && pageAlive),
+                });
             }
         }).catch((err) => {
             console.error('Watchdog recovery failed:', err.message);
