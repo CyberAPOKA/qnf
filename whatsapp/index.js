@@ -140,6 +140,26 @@ function isCurrentInstance(instance) {
     return Boolean(instance) && client === instance;
 }
 
+async function markReadyIfSessionHealthy(reason) {
+    if (shuttingDown || loggedOut || !client || !isAuthenticated) {
+        return false;
+    }
+
+    if (!(await probePage())) {
+        return false;
+    }
+
+    if (!isReady) {
+        isReady = true;
+        lastQr = null;
+        console.log(
+            `WhatsApp client generation=${generationOf(client)} ready via ${reason}`,
+        );
+    }
+
+    return true;
+}
+
 function resolveChromePath() {
     if (process.env.PUPPETEER_EXECUTABLE_PATH) {
         return process.env.PUPPETEER_EXECUTABLE_PATH;
@@ -431,6 +451,7 @@ async function destroyClient() {
 
 async function waitForReadyOrQr(timeoutMs = READY_WAIT_MS) {
     const deadline = Date.now() + timeoutMs;
+    let healthySince = null;
 
     while (Date.now() < deadline) {
         if (shuttingDown) {
@@ -445,7 +466,25 @@ async function waitForReadyOrQr(timeoutMs = READY_WAIT_MS) {
             return 'qr';
         }
 
+        // LocalAuth restore can skip the `ready` event. After a short healthy
+        // authenticated window, treat the session as ready instead of looping.
+        if (isAuthenticated && await probePage()) {
+            healthySince ??= Date.now();
+
+            if (Date.now() - healthySince >= 10000) {
+                if (await markReadyIfSessionHealthy('authenticated session settled')) {
+                    return 'ready';
+                }
+            }
+        } else {
+            healthySince = null;
+        }
+
         await sleep(500);
+    }
+
+    if (await markReadyIfSessionHealthy('ready-event timeout fallback')) {
+        return 'ready';
     }
 
     throw new Error('WhatsApp client not ready');
@@ -619,7 +658,15 @@ async function waitUntilReady(timeoutMs = READY_WAIT_MS) {
             return;
         }
 
+        if (await markReadyIfSessionHealthy('send wait')) {
+            return;
+        }
+
         await sleep(500);
+    }
+
+    if (await markReadyIfSessionHealthy('send wait timeout fallback')) {
+        return;
     }
 
     throw new Error('WhatsApp client not ready');
@@ -683,6 +730,8 @@ async function sendWithRetry(operation, label) {
                 await startPromise;
             }
 
+            await markReadyIfSessionHealthy(`${label}: existing session`);
+
             if (!isReady || !(await probePage())) {
                 await recoverClient(`${label}: client not healthy`);
             }
@@ -738,6 +787,10 @@ function startWatchdog() {
 
             if (!client) {
                 await recoverClient('watchdog: client missing');
+                return;
+            }
+
+            if (await markReadyIfSessionHealthy('watchdog')) {
                 return;
             }
 
