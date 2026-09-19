@@ -1,20 +1,30 @@
 diff --git a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-index 4fdc45d..c09d10d 100644
+index 4fdc45d..9874cfb 100644
 --- a/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
 +++ b/node_modules/whatsapp-web.js/src/util/Injected/Utils.js
-@@ -294,6 +294,15 @@ exports.LoadUtils = () => {
+@@ -294,6 +294,25 @@ exports.LoadUtils = () => {
              ...extraOptions
          };
  
 +        // TEMPORARY workaround for an upstream whatsapp-web.js media-send bug:
-+        // processMediaData() returns MediaData with enumerable internals such as
-+        // __x_id. Spreading mediaOptions onto the new message can collide with
-+        // WhatsApp's memoized id getter ("Data passed to getter must include an
-+        // id property") and break image/audio sends. Remove only that leaked
-+        // property; do not strip other media fields. Remove this patch when
-+        // the library fixes it.
-+        delete message.__x_id;
-+        
++        // processMediaData() returns a Store MediaData model whose enumerable
++        // internals (__x_id, id, from, ...) overwrite the outgoing message key
++        // and sender. WhatsApp then throws "Data passed to getter must include
++        // an id property". Strip leaked internals and restore the key fields.
++        // Remove this patch when the library stops spreading MediaData as-is.
++        for (const key of Object.keys(message)) {
++            if (key.startsWith('__x_')) {
++                delete message[key];
++            }
++        }
++        message.id = newMsgKey;
++        message.from = from;
++        message.to = chat.id;
++        if (participant) {
++            message.participant = participant;
++        }
++
++
          // Bot's won't reply if canonicalUrl is set (linking)
          if (botOptions) {
              delete message.canonicalUrl;
