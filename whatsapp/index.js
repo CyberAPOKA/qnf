@@ -24,7 +24,7 @@ const PORT = process.env.WHATSAPP_PORT || 3001;
 const MAX_SEND_ATTEMPTS = 3;
 const MAX_INIT_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1500;
-const READY_WAIT_MS = 60000;
+const READY_WAIT_MS = 90000;
 const DESTROY_TIMEOUT_MS = 8000;
 const BROWSER_CLOSE_TIMEOUT_MS = 3000;
 const PROFILE_RELEASE_WAIT_MS = 1000;
@@ -140,12 +140,49 @@ function isCurrentInstance(instance) {
     return Boolean(instance) && client === instance;
 }
 
+async function probeWhatsAppStore() {
+    const page = client?.pupPage;
+
+    if (!page) {
+        return false;
+    }
+
+    try {
+        if (page.isClosed()) {
+            return false;
+        }
+    } catch {
+        return false;
+    }
+
+    try {
+        return Boolean(
+            await withTimeout(
+                page.evaluate(() => Boolean(
+                    window.Store
+                    && window.WWebJS
+                    && typeof window.WWebJS.getChat === 'function'
+                    && window.Store.Chat
+                )),
+                PROBE_TIMEOUT_MS,
+                'store probe timed out',
+            ),
+        );
+    } catch {
+        return false;
+    }
+}
+
 async function markReadyIfSessionHealthy(reason) {
     if (shuttingDown || loggedOut || !client || !isAuthenticated) {
         return false;
     }
 
     if (!(await probePage())) {
+        return false;
+    }
+
+    if (!(await probeWhatsAppStore())) {
         return false;
     }
 
@@ -191,8 +228,10 @@ function createWhatsAppClient() {
         authStrategy: new LocalAuth({
             dataPath: process.env.WWEBJS_AUTH_PATH || './.wwebjs_auth',
         }),
+        // A stale local WhatsApp Web HTML cache can authenticate but never
+        // inject window.WWebJS, so sends fail with "getChat of undefined".
         webVersionCache: {
-            type: 'local',
+            type: 'none',
         },
         puppeteer: {
             headless: true,
